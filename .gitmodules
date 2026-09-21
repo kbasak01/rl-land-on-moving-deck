@@ -1,0 +1,6 @@
+[submodule "third_party/deck-motion-forecast"]
+	path = third_party/deck-motion-forecast
+	url = https://github.com/kbasak01/deck-motion-forecast
+[submodule "third_party/gym-pybullet-drones"]
+	path = third_party/gym-pybullet-drones
+	url = https://github.com/learnsyslab/gym-pybullet-drones

@@ -1,0 +1,59 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(pytest:*)",
+      "Bash(ruff:*)",
+      "Bash(mypy:*)",
+      "Bash(make:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(git submodule status:*)",
+      "Bash(nvidia-smi:*)",
+      "Bash(tail:*)",
+      "Bash(ps:*)",
+      "Bash(nproc:*)",
+      "Read(//home/**)",
+      "Write(./src/**)",
+      "Write(./tests/**)",
+      "Write(./configs/**)",
+      "Write(./scripts/**)",
+      "Write(./results/**)",
+      "Write(./docs/**)"
+    ],
+    "ask": [
+      "Bash(git push:*)",
+      "Bash(git commit:*)",
+      "Bash(pip install:*)",
+      "Bash(rm:*)",
+      "Bash(kill:*)",
+      "Bash(pkill:*)"
+    ],
+    "deny": [
+      "Write(./third_party/**)",
+      "Edit(./third_party/**)",
+      "Write(./artifacts/**)",
+      "Read(./.env)"
+    ]
+  },
+  "env": {
+    "PYTHONHASHSEED": "0",
+    "CUBLAS_WORKSPACE_CONFIG": ":4096:8",
+    "OMP_NUM_THREADS": "1"
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *.py) .venv/bin/ruff check --quiet \"$f\" || true ;; esac"
+          }
+        ]
+      }
+    ]
+  }
+}
