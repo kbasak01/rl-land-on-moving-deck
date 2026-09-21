@@ -190,6 +190,15 @@ Tasks
 
 ### Phase 1 — Deck-motion bridge (1.5 days) · owner: `deck-bridge-engineer`
 
+**Before you start (added after Gate 0, 2026-09-21).** Read `docs/protocol.md` P0-D1 and P0-D2.
+Three things Phase 0 settled that this phase depends on: (a) `dmf` is an **editable** install at
+SHA `e9fa15c` and `simulate_realization` is verified to run from it — that SHA is what the Phase 1
+parity test is written against, and `tests/test_smoke.py` already contains a working call to copy;
+(b) the environment is exactly pinned, so a parity tolerance that only holds on one numpy version
+is a real result, not a nuisance; (c) the Phase 0 throughput number is `HoverAviary`-only and is a
+**ceiling** — Phase 2 must re-measure with the deck body and the bridge in the loop before P3-D1
+fixes any budget. Nothing in Phase 0 changes Phase 1's tasks or Gate 1.
+
 Tasks
 1. `deck/bridge.py`: `DeckMotionSource(spec: RealizationSpec, sim_cfg, t_model: ndarray)`.
    Reproduce `simulate_realization`'s seed path exactly — `realization_seed_sequence(spec).spawn(2)`,
