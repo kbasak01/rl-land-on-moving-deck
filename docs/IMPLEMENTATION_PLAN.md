@@ -234,6 +234,40 @@ CF2X's commanded max speed in gym-pybullet-drones; if not, λ is reduced and rec
 
 ### Phase 2 — Moving-platform landing environment (2 days) · owner: `sim-env-engineer`
 
+**Before you start (added after Gate 1, 2026-09-21).** Read `docs/protocol.md` P1-D1, P1-D2 and
+P1-D3. Five things Phase 1 measured that change this phase:
+
+(a) **The action space cannot reuse `ActionType.VEL` verbatim.** `BaseRLAviary.py:95` caps commanded
+speed at `SPEED_LIMIT` = 0.25 m/s, which is *below* the deck's own aft-pad `v_z` p99 at every sea
+state from SS3 up (0.166 / 0.351 / 0.575 / 0.577 m/s at 180 deg, 12 kn). Set `v_max` as a project
+parameter, >= 1.0 m/s, call `DSLPIDControl` directly, and record the value as P2-D*.
+
+(b) **The frame and sign convention are fixed and tested — do not re-derive them.** World frame is
+x = bow, y = **port**, z = up; hand `pybullet.getQuaternionFromEuler([+radians(roll_deg),
+-radians(pitch_deg), 0])`, which is exactly `rld.deck.kinematics.euler_xyz_rad`. Composition is ZYX;
+a `pybullet`-marked test already asserts our rotation matrix equals PyBullet's to 1e-12. Note the
+**plan's own D0.5 and D0.1 are superseded by P1-D2** on this point, as is the `deck-scaling-physics`
+skill's older text.
+
+(c) **`rld.deck.bridge.JonswapDeckMotion` is the interface**, model scale, world frame: `deck_point(
+t_model_s, pad)` -> position/velocity/acceleration/euler/omega/alpha/normal/tilt, and
+`deck_points(t_model_s, pads)` for both pads from one channel evaluation (use it for the pad-at-CG
+arm so both come from bit-identical motion). Model time 0 == full-scale absolute 120.0 s;
+`t_model_window_s == (4.0, 120.0)`; `episode_start_window_s(12.0) == (4.0, 108.0)`. Times outside the
+committed record raise.
+
+(d) **The deck alone exceeds the 15 deg tilt criterion in 10 of 96 cells** (max 24.49 deg, frigate
+SS6 90 deg), dominated by roll in beam and stern-quartering SS6. The success criterion must be on
+*relative* tilt, and `configs/env/success.yaml` should say so explicitly.
+
+(e) **Re-measure throughput with the deck body and the bridge in the loop before P3-D1.** P0-D2's
+number is `HoverAviary`-only and is a ceiling. The bridge costs ~0.28 s per 28 800-sample
+realization evaluation, so the per-step cost of evaluating deck motion is not free.
+
+Sanity anchors for the platform tracking test: at lambda = 1/25 the frigate's aft pad sits
+1.984 m aft of the deck reference point, `z` std is 4.43 cm at SS5 180 deg 12 kn and peak `|v_z|` is
+~0.67 m/s at SS6; the CG pad is *exactly* pure heave in position, velocity and acceleration.
+
 Tasks
 1. `envs/platform.py`: the deck as a PyBullet body driven along the bridge trajectory.
    **Do not teleport it with `resetBasePositionAndOrientation` every step** — contact then sees zero

@@ -17,7 +17,7 @@ import math
 import numpy as np
 import pytest
 
-from conftest import BASE_SEED, DMF_ROOT
+from conftest import BASE_SEED, DMF_ROOT, REPO_ROOT
 
 #: Steps of the random-policy rollout in item 3 of the Phase 0 smoke set.
 ROLLOUT_STEPS = 1000
@@ -126,3 +126,23 @@ def test_ppo_trains_hover_aviary() -> None:
         assert env.action_space.contains(np.asarray(action, dtype=np.float32))
     finally:
         env.close()
+
+
+def test_provenance_block_is_unchanged_by_its_promotion() -> None:
+    """``environment_provenance`` moved to :mod:`rld.provenance` in Phase 1, columns intact.
+
+    Phase 0's ``results/env_throughput.csv`` is a committed artifact, so the promotion must
+    leave both the column *set* and its *order* identical -- not only the fields, but where
+    the throughput-specific ones sit inside the block.
+    """
+    from pathlib import Path
+
+    from rld.bench.throughput import environment_provenance
+    from rld.provenance import environment_provenance as generic
+
+    committed = (REPO_ROOT / "results" / "env_throughput.csv").read_text().splitlines()[0]
+    header = committed.split(",")
+    block = list(environment_provenance(REPO_ROOT))
+    assert header[-len(block) :] == block
+    assert list(generic(Path("/nonexistent"), extra={"k": "v"}))[8] == "k"
+    assert generic(Path("/nonexistent"))["dmf_sha"] == "unknown"

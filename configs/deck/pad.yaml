@@ -1,0 +1,24 @@
+# Landing-pad geometry on the deck.
+#
+# Units and conventions:
+#   r_pad_frac    dimensionless fractions of the vessel's length between perpendiculars
+#                 (FULL scale, dmf.sim.vessel.Vessel.length_m), in the ship body frame with
+#                 x = bow, y = PORT, z = up. Negative x is aft. Multiplying by L rather
+#                 than storing metres keeps the lever arm per-vessel automatically:
+#                 -0.4 L is -49.6 m on the frigate and -70.0 m on the s175, which is a
+#                 confound of the unseen_vessel regime worth naming (P1-D1).
+#   radius_model_m  metres, MODEL scale. The success criterion's lateral tolerance
+#                 (0.10 m) is smaller than this, per plan Phase 2.
+#
+# The default `aft` pad sits on the centreline, y = z = 0, and is therefore exactly
+# roll-blind under the ZYX rotation order used by rld.deck.kinematics: R_x fixes any point
+# on the x axis. y_frac and z_frac are exposed (defaults 0) so a later phase can add a
+# roll-sensitive pad without a schema change; see docs/protocol.md P1-D2.
+
+radius_model_m: 0.15
+
+pads:
+  - name: aft
+    r_pad_frac: [-0.4, 0.0, 0.0]
+  - name: cg
+    r_pad_frac: [0.0, 0.0, 0.0]
