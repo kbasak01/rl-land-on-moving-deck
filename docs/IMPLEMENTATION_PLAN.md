@@ -313,6 +313,51 @@ Tests
 
 ### Phase 3 — Classical baselines and evaluation protocol freeze (1.5 days) · owners: `controls-engineer`, `eval-auditor`
 
+**Before you start (added after Gate 2, 2026-09-22).** Read `docs/protocol.md` P2-D1 through P2-D9.
+Six things Phase 2 fixed or measured that change this phase:
+
+(a) **The action space is settled and shared — do not invent a second one.** `Box(-1, 1, (3,))`,
+world-frame velocity setpoint, `v_max` = **1.5 m/s** model scale, yaw commanded to **0**, and
+`v_max` is a cap on the **speed**, not per axis (P2-D2). Every controller emits a setpoint through
+`env.velocity_setpoint_m_s(action)` so PID, PPO and residual scale identically; that is what makes
+the comparison fair.
+
+(b) **A pure vertical descent is not a landing in this environment.** Episodes start with a lateral
+spread of ±0.3 m against a plate half-width of 0.26 m, so roughly 13 % begin laterally outside the
+deck footprint. `pid_track_descend` must null lateral error before committing to descent or it will
+score badly for a geometric reason rather than a control one (P2-D3).
+
+(c) **The success criteria live in `configs/env/success.yaml` and carry three frozen resolutions**
+that the plan and the `landing-protocol` skill left ambiguous (P2-D5): `hard_landing` absorbs a
+relative-tilt violation, the vertical-velocity criterion is the component **along the deck normal**
+(both readings are recorded per episode), and divergence is `crash` with a `termination_reason`
+column. P3-D1 must copy that file **and its SHA-256**, not restate the numbers.
+
+(d) **Size the P3-D1 training budget from `results/env_throughput_landing.csv`, not from P0-D2.**
+P0-D2's 7 575 steps/s is a `HoverAviary` ceiling. With the deck body and the bridge in the loop the
+landing env runs 514 steps/s at 16 workers under a random policy and 4 610 steps/s with full-length
+episodes — a **10.4×** spread, because a reset costs 88.5 ms of which 73 % is the analytic bridge
+call and one worker's reset stalls a synchronous vector step. The budget is bracketed by those two
+rows; quoting either alone is wrong (P2-D8).
+
+(e) **The pad's standing lever arm is removed inside the environment** (P2-D3). `DeckPointState.
+position_m` is measured from the vessel's mean-position CG, so the frigate's aft pad carries a
+constant −1.984 m world-x offset (−2.800 m on the s175); the env subtracts it, so controllers see a
+pad oscillating about `deck_origin_m` with identical world geometry for both pads and both hulls.
+The lever-arm *motion* is untouched and asserted non-zero.
+
+(f) **Episode geometry.** 12.0 s flight budget + 0.5 s dwell grace, so a touchdown at 11.9 s can
+finish its 0.5 s dwell; start offsets come from `episode_start_window_s(12.5) == (4.0, 107.5)`
+(P2-D7).
+
+One caveat on what Gate 2 does and does not certify: only **1 of 400** random-policy episodes ever
+reached contact, so the sanity sweep barely exercises the touchdown path — the scripted tests
+(100/100 static descents, 0/30 disagreement on a moving deck) carry that evidence. Phase 3's
+baselines are the first methods that will exercise it at volume, and that single random touchdown
+was also the one episode that tunnelled (7.86 mm against a 5 mm threshold). Watch `tunnelling_n`
+and the analytic-vs-contact disagreement rate in the Phase 3 tables.
+
+
 Controllers (`src/rld/control/`, one file each, registry entry each):
 1. `pid_track_descend`: track pad x/y, descend at constant rate. The naive baseline.
 2. `pid_feedforward`: as above plus deck-point velocity feedforward (privileged but realistic —

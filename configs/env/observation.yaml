@@ -1,0 +1,26 @@
+# The observation vector: which blocks are on, and the finite bounds each is clipped to.
+#
+# The layout itself is a declared table in src/rld/envs/observation.py (OBS_FIELDS), so the
+# vector documents itself -- name, slice, unit, frame -- and Phase 4 appends its forecast
+# block at the end without renumbering anything that already exists.
+#
+# Units and scales: metres and metres per second MODEL scale, radians, dimensionless.
+# Frames: "world" is x = bow, y = port, z = up (P1-D2). "drone-yaw" is the world frame
+# rotated by -yaw about z, i.e. the drone's heading-aligned horizontal frame; it is NOT
+# the full body frame, so a tilted drone's relative-position block does not rotate with
+# its attitude.
+
+# Blocks that Phase 2 can switch off. `last_action` and `in_contact` default ON and should
+# stay on: the smoothness reward makes the MDP non-Markov without a_{t-1}, and the 0.5 s
+# dwell is not learnable without a contact flag.
+include_last_action: true
+include_contact: true
+
+# Clipping bounds. The observation is clipped into these so that it always lies inside the
+# declared Box (gymnasium's check_env verifies membership, and +-inf bounds make it warn).
+# They are generous: clipping is a guard against divergence, not a normalisation.
+max_body_rate_rad_s: 20.0
+max_velocity_m_s: 10.0
+max_rel_position_m: 5.0
+max_rel_velocity_m_s: 10.0
+max_height_m: 5.0

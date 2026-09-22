@@ -16,8 +16,11 @@ STEPS ?= 6000
 # Worker processes for the Phase 1 deck-statistics sweep (split over the 96 grid cells).
 WORKERS ?= 24
 THROUGHPUT_CSV ?= results/env_throughput.csv
+# Phase 2 throughput: the same measurement with the deck body and the motion bridge in the
+# loop. Written to its own file so the committed Gate 0 artifact is left exactly as it was.
+THROUGHPUT_LANDING_CSV ?= results/env_throughput_landing.csv
 
-.PHONY: test lint format throughput \
+.PHONY: test lint format throughput throughput-landing env-sanity \
         deck-stats baselines dmf-forecasters train-bg eval bench report all
 
 # --- implemented ------------------------------------------------------------------
@@ -39,6 +42,17 @@ throughput: ; $(PY) scripts/env_throughput.py --out $(THROUGHPUT_CSV) --steps $(
 # physics rate, plus the pre-registered lambda feasibility verdict under both candidate
 # denominators. Parallel over cells; the CSVs do not depend on WORKERS.
 deck-stats: ; $(PY) scripts/deck_stats.py --out results/deck_stats.csv --seeds-out results/deck_stats_seeds.csv --feasibility-out results/deck_feasibility.csv --workers $(WORKERS) --threshold-reference all
+
+# Phase 2 -- sim-env-engineer: random and hover policies over 200 episodes per (policy, sea
+# state) on the `id` split's val partition, with the six outcome-class fractions and the
+# analytic-vs-contact touchdown disagreement rate Gate 2 reads. Parallel over chunks of
+# episodes; the CSVs do not depend on WORKERS.
+env-sanity: ; $(PY) scripts/env_sanity.py --out results/e00_env_sanity.csv --episodes-out results/e00_env_sanity_episodes.csv --workers $(WORKERS)
+
+# Phase 2 -- sim-env-engineer: throughput with the deck body and the motion bridge in the
+# loop. P0-D2's HoverAviary number is the ceiling; this is the estimate P3-D1 sizes the
+# training budget from.
+throughput-landing: ; $(PY) scripts/env_throughput.py --env landing --policies random hold --out $(THROUGHPUT_LANDING_CSV) --steps $(STEPS)
 # Phase 3 -- controls-engineer + eval-auditor: four classical controllers -> results/e01/
 baselines:       ; @echo "not implemented: phase 3"
 # Phase 4 -- deck-bridge-engineer: dmf corpus + dlinear_ols + tcn -> artifacts/dmf/
@@ -54,4 +68,4 @@ report:          ; @echo "not implemented: phase 7"
 
 # The whole project in the order the methodology requires. Stubs today; each phase
 # replaces its own line's target.
-all: deck-stats baselines dmf-forecasters eval bench report
+all: deck-stats env-sanity baselines dmf-forecasters eval bench report

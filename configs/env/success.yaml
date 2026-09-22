@@ -1,0 +1,118 @@
+# FROZEN SUCCESS CRITERIA for the deck-landing task (docs/IMPLEMENTATION_PLAN.md Phase 2,
+# frozen at Gate 3 by docs/protocol.md P3-D1). Nothing here is hard-coded anywhere in
+# src/; every consumer reads this file. Changing a number after Gate 3 requires a dated
+# deviation entry in docs/protocol.md.
+#
+# Units and scales
+# ----------------
+# Every length is metres MODEL scale, every speed metres per second MODEL scale, every
+# time seconds MODEL scale, every angle degrees. At lambda = 1/25 one model second is
+# 5 full-scale seconds and one model metre is 25 full-scale metres. The drone (a
+# Crazyflie 2.X) is NOT scaled; the deck is Froude-scaled down to it (P1-D1).
+#
+# ---------------------------------------------------------------------------------
+# The four success criteria. A landing is `success` only if ALL FOUR hold.
+# ---------------------------------------------------------------------------------
+
+# 1. Relative vertical velocity at first contact.
+rel_vertical_velocity_max_m_s: 0.5
+
+# RESOLUTION (P2-D5, user decision 2026-09-22): which "vertical" this is.
+#   deck_normal -> the criterion is on the CLOSING SPEED INTO THE SURFACE,
+#                  max(0, -(v_drone - v_pad) . n_deck), using the same deck normal the
+#                  tilt criterion uses. This is the component that does structural work
+#                  on the landing gear.
+# The other reading, the world-z component (v_drone - v_pad).z_hat, is committed beside it
+# on every episode row as `rel_vz_world_z_m_s`, so the whole evaluation is recomputable
+# under the other definition without re-running anything. They differ by ~9 % at the
+# grid's worst deck tilt (24.49 deg, frigate SS6 90 deg; P1-D1).
+vz_component: deck_normal
+
+# 2. Lateral offset of the DRONE CENTRE from the pad centre, measured in the deck plane.
+lateral_offset_max_m: 0.10
+
+# 3. Relative tilt: the angle between the drone's body z axis and the DECK NORMAL --
+#    NOT between the drone's body z and world up.
+#    Why relative is not a detail (P1-D1, finding 2): the deck alone exceeds 15 deg of
+#    absolute tilt in 10 of 96 grid cells, worst 24.492 deg (frigate SS6 90 deg 0 kn).
+#    Under an absolute criterion those cells would be structurally 0 % success for every
+#    method, which would be an environment artefact reported as a result.
+relative_tilt_max_deg: 15.0
+
+# 4. Dwell: the drone stays in contact, on the pad, for at least this long after first
+#    contact. Contact may flicker for up to `contact_loss_grace_s` without counting as a
+#    release (Bullet drops and re-adds contact points at rest).
+contact_dwell_min_s: 0.5
+contact_loss_grace_s: 0.05
+
+# ---------------------------------------------------------------------------------
+# Outcome-class thresholds. The six classes are exhaustive, mutually exclusive, and
+# matched in this order (first match wins):
+#     crash -> off_pad -> hard_landing -> bounce -> success -> timeout
+# ---------------------------------------------------------------------------------
+
+# `crash` also fires on loss of control. This threshold is on the drone's ABSOLUTE tilt
+# (body z vs world up), deliberately, and unlike criterion 3: it is a loss-of-control
+# detector, not a landing-quality criterion, and a quadrotor 60 deg from vertical cannot
+# fly whatever the deck is doing. Both tilts are committed per episode
+# (`rel_tilt_deg`, `abs_tilt_deg`), so either reading is recomputable.
+crash_tilt_deg: 60.0
+crash_tilt_component: absolute
+
+# RESOLUTION (P2-D5, user decision 2026-09-22): `hard_landing` is re-worded as
+#   "touched down on the pad but violated a touchdown-QUALITY criterion -- relative
+#    vertical velocity OR relative tilt".
+# Without this an on-pad, soft, 20 deg-tilt landing that dwells 0.5 s would match no class
+# at all while the list is documented as exhaustive. The six-class list is unchanged, and
+# `rel_vz_normal_m_s` and `rel_tilt_deg` are both committed per episode so the two causes
+# stay separable in analysis.
+hard_landing_includes_relative_tilt: true
+
+# Divergence is a `crash`, not a separate class (P2-D5). Bounds are deliberately generous
+# -- relative to the pad centre, per axis -- so that only genuine divergence trips them,
+# and every outcome row carries a free-text `termination_reason`
+# (ground_contact | off_plate_strike | tilt_gt_crash | below_deck | out_of_bounds |
+#  dwell_complete | release | time_limit).
+
+# ---------------------------------------------------------------------------------
+# Detector settings (not success criteria; they define how the two detectors read the
+# same event, and the Gate 2 disagreement rate is measured against them).
+# ---------------------------------------------------------------------------------
+
+# Penetration deeper than this at first contact is flagged and counted as tunnelling.
+tunnelling_penetration_m: 0.005
+
+# PyBullet's `getContactPoints` reports candidate points up to ~2 cm before the surfaces
+# actually touch (Bullet's contactBreakingThreshold). Contacts carrying less normal force
+# than this are discarded, or the contact detector fires early and the analytic-vs-contact
+# disagreement rate fails Gate 2 for a non-physical reason. Newtons.
+contact_normal_force_min_n: 1.0e-4
+
+# Where PyBullet thinks the DRONE's surface is. Bullet shrinks a convex collision shape by
+# its margin and inflates the contact by the same amount, so a drone resting on the plate
+# settles with its geometric cylinder 0.99 mm clear of the geometric plate while
+# `contactDistance` reads ~0. A purely geometric analytic detector triggering at exactly
+# zero would therefore NEVER fire on a soft landing, while the contact detector fires every
+# time: measured at 4 of 100 scripted static-pad descents before this key was added. The
+# analytic detector triggers at `clearance <= analytic_contact_margin_m` instead. That
+# aligns the two detectors' definition of "the surface"; it does not make the analytic path
+# depend on PyBullet's contact manifold, which is what the cross-check is actually about.
+#
+# Metres, MODEL scale. It is the CF2X URDF body's collision margin -- the plate, built with
+# createMultiBody, reports 0.0 and contributes nothing. tests/test_platform.py asserts this
+# value equals `getDynamicsInfo(drone, -1)[11]`, so it cannot drift from the engine.
+analytic_contact_margin_m: 0.001
+
+# The two detectors are counted as disagreeing when they fire more than this far apart in
+# model time, or when exactly one of them fires at all. One control step at 30 Hz.
+detector_disagreement_window_s: 0.0333333333333333
+
+# ---------------------------------------------------------------------------------
+# Geometry this file states rather than leaving to be rediscovered in Phase 7.
+# ---------------------------------------------------------------------------------
+# The painted pad radius is 0.15 m (configs/deck/pad.yaml, model scale) and the lateral
+# criterion (0.10 m) is on the DRONE CENTRE. The CF2X collision shape is a cylinder of
+# radius 0.06 m and length 0.025 m (cf2x.urdf:34, mass 0.027 kg), so a landing at exactly
+# 0.10 m puts the airframe rim at 0.16 m -- just past the painted pad, and far inside the
+# 0.80 m x 0.52 m plate (P2-D3). That is the intended reading: the criterion is on the
+# centre and the pad radius is context, not a second criterion.

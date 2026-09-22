@@ -1,0 +1,34 @@
+# The reward function. Its STRUCTURE is pre-registered (docs/IMPLEMENTATION_PLAN.md
+# Phase 2 task 6) and does not change; only these weights are tuned, and only on `id`
+# VALIDATION realizations in Phase 5, never on anything in results/episodes/.
+#
+#   r_t = w_progress * (d_{t-1} - d_t)                     progress toward the pad centre
+#       - w_vz       * max(0, |v_rel . n| - v_safe) * [h < gate_height]
+#       - w_smooth   * ||a_t - a_{t-1}||^2
+#       - w_time
+#   plus, once, at the end:
+#       + r_success | - r_hard_landing | - r_off_pad | - r_bounce | - r_crash
+#       and EXACTLY ZERO for `timeout`.
+#
+# `timeout` carries no terminal penalty and is returned as truncated=True, not
+# terminated=True, so the value function bootstraps through the time limit. Getting this
+# backwards is the classic way to teach PPO to hover out the clock; tests/test_landing_env.py
+# asserts it.
+#
+# Units and scales: `d` is metres MODEL scale (distance from the drone to the pad centre),
+# `v_rel . n` metres per second MODEL scale along the deck normal, `h` metres MODEL scale
+# (signed clearance to the pad plane), `a` the dimensionless action in [-1, 1]^3. Weights
+# are dimensionless multipliers on those; the reward itself has no units.
+
+w_progress: 10.0
+w_vz: 2.0
+v_safe_m_s: 0.3
+gate_height_m: 0.25
+w_smooth: 0.05
+w_time: 0.01
+
+r_success: 50.0
+r_hard_landing: 10.0
+r_off_pad: 10.0
+r_bounce: 10.0
+r_crash: 25.0
