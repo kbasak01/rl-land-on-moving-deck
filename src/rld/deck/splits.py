@@ -23,10 +23,24 @@ Note that the first three regimes are confined to the primary hull, so they cove
 frigate realizations and drop s175 entirely; only ``unseen_vessel`` covers all 2304. A
 "covers the whole grid" assertion would be wrong for three regimes out of four.
 
+**The intersection pool (protocol P3-D2).** dmf's four regimes are four *separate* splits,
+and each regime's train set overlaps another regime's test set: ``id`` tests frigate seed
+ordinals 32-39, which ``unseen_seastate``/``unseen_heading``/``unseen_vessel`` train on (their
+train is 0-33); and ``id``-val SS6 and 90 deg realizations sit in the ``unseen_seastate`` and
+``unseen_heading`` test sets. A single policy trained on one regime's train set and evaluated
+on all four would therefore violate CLAUDE.md non-negotiable 2. :func:`dev_pool` returns the
+development data every method in this project uses instead: TRAIN is the intersection of all
+four regimes' train partitions (frigate, SS3-SS5, headings 180/135/45 deg, all speeds, seed
+ordinals 0-26: 729 realizations) and TUNE is the same cells at seed ordinals 27-31
+(135 realizations), for PID gain tuning, RL hyperparameters and curriculum validation.
+Evaluation stays on each regime's dmf test partition, unchanged. Both pools are *derived*
+from :func:`build_all_splits`, never from hard-coded seed numbers.
+
 Units: ``heading`` degrees, ``speed`` knots, ``seed`` a dimensionless ordinal within its
 cell. No time or length quantity appears in this module, so no scale applies.
 """
 
+from functools import reduce
 from typing import Literal
 
 import pandas as pd
@@ -39,6 +53,7 @@ __all__ = [
     "PART_NAMES",
     "Part",
     "build_all_splits",
+    "dev_pool",
     "key_for_spec",
     "part_specs",
     "realization_meta",
@@ -171,3 +186,36 @@ def part_specs(split: Split, part: Part) -> list[RealizationSpec]:
     if part == "test":
         return sorted_specs(split.test_keys)
     raise ValueError(f"unknown partition {part!r}, expected one of {list(PART_NAMES)}")
+
+
+def dev_pool(cfg: SimConfig) -> tuple[list[RealizationSpec], list[RealizationSpec]]:
+    """Return the regime-safe development pool: the (train, tune) realizations (P3-D2).
+
+    Derived from :func:`build_all_splits` at its default ``val_frac``, never from literal
+    seed numbers:
+
+    * ``train`` = the intersection over all four regimes of ``train_keys``;
+    * ``tune`` = the intersection over all four regimes of ``train_keys | val_keys``, minus
+      the union of every regime's ``test_keys``, minus ``train``.
+
+    Neither pool shares a realization key with any regime's test partition, so one policy
+    (or one set of PID gains) developed on these pools can be evaluated on all four regimes
+    without breaking CLAUDE.md non-negotiable 2. For the committed grid this is the frigate,
+    SS3-SS5, headings 180/135/45 deg, speeds 0/6/12 kn, with seed ordinals 0-26 (train,
+    729 realizations) and 27-31 (tune, 135 realizations).
+
+    Args:
+        cfg: dmf's corpus config. Its grid (vessels, sea states, headings in degrees, speeds
+            in knots, per-vessel seed counts) defines the splits.
+
+    Returns:
+        ``(train, tune)``, each a list of :class:`dmf.sim.generate.RealizationSpec` in
+        :func:`sorted_specs` order. Heading degrees, speed knots, seed a dimensionless
+        ordinal; no time or length quantity, so no scale applies.
+    """
+    splits = list(build_all_splits(cfg).values())
+    train = reduce(frozenset.intersection, (s.train_keys for s in splits))
+    development = reduce(frozenset.intersection, (s.train_keys | s.val_keys for s in splits))
+    tested = reduce(frozenset.union, (s.test_keys for s in splits))
+    tune = development - tested - train
+    return sorted_specs(train), sorted_specs(tune)
