@@ -22,15 +22,29 @@ Invariant to test: Froude number `v / sqrt(g·L)` unchanged.
   45° is encounter-non-monotonic — keep dmf's handling.
 - Regimes: `id`, `unseen_seastate` (SS6), `unseen_heading` (90° beam), `unseen_vessel` (S175).
 
-## Deck-point kinematics (3-DOF deck, small or finite angles)
-`p_pad = [0, 0, heave] + R_x(roll) R_y(pitch) r_pad`, default `r_pad = [−0.4·L, 0, 0]` full scale.
-Velocity: `v_pad = [0,0,heave_rate] + ω × (R r_pad)`. Write sign conventions into docstrings and
-test against one hand-computed case.
+## Deck-point kinematics (3-DOF deck, finite angles) — see protocol P1-D2
+One world frame: `x` = bow, `y` = **port**, `z` = up, right-handed (PyBullet's). Map dmf's angle
+*signs* into it; do not carry a second SNAME frame. `φ_w = +radians(roll)`, `θ_w = −radians(pitch)`,
+ψ = 0. Composition is **ZYX**: `R = R_y(θ_w)·R_x(φ_w)` — what `getQuaternionFromEuler` uses.
+Default `r_pad = [−0.4·L, 0, 0]` full scale, **signed**, so an aft pad has `x < 0` and a **starboard**
+pad has `y < 0`.
+
+    z_pad   = heave + x_pad·sin(pitch)          # PLUS sign; no cos(roll) under ZYX
+    ω       = (φ̇·cos θ_w,  θ̇,  −φ̇·sin θ_w)
+    v_pad   = [0,0,heave_rate] + ω × p_offset
+    n_world = (−sin(pitch)·cos(roll), −sin(roll), cos(pitch)·cos(roll))
+
+The centreline pad is **exactly roll-blind** under ZYX. Write sign conventions into docstrings and
+test against hand-computed cases (`tests/test_kinematics.py` Cases A/B/C).
 
 ## Known dmf defect
 dmf roll/pitch are in phase with heave where strip theory puts them in quadrature (~90° error).
-Aft-pad v_z = heave_rate − x_pad·cos(pitch)·pitch_rate adds components whose relative phase is wrong,
-so aft-pad amplitude is biased. Always report aft pad and CG pad side by side. Never fix it here.
+Aft-pad `v_z = heave_rate + x_pad·cos(pitch)·pitch_rate` (**plus**, `x_pad` signed negative aft)
+adds components whose relative phase is wrong, so aft-pad amplitude is biased. Measured
+`corr(pitch, heave)` = +0.812/+0.865/+0.948 (min/median/max over 96 cells) where strip theory would
+give ~0. Because they are nearly in phase, the lever arm **cancels** heave at an aft pad in 30 of 96
+cells, and the aft ladder saturates SS5→SS6 while the CG ladder stays monotone (protocol P1-D2).
+Always report aft pad and CG pad side by side. Never fix it here.
 
 ## Sinusoidal motion (H4 arm)
 Per DOF: amplitude = √2 · RMS of the matched JONSWAP realization, period = its peak encounter

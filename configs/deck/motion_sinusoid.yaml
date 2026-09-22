@@ -1,0 +1,28 @@
+# Sinusoidal deck motion -- the Angelis-style motion model that the pre-registered
+# motion-realism test (H4, plan D0.4) trains against. Consumed in Phase 1 Stage B by
+# rld.deck.sinusoid; this file is the committed statement of the matching rule.
+#
+# Units and conventions:
+#   amplitude_rule   per DOF, amplitude = sqrt(2) * RMS of the MATCHED JONSWAP
+#                    realization (same vessel, sea state, heading, speed, seed), so a
+#                    sinusoid and its JONSWAP twin share a variance. Degrees for
+#                    roll/pitch, metres for heave, FULL scale before Froude scaling.
+#   period_rule      per realization, the peak encounter period
+#                    T_e = 2*pi / |encounter_frequency(2*pi/Tp, U, beta)|, seconds FULL
+#                    scale (SS6 180 deg 12 kn: 9.40 s full = 1.880 s model at 1/25).
+#   phase_rule       one phase per DOF, drawn U(0, 2*pi) from the episode seed, so the
+#                    three DOFs are not locked in phase the way dmf's known defect locks
+#                    them.
+#   sim_config / rates  as in motion_jonswap.yaml; the two sources share one interface.
+
+sim_config: ../../third_party/deck-motion-forecast/configs/sim/corpus.yaml
+
+physics_freq_hz: 240.0
+ctrl_freq_hz: 30.0
+
+forecast_fs_hz: 10.0
+forecast_lookback_samples: 200
+
+amplitude_rule: sqrt2_times_matched_jonswap_rms
+period_rule: peak_encounter_period
+phase_rule: uniform_per_dof_from_episode_seed

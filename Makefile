@@ -13,6 +13,8 @@ PYTEST ?= $(shell [ -x .venv/bin/pytest ] && echo .venv/bin/pytest || echo pytes
 CFG ?= configs/rl/ppo.yaml
 # Throughput measurement (Phase 0). STEPS is per (vec_cls, n_envs, act) row.
 STEPS ?= 6000
+# Worker processes for the Phase 1 deck-statistics sweep (split over the 96 grid cells).
+WORKERS ?= 24
 THROUGHPUT_CSV ?= results/env_throughput.csv
 
 .PHONY: test lint format throughput \
@@ -33,8 +35,10 @@ throughput: ; $(PY) scripts/env_throughput.py --out $(THROUGHPUT_CSV) --steps $(
 # (Gate 9 reads `make all` as the stage list). Replace the stub in its own phase; do not
 # add a second target beside it.
 
-# Phase 1 -- deck-bridge-engineer: scripts/deck_stats.py -> results/deck_stats.csv
-deck-stats:      ; @echo "not implemented: phase 1"
+# Phase 1 -- deck-bridge-engineer: deck-point statistics over all 96 grid cells at the model
+# physics rate, plus the pre-registered lambda feasibility verdict under both candidate
+# denominators. Parallel over cells; the CSVs do not depend on WORKERS.
+deck-stats: ; $(PY) scripts/deck_stats.py --out results/deck_stats.csv --seeds-out results/deck_stats_seeds.csv --feasibility-out results/deck_feasibility.csv --workers $(WORKERS) --threshold-reference all
 # Phase 3 -- controls-engineer + eval-auditor: four classical controllers -> results/e01/
 baselines:       ; @echo "not implemented: phase 3"
 # Phase 4 -- deck-bridge-engineer: dmf corpus + dlinear_ols + tcn -> artifacts/dmf/

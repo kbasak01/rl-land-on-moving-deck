@@ -1,0 +1,31 @@
+# JONSWAP deck motion: the dmf corpus config this project's bridge reproduces, and the
+# rates at which it is sampled.
+#
+# Units and conventions:
+#   sim_config            path to dmf's corpus config, resolved relative to THIS file.
+#                         It fixes the sea states, the heading/speed grid, the seed counts,
+#                         and -- critically for the bridge -- spinup_s = 120 s,
+#                         duration_s = 600 s and fs_hz = 10 Hz, all FULL scale.
+#   physics_freq_hz       hertz, MODEL scale. PyBullet's step rate (Phase 2).
+#   ctrl_freq_hz          hertz, MODEL scale. Controller / policy rate (Phase 2).
+#   forecast_fs_hz        hertz, FULL scale. The dmf forecaster's input rate.
+#   forecast_lookback_samples  samples of the forecaster's lookback window, at
+#                         forecast_fs_hz, i.e. 200 / 10 Hz = 20.0 s FULL scale = 4.0 s
+#                         model scale at lambda = 1/25.
+#
+# The bridge evaluates dmf analytically on the full-scale time grid that maps to
+# physics_freq_hz (240 Hz model = 48 Hz full at lambda = 1/25). There is no interpolation
+# of the 10 Hz corpus anywhere; forecast_fs_hz is the forecaster's rate, not the deck's.
+#
+# Usable model-scale window: the bridge refuses full-scale times outside the committed
+# record [spinup_s, spinup_s + duration_s), and reserves the forecaster's lookback at the
+# front, leaving model time (4.0, 120.0) s. Off-corpus times are physically identical but
+# were never committed, so they stay out of reach.
+
+sim_config: ../../third_party/deck-motion-forecast/configs/sim/corpus.yaml
+
+physics_freq_hz: 240.0
+ctrl_freq_hz: 30.0
+
+forecast_fs_hz: 10.0
+forecast_lookback_samples: 200

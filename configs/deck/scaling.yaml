@@ -1,0 +1,51 @@
+# Froude scaling of the deck motion to the Crazyflie, and the pre-registered lambda
+# feasibility rule (docs/IMPLEMENTATION_PLAN.md D0.1, docs/protocol.md P1-D1).
+#
+# Units and conventions:
+#   lam_inverse          dimensionless; lambda = L_model / L_full = 1 / lam_inverse.
+#   lam_ladder_inverse   dimensionless; the declared ladder {1/25, 1/40, 1/60, 1/100},
+#                        stored as inverses so 1/60 is exact rather than rounded.
+#   gravity_m_s2         metres per second squared, the g the *scaling table* assumes is
+#                        equal at both scales. dmf uses 9.80665 (dmf.sim.encounter);
+#                        gym-pybullet-drones uses 9.8 (BaseAviary.py:74), 0.068 % apart.
+#                        That mismatch is recorded in P1-D1, not corrected: it is below
+#                        every tolerance in Phase 1.
+#   feasibility.fraction dimensionless fraction of the reference speed.
+#   v_max_m_s            metres per second, MODEL scale (the drone is not scaled).
+#
+# The deck is Froude-scaled to the drone, not the drone to the deck: length x lam,
+# time x sqrt(lam), velocity x sqrt(lam), acceleration x 1, angle x 1,
+# angular rate and frequency x 1/sqrt(lam).
+#
+# One lambda for both hulls, deliberately (P1-D3): lambda = L_model/L_full per vessel would
+# give the s175 its own time and velocity rescaling and would confound the unseen_vessel
+# regime with a scale change. The lever arm differs instead (-49.6 m frigate,
+# -70.0 m s175, full scale).
+
+lam_inverse: 25.0
+lam_ladder_inverse: [25.0, 40.0, 60.0, 100.0]
+gravity_m_s2: 9.80665
+
+feasibility:
+  rule: >-
+    SS6 head-seas aft-pad deck-point vertical velocity p99 at model scale must not exceed
+    `fraction` of the CF2X's commanded maximum speed in gym-pybullet-drones. If it does,
+    lambda is reduced to the largest value in lam_ladder_inverse that satisfies the rule
+    and the change is recorded in docs/protocol.md P1-D1.
+  fraction: 0.25
+  # Both readings of "the CF2X's commanded max speed" are carried so that
+  # results/deck_feasibility.csv reports the verdict under each and P1-D1 only has to name
+  # which row is the gate (decision: user, 2026-09-21 -- the URDF value).
+  references:
+    - name: cf2x_urdf_max_speed_kmh
+      v_max_m_s: 8.333333333333334
+      source: >-
+        third_party/gym-pybullet-drones/gym_pybullet_drones/assets/cf2x.urdf:5
+        max_speed_kmh="30", i.e. 30 / 3.6 m/s
+      is_gate: true
+    - name: baserlaviary_speed_limit
+      v_max_m_s: 0.25
+      source: >-
+        third_party/gym-pybullet-drones/gym_pybullet_drones/envs/BaseRLAviary.py:95
+        SPEED_LIMIT = 0.03 * MAX_SPEED_KMH * (1000/3600)
+      is_gate: false
