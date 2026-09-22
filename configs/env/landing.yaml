@@ -1,0 +1,109 @@
+# The moving-platform landing environment: rates, episode geometry, the shared action
+# space, the deck plate and how the plate is driven.
+#
+# Units and scales
+# ----------------
+# Every length here is metres MODEL scale, every speed metres per second MODEL scale and
+# every time seconds MODEL scale. The deck motion is Froude-scaled to the (unscaled)
+# Crazyflie at lambda = 1/25, so 12.0 s of model episode is 60 s full scale.
+
+# Physics and control rates, hertz, model scale. Pre-registered in the plan; PYB_FREQ must
+# be an integer multiple of CTRL_FREQ (BaseAviary enforces it).
+physics_freq_hz: 240
+ctrl_freq_hz: 30
+
+# Flight budget, seconds model scale. A `timeout` is declared at this time if no touchdown
+# has happened. `dwell_grace_s` is extra simulated time granted AFTER the budget so that a
+# touchdown at 11.9 s can still complete its 0.5 s dwell; it is not flight time and a
+# policy cannot use it. Episode start offsets are therefore drawn inside
+# `motion.episode_start_window_s(episode_len_s + dwell_grace_s)` = (4.0, 107.5) s model.
+episode_len_s: 12.0
+dwell_grace_s: 0.5
+
+# ---------------------------------------------------------------------------------
+# The shared action space (P2-D2). Every method in this project -- PID baselines, PPO,
+# SAC, residual, forecast-conditioned -- emits exactly this, which is what makes the
+# comparison fair. Box(-1, 1, (3,)) world-frame velocity setpoint, yaw held at 0,
+# tracked by gym-pybullet-drones' DSLPIDControl.
+# ---------------------------------------------------------------------------------
+# metres per second, model scale. 2.60x the frigate SS6 aft-pad v_z p99 (0.577 m/s) and
+# 2.14x the globally worst cell (s175 SS6 180 deg 12 kn, 0.700 m/s); 18 % of the CF2X
+# URDF's own 8.333 m/s. BaseRLAviary's ActionType.VEL caps at 0.25 m/s, which is BELOW the
+# deck's own vertical velocity from SS3 up (P1-D1), so ActionType.VEL is not reused.
+v_max_m_s: 1.5
+
+# When true, `v_max_m_s` is a cap on the SPEED, not on each axis: a commanded vector longer
+# than v_max is rescaled to v_max rather than clipped per component. A literal
+# [-1,1]^3 x v_max would allow sqrt(3)*v_max = 2.6 m/s along a diagonal, i.e. a diagonal
+# descent would be 73 % faster than a vertical one, which is an artefact of the box, not a
+# vehicle property. Recorded in P2-D2.
+v_max_is_norm_cap: true
+
+# Yaw setpoint, degrees, held for the whole episode. Upstream's ActionType.VEL passes
+# target_rpy = [0, 0, current_yaw], which integrates whatever yaw drift the attitude loop
+# produces instead of correcting it; we pass [0, 0, 0] and test that yaw stays near zero.
+yaw_setpoint_deg: 0.0
+
+# ---------------------------------------------------------------------------------
+# The deck plate (P2-D3).
+# ---------------------------------------------------------------------------------
+platform:
+  # How the plate is driven along the deck-motion trajectory (P2-D1). Both are
+  # implemented and both were measured; see docs/protocol.md P2-D1 for the numbers.
+  #   kinematic  -- dynamic body, gravity compensated, pose AND velocity (linear and
+  #                 angular) written from the analytic deck state every physics step.
+  #   constraint -- dynamic body held by a JOINT_FIXED constraint to the world, retargeted
+  #                 with changeConstraint every physics step.
+  # NEVER a bare resetBasePositionAndOrientation: the contact solver then sees a
+  # zero-velocity deck and the drone is not carried by it (the conveyor test).
+  driver: kinematic
+
+  # Box half-extents, metres model scale: a 0.80 m x 0.52 m x 0.02 m plate (20 m x 13 m
+  # full scale at lambda = 1/25, a frigate flight deck). The SAME plate is used for both
+  # hulls -- the s175 is a containership with no flight deck, and a per-hull plate would
+  # confound `unseen_vessel` with a geometry change, which is exactly what P1-D3 avoided
+  # for lambda.
+  half_extents_m: [0.40, 0.26, 0.01]
+
+  # The collision box is offset -half_extent_z in body z, so the BODY ORIGIN sits on the
+  # plate's TOP SURFACE at the pad centre and is exactly the bridge's deck point.
+  # Consequently `deck_origin_m + DeckPointState.position_m` drives the body directly.
+
+  # Where the deck point sits when the sea is flat, metres model scale, world frame
+  # (x = bow, y = port, z = up). z = 1.0 m lifts the mean deck a metre above PyBullet's
+  # ground plane so that a drone starting 0.6-1.0 m above the deck flies at z ~ 1.6-2.0 m
+  # and falling to the ground is a distinct, reachable `crash` rather than a soft landing.
+  deck_origin_m: [0.0, 0.0, 1.0]
+
+  # Kilograms. Large enough that the 27 g drone cannot perturb the ship within one step.
+  mass_kg: 1000.0
+
+  # Newtons, `constraint` driver only: the cap passed to changeConstraint.
+  constraint_max_force_n: 1.0e6
+
+  # Dimensionless. Bullet multiplies the two bodies' coefficients; the CF2X URDF leaves
+  # PyBullet's default 0.5, so 0.5 x 0.5 = 0.25 effective.
+  lateral_friction: 0.5
+  restitution: 0.0
+
+# ---------------------------------------------------------------------------------
+# Initial drone state, drawn per episode from the episode seed.
+# ---------------------------------------------------------------------------------
+init:
+  # Metres above the MEAN deck (deck_origin_m.z), uniform in [lo, hi], model scale.
+  height_above_deck_m: [0.6, 1.0]
+  # Metres, uniform in [-a, +a] independently in x and y about the mean deck point.
+  lateral_m: 0.3
+  # The drone starts level and at rest.
+
+# ---------------------------------------------------------------------------------
+# Divergence bounds, metres model scale, RELATIVE TO THE PAD CENTRE, per axis. Leaving
+# them is a `crash` with termination_reason `out_of_bounds` (P2-D5). Deliberately
+# generous: only genuine divergence trips them, so the bar stays interpretable.
+# ---------------------------------------------------------------------------------
+bounds:
+  rel_xy_max_m: 3.0
+  rel_z_max_m: 3.0
+  # Metres BELOW deck_origin_m.z at which the drone is declared lost, model scale. Reached
+  # well before the ground plane at z = 0.
+  below_deck_m: 0.3

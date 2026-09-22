@@ -8,16 +8,32 @@ description: Hard-won guidance for moving landing platforms, contact and touchdo
 ## Driving the platform
 - Do **not** call `resetBasePositionAndOrientation` every step on its own: the solver sees a
   zero-velocity body, so relative touchdown velocity is wrong and the drone can tunnel.
-- Preferred: dynamic box (large mass, e.g. 1 000 kg), `createConstraint(body, -1, -1, -1,
-  JOINT_FIXED, ...)` to world, then each **physics** step `changeConstraint(cid, jointChildPivot=p,
-  jointChildFrameOrientation=q, maxForce=1e6)`. Tune `maxForce`, check tracking.
-- Alternative: reset pose **and** `resetBaseVelocity(linear, angular)` from analytic deck velocity
-  every physics step. Must pass the same tests.
+- **Preferred (measured, P2-D1): `kinematic`.** Dynamic box (1 000 kg) with its weight cancelled
+  by `applyExternalForce(..., WORLD_FRAME, posObj=<the body's world CoM>)`, then each **physics**
+  step `resetBasePositionAndOrientation` **and** `resetBaseVelocity(linear, angular)` from the
+  analytic deck state. Pose error 0.0 mm, `getBaseVelocity` error 0.0 %.
+  - The weight cancellation is not optional: PyBullet integrates gravity into the body's velocity
+    *before* the solver runs, so without it the plate enters every contact solve at `v - g*dt`
+    (40.8 mm/s, ~7 % of the SS6 deck's own peak |v_z|).
+  - `WORLD_FRAME` with `posObj=[0,0,0]` is **not** the same as "at the CoM": it applies the force
+    at the world origin and adds a large spurious torque.
+- **Rejected (measured): `constraint`.** `createConstraint(body, -1, -1, -1, JOINT_FIXED, ...)` to
+  world plus `changeConstraint(cid, jointChildPivot=p, jointChildFrameOrientation=q, maxForce=1e6)`
+  every physics step. It is a velocity-level servo and trails its target by a few steps: 11.4 mm
+  pose error, 14.8 mm at the plate corners, 8.5 mrad, `getBaseVelocity` p99 error 416 %. **It
+  cannot be tuned out** -- `maxForce`, `erp`, `numSolverIterations` and plate mass were all swept
+  and returned four identical digits. (This file previously called it "Preferred"; it is not.)
 - Update at the physics rate (240 Hz), not the control rate.
 
 ## Tests that must pass
-- Pose tracking error ≤ 1 mm over 10 s at SS6.
-- `getBaseVelocity` within 2 % of analytic deck-point velocity.
+- Pose tracking error ≤ 1 mm over 10 s at SS6, measured **before** `stepSimulation` (the state the
+  solver is about to use) and at the plate's **corners** as well as its origin -- a plate rotated
+  about its own origin has zero origin error.
+- `getBaseVelocity` within 2 % of analytic deck-point velocity. **Necessary but not sufficient**:
+  under a kinematic drive it reads back what was written, whether or not the solver used it.
+- **The conveyor test is the decisive one.** A drone resting on a plate translating at 0.5 m/s must
+  be carried along; a teleport-only drive must be asserted to *fail* it (measured: the drone stays
+  put and slides off, v_x = -0.04 m/s against the plate's +0.50 m/s).
 - Drone dropped on a static pad: exactly one touchdown event.
 
 ## Contact and touchdown

@@ -8,10 +8,26 @@ Two action types are measured because they cost very different amounts:
 
 - ``rpm``: the four motor speeds, gym-pybullet-drones' default. The cheapest action space
   and the one the plan's wording names.
-- ``vel``: a velocity setpoint tracked by ``DSLPIDControl``, which runs an inner loop at
-  the physics rate (240 Hz) rather than the control rate (30 Hz). Every method in this
-  project shares a velocity-setpoint action space, so this is the row the budget should be
-  read from; ``rpm`` is the reference that shows how much of the cost is the PID tracker.
+- ``vel``: a velocity setpoint tracked by ``DSLPIDControl``. Every method in this project
+  shares a velocity-setpoint action space, so this is the row the budget should be read
+  from; ``rpm`` is the reference that shows how much of the cost is the PID tracker.
+
+  **Correction, recorded rather than rewritten (P2-D9).** The original text of this
+  docstring said the ``vel`` path runs ``DSLPIDControl`` "at the physics rate (240 Hz)
+  rather than the control rate (30 Hz)", and P0-D2's reasoning quotes that sentence. It is
+  wrong: ``BaseRLAviary._preprocessAction`` calls ``computeControl`` **once per control
+  step** (30 Hz) and holds the resulting RPMs across the eight physics substeps.
+  ``rld.envs.landing_env.DeckLandingAviary`` does the same. The measured numbers in
+  ``results/env_throughput.csv`` stand; only the explanation was wrong.
+
+Two environments are measured:
+
+- ``hover``: ``HoverAviary``, the Phase 0 measurement. A **ceiling**, not an estimate: it
+  has one body, no deck, no constraint and no motion bridge.
+- ``landing``: ``rld.envs.landing_env.DeckLandingAviary``, the Phase 2 environment, with the
+  deck plate driven every physics step and the deck-motion bridge evaluated once per reset.
+  This is the row P3-D1's training budget must be sized from (plan Phase 2 note (e)). It is
+  written to a **separate** CSV so that the committed Gate 0 artifact's shape is preserved.
 
 Both are stepped with **random** actions, which is what makes the two rows comparable
 only with care: a random RPM command tumbles the Crazyflie out of bounds in a handful of
@@ -41,8 +57,23 @@ from rld.provenance import environment_provenance as _environment_provenance
 #: environment cost.
 VecClsName = Literal["dummy", "subproc"]
 
-#: Action spaces measured. See the module docstring for why both are recorded.
+#: Action spaces measured. See the module docstring for why both are recorded. The
+#: ``landing`` environment has exactly one action space, so it ignores this.
 ActName = Literal["rpm", "vel"]
+
+#: Environments measured. ``hover`` is Phase 0's ceiling; ``landing`` is the Phase 2
+#: environment with the deck body and the motion bridge in the loop.
+EnvName = Literal["hover", "landing"]
+
+#: Action stream used during the timed region.
+#:
+#: ``random`` is Phase 0's contract and is kept so the rows stay comparable. ``hold`` sends
+#: a constant zero action, which in the landing environment is "hover" -- the episode then
+#: runs to the 12 s time limit instead of tumbling out in ~1.5 s. The two bracket the truth
+#: for a training run: a policy early in training resets often, a competent one rarely, and
+#: the landing environment's reset costs ~90 ms (most of it the analytic deck-motion
+#: evaluation), so the two rows differ by far more than the per-step cost.
+PolicyName = Literal["random", "hold"]
 
 #: Worker counts required by the Phase 0 task.
 DEFAULT_WORKERS: tuple[int, ...] = (1, 8, 16)
@@ -64,15 +95,25 @@ BUDGET_STEPS: int = 10_000_000
 PYB_FREQ_HZ: int = 240
 CTRL_FREQ_HZ: int = 30
 
+#: Grid cell the ``landing`` rows are measured at. The frigate's worst aft-pad cell in
+#: P1-D2's table, so the number is taken at the difficulty training will face.
+LANDING_BENCH_SEA_STATE: str = "SS5"
+
+#: Pad the ``landing`` rows are measured at. ``aft`` is the primary arm.
+LANDING_BENCH_PAD: str = "aft"
+
 
 @dataclass(frozen=True)
 class ThroughputResult:
     """One measured row of ``results/env_throughput.csv``.
 
     Attributes:
+        env: Environment measured, ``hover`` or ``landing``.
+        policy: Action stream, ``random`` or ``hold``. See :data:`PolicyName`.
         vec_cls: Vectorisation backend, ``dummy`` or ``subproc``.
         n_envs: Number of parallel environments.
-        act: Action space measured, ``rpm`` or ``vel``.
+        act: Action space measured, ``rpm`` or ``vel``. Always ``vel`` for ``landing``,
+            which has one shared action space by construction.
         total_steps: Timed environment steps, ``n_vec_steps * n_envs``.
         warmup_steps: Environment steps executed and discarded before timing.
         wall_s: Wall-clock seconds spanning the timed steps.
@@ -90,6 +131,8 @@ class ThroughputResult:
             action space, and read across action spaces only alongside this column.
     """
 
+    env: EnvName
+    policy: PolicyName
     vec_cls: VecClsName
     n_envs: int
     act: ActName
@@ -103,35 +146,98 @@ class ThroughputResult:
     steps_per_episode: float
 
 
-def _env_factory(act: ActName, seed: int) -> Any:
-    """Build a picklable zero-argument factory for one ``HoverAviary``.
+def _env_factory(env: EnvName, act: ActName, seed: int) -> Any:
+    """Build a picklable zero-argument factory for one environment.
 
     Imports happen inside the returned closure so that ``subproc`` workers import
     PyBullet themselves rather than inheriting a connected client across a fork.
 
     Args:
-        act: Action space, ``rpm`` or ``vel``.
+        env: ``hover`` or ``landing``.
+        act: Action space, ``rpm`` or ``vel``. Ignored by ``landing``.
         seed: Reset seed for this worker.
 
     Returns:
         A callable taking no arguments and returning a fresh environment.
     """
 
-    def _init() -> Any:
+    def _hover() -> Any:
         from gym_pybullet_drones.envs.HoverAviary import HoverAviary
         from gym_pybullet_drones.utils.enums import ActionType
 
-        env = HoverAviary(
+        aviary = HoverAviary(
             gui=False,
             record=False,
             pyb_freq=PYB_FREQ_HZ,
             ctrl_freq=CTRL_FREQ_HZ,
             act=ActionType.RPM if act == "rpm" else ActionType.VEL,
         )
-        env.reset(seed=seed)
-        return env
+        aviary.reset(seed=seed)
+        return aviary
 
-    return _init
+    def _landing() -> Any:
+        from dmf.config import load_sim
+        from dmf.sim.generate import RealizationSpec
+
+        from rld.deck.bridge import JonswapDeckMotion
+        from rld.deck.config import (
+            MOTION_JONSWAP_CONFIG,
+            PAD_CONFIG,
+            SCALING_CONFIG,
+            load_motion,
+            load_pads,
+            load_scaling,
+        )
+        from rld.envs.config import (
+            LANDING_CONFIG,
+            NOISE_CONFIG,
+            OBSERVATION_CONFIG,
+            REWARD_CONFIG,
+            SUCCESS_CONFIG,
+            load_landing,
+            load_noise,
+            load_observation,
+            load_reward,
+            load_success,
+        )
+        from rld.envs.landing_env import DeckLandingAviary
+        from rld.envs.platform import pad_offset_model_m
+
+        motion_cfg = load_motion(MOTION_JONSWAP_CONFIG)
+        pads = load_pads(PAD_CONFIG)
+        scale = load_scaling(SCALING_CONFIG).froude_scale()
+        # The measured cell is the one P1-D2 reports the worst frigate aft-pad v_z p99 for,
+        # so the throughput number is taken at the difficulty the training budget will face,
+        # not at flat water.
+        source = JonswapDeckMotion(
+            RealizationSpec(
+                sea_state=LANDING_BENCH_SEA_STATE,
+                heading_deg=180.0,
+                speed_kn=12.0,
+                vessel="frigate",
+                seed=seed % 40,
+            ),
+            load_sim(motion_cfg.sim_config_path),
+            scale,
+            pads,
+            lookback_full_s=motion_cfg.forecast_lookback_full_s,
+        )
+        aviary = DeckLandingAviary(
+            motion=source,
+            pad=LANDING_BENCH_PAD,
+            pad_radius_m=pads.radius_model_m,
+            pad_offset_m=pad_offset_model_m("frigate", pads, scale, LANDING_BENCH_PAD),
+            cfg=load_landing(LANDING_CONFIG),
+            success=load_success(SUCCESS_CONFIG),
+            obs_cfg=load_observation(OBSERVATION_CONFIG),
+            noise_cfg=load_noise(NOISE_CONFIG),
+            reward_cfg=load_reward(REWARD_CONFIG),
+            episode_seed=seed,
+        )
+        aviary.reset(seed=seed)
+        return aviary
+
+    return _hover if env == "hover" else _landing
 
 
 def measure_throughput(
@@ -141,8 +247,10 @@ def measure_throughput(
     vec_cls: VecClsName,
     warmup_vec_steps: int = WARMUP_VEC_STEPS,
     seed: int = 0,
+    env: EnvName = "hover",
+    policy: PolicyName = "random",
 ) -> ThroughputResult:
-    """Time ``HoverAviary`` stepping under random actions in DIRECT (headless) mode.
+    """Time one environment's stepping under random actions in DIRECT (headless) mode.
 
     The vectorised environment auto-resets on termination, so no episode bookkeeping
     enters the timed region. Actions are drawn once into a pool before timing and cycled,
@@ -156,6 +264,9 @@ def measure_throughput(
         vec_cls: Vectorisation backend, ``dummy`` (in-process) or ``subproc``.
         warmup_vec_steps: Vector steps executed and discarded before timing.
         seed: Base seed; worker ``i`` is reset with ``seed + i``.
+        env: Environment to measure, ``hover`` (Phase 0's ceiling) or ``landing`` (the
+            Phase 2 environment, with the deck body and the motion bridge in the loop).
+        policy: Action stream during the timed region, ``random`` or ``hold``.
 
     Returns:
         The measured row.
@@ -173,16 +284,19 @@ def measure_throughput(
     from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
     n_vec_steps = -(-total_steps // n_envs)
-    fns = [_env_factory(act, seed + i) for i in range(n_envs)]
+    fns = [_env_factory(env, act, seed + i) for i in range(n_envs)]
     venv = DummyVecEnv(fns) if vec_cls == "dummy" else SubprocVecEnv(fns)
     try:
         space = venv.action_space
         if not isinstance(space, Box):
             raise TypeError(f"expected a Box action space, got {type(space).__name__}")
         rng = np.random.default_rng(seed)
-        pool = rng.uniform(
-            low=space.low, high=space.high, size=(ACTION_POOL_SIZE, n_envs, *space.shape)
-        ).astype(np.float32)
+        if policy == "random":
+            pool = rng.uniform(
+                low=space.low, high=space.high, size=(ACTION_POOL_SIZE, n_envs, *space.shape)
+            ).astype(np.float32)
+        else:
+            pool = np.zeros((ACTION_POOL_SIZE, n_envs, *space.shape), dtype=np.float32)
 
         venv.reset()
         for i in range(warmup_vec_steps):
@@ -200,6 +314,8 @@ def measure_throughput(
     steps = n_vec_steps * n_envs
     rate = steps / wall_s
     return ThroughputResult(
+        env=env,
+        policy=policy,
         vec_cls=vec_cls,
         n_envs=n_envs,
         act=act,

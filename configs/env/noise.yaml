@@ -1,0 +1,29 @@
+# The perception stand-in: what a vision-based relative-pose estimator would cost us.
+# Applied to the RELATIVE PAD POSE BLOCK ONLY (relative position and relative velocity);
+# the drone's own attitude, rates and velocity are assumed to come from the IMU and are
+# left clean.
+#
+# OFF by default. Training in Phase 5 and 6 runs clean; Phase 7 ablates it at
+# sigma in {0, 1, 2, 4} cm and latency in {0, 33, 66} ms on the frozen episode lists.
+#
+# Units and scales: metres and metres per second MODEL scale, milliseconds MODEL scale,
+# hertz MODEL scale. At lambda = 1/25 a 33 ms model latency is 165 ms full scale.
+#
+# The generator is a SPAWNED CHILD of the episode seed sequence, never a fresh
+# default_rng() and never the same generator the episode start offset is drawn from: if
+# turning noise on shifted the episode draw, the Phase 7 ablation would stop being a
+# paired comparison over identical episodes.
+
+enabled: false
+
+# Gaussian, zero-mean, independent per axis, applied after the hold.
+position_sigma_m: 0.0
+velocity_sigma_m_s: 0.0
+
+# Fixed transport delay, milliseconds model scale. Quantised down to a whole number of
+# control steps (33.33 ms at 30 Hz).
+latency_ms: 0.0
+
+# Sample-and-hold rate, hertz model scale. The relative-pose block is refreshed at this
+# rate and held between refreshes. 30 Hz = the control rate = no hold.
+hold_freq_hz: 30.0
