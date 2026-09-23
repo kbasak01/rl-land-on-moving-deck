@@ -27,7 +27,14 @@ What each group asserts, and what it needs:
   ``results/forecast/coverage.csv``; reported, not gated.
 
 Artifacts are read from ``artifacts/dmf/`` or ``$RLD_DMF_ARTIFACTS``; tests needing an
-absent artifact skip. Results files are written only from **non-smoke** models.
+absent artifact skip. The secondary seed exports (``tcn_quantile_seed0``/``_seed2``,
+results-skeptic M5, ``role = "seed-sensitivity, not selected"``) run through every parity,
+cost, coverage and feasibility check beside the primaries.
+
+**Writing results is opt-in.** By default every test asserts and writes nothing. With
+``RLD_WRITE_RESULTS=1`` (``make forecast-report``) the tests also write
+``results/forecast/{parity,cost,coverage,band_feasibility}.csv``, from **non-smoke** models
+only. ``cost.csv`` is a timing and differs on every run; it is regenerated only on purpose.
 
 Units: model-scale seconds for episode time, full-scale seconds for the 10 Hz grid; degrees,
 metres and metres per second, full scale for channels, model scale for pad quantities.
@@ -121,7 +128,16 @@ LIM_ROLL_DEG, LIM_PITCH_DEG, LIM_VZ_M_S = 3.0, 2.0, 0.16
 #: Pooled calibrated pad-v_z coverage must land here on the tune pool (the amendment's test).
 CALIBRATED_COVERAGE = (0.89, 0.91)
 
-INTERVAL_MODELS = ("residual_interval", "tcn_quantile")
+#: Secondary seed exports (M5): reported beside the primaries, never selected or deployed.
+SECONDARY_MODELS = ("tcn_quantile_seed0", "tcn_quantile_seed2")
+
+#: Every model directory the checks run over: the four primaries, then the secondaries.
+ALL_MODELS = (*FORECASTERS, *SECONDARY_MODELS)
+
+INTERVAL_MODELS = ("residual_interval", "tcn_quantile", *SECONDARY_MODELS)
+
+#: ``RLD_WRITE_RESULTS=1`` makes the tests write ``results/forecast/*.csv``; off by default.
+WRITE_RESULTS = os.environ.get("RLD_WRITE_RESULTS") == "1"
 
 
 # ---------------------------------------------------------------------------------------
@@ -569,7 +585,7 @@ def _parity_record() -> Iterator[None]:
     """Merge this run's non-smoke parity rows into ``results/forecast/parity.csv``."""
     yield
     real = [r for r in _PARITY_ROWS if not r["smoke_fit"]]
-    if not real:
+    if not real or not WRITE_RESULTS:
         return
     path = RECORD_DIR / "parity.csv"
     merged: dict[tuple[str, str], dict[str, object]] = {}
@@ -579,7 +595,7 @@ def _parity_record() -> Iterator[None]:
                 merged[(row["model"], row["check"])] = dict(row)
     for row in real:
         merged[(str(row["model"]), str(row["check"]))] = row
-    order = list(FORECASTERS)
+    order = list(ALL_MODELS)
     rows = sorted(merged.values(), key=lambda r: (order.index(str(r["model"])), str(r["check"])))
     _write_rows(path, rows)
 
@@ -610,7 +626,7 @@ def _parity(
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("name", list(FORECASTERS))
+@pytest.mark.parametrize("name", ALL_MODELS)
 def test_parity_a_adapter_matches_dmf_offline_on_corpus_windows(
     name: str, sim_cfg: SimConfig, dmf_train_stats: NormStats
 ) -> None:
@@ -628,7 +644,7 @@ def test_parity_a_adapter_matches_dmf_offline_on_corpus_windows(
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("name", list(FORECASTERS))
+@pytest.mark.parametrize("name", ALL_MODELS)
 def test_parity_b_feed_from_the_bridge_matches_dmf_offline(
     name: str,
     sim_cfg: SimConfig,
@@ -728,6 +744,9 @@ def test_fitted_keys_are_dev_pool_and_disjoint_from_every_frozen_episode(
 
 
 def _write_rows(path: Path, rows: list[dict[str, object]]) -> None:
+    """Write a results CSV -- only under ``RLD_WRITE_RESULTS=1``; otherwise do nothing."""
+    if not WRITE_RESULTS:
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]), lineterminator="\n")
@@ -741,7 +760,7 @@ def test_cpu_cost_per_control_step(
 ) -> None:
     import onnxruntime as ort
 
-    names = [n for n in FORECASTERS if _available(n)]
+    names = [n for n in ALL_MODELS if _available(n)]
     if not names:
         pytest.skip(f"no fitted forecaster under {MODEL_ROOT}")
     rows: list[dict[str, object]] = []
@@ -926,6 +945,11 @@ def tune_predictions(sim_cfg: SimConfig) -> dict[str, dict[str, np.ndarray]]:
     return out
 
 
+def _role(name: str) -> str:
+    """``primary`` for a pre-registered model dir, the secondary label for a seed export."""
+    return "seed-sensitivity, not selected" if name in SECONDARY_MODELS else "primary"
+
+
 def _pad_vz(band: np.ndarray, truth: np.ndarray, x: float) -> tuple[np.ndarray, np.ndarray]:
     """Return the raw pad-v_z box and the true pad v_z, both m/s **model** scale."""
     _, box = pad_vertical_band(band, x)
@@ -946,7 +970,7 @@ def test_band_coverage_on_the_tune_pool(
     pads = {"aft": _aft_x(deck_pads), "cg": 0.0}
     rows: list[dict[str, object]] = []
     for name, pred in tune_predictions.items():
-        band, truth, ss = pred["band"], pred["truth"], pred["ss"]
+        band, truth, ss, fold = pred["band"], pred["truth"], pred["ss"], pred["fold"]
         cases: list[tuple[str, str, str, np.ndarray, np.ndarray, str]] = [
             ("native", "-", "roll_deg", band[..., 0, :], truth[..., 0], "deg"),
             ("native", "-", "pitch_deg", band[..., 1, :], truth[..., 1], "deg"),
@@ -956,6 +980,9 @@ def test_band_coverage_on_the_tune_pool(
             cases.append(("raw_box", pad, "pad_vz", box, true, "m/s model"))
             cal = calibrate_band(box, pred[f"gamma_{pad}"])
             cases.append(("conformal", pad, "pad_vz", cal, true, "m/s model"))
+            lo2, hi2 = _gamma_2fold(box, true, fold)
+            two_fold = np.stack([lo2, box[..., POINT], hi2], axis=-1)
+            cases.append(("conformal_2fold", pad, "pad_vz", two_fold, true, "m/s model"))
         for band_kind, pad, quantity, qb, qt, units in cases:
             for group in ["all", *sorted(set(ss.tolist()))]:
                 m = np.ones(ss.size, dtype=bool) if group == "all" else ss == group
@@ -965,6 +992,7 @@ def test_band_coverage_on_the_tune_pool(
                     rows.append(
                         {
                             "model": name,
+                            "role": _role(name),
                             "smoke_fit": bool(pred["smoke"]),
                             "pool": "dev_pool/tune",
                             "band": band_kind,
@@ -979,11 +1007,16 @@ def test_band_coverage_on_the_tune_pool(
                             "mean_width": round(float((hi - lo).mean()), 6),
                             "median_width": round(float(np.median(hi - lo)), 6),
                             "n_windows": int(inside.size),
+                            # conformal: gamma fitted on this pool (in-sample); conformal_2fold:
+                            # gamma fitted on the other half of the tune keys (out-of-sample).
                             "calibrated_on_this_pool": band_kind == "conformal"
-                            or name == "residual_interval",
+                            or (band_kind != "conformal_2fold" and name == "residual_interval"),
                         }
                     )
     pooled = [r for r in rows if r["band"] == "conformal" and r["ss"] == "all"]
+    for r in rows:
+        if r["band"] == "conformal_2fold" and r["ss"] == "all":
+            print(f"{r['model']:>18} {r['pad']:>3} {r['lead_full_s']:>4} s 2-fold: {r['coverage']}")
     for r in pooled:
         print(f"{r['model']:>18} {r['pad']:>3} {r['lead_full_s']:>4} s: {r['coverage']}")
         # A smoke calibration uses 3 tune keys; it is gated only on the real, 135-key fit.
@@ -1082,6 +1115,7 @@ def test_band_feasibility_record(
                         rows.append(
                             {
                                 "model": name,
+                                "role": _role(name),
                                 "smoke_fit": bool(pred["smoke"]),
                                 "construction": construction,
                                 "pad": pad,

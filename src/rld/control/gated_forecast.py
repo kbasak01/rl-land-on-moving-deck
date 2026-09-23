@@ -17,9 +17,15 @@ observation ``gated`` reads, is:
   lead, a ``[lo, point, hi]`` band on roll (degrees), pitch (degrees) and pad deck-point
   ``v_z`` (metres per second **model** scale), out to 3.0 s model (15 s full).
 
-Two registry entries share this class and differ only in ``forecaster_dir``:
+Two primary registry entries share this class and differ only in ``forecaster_dir``:
 ``gated_forecast`` (dmf's ``residual_interval``: DLinear-OLS point plus fixed empirical 5/95 %
-residual quantiles) and ``gated_forecast_tcn`` (dmf's learned ``tcn_quantile`` fan).
+residual quantiles) and ``gated_forecast_tcn`` (dmf's learned ``tcn_quantile`` fan, seed 1,
+the seed the pre-registered lowest-tune-pool-pinball rule selected, P4-D2).
+
+Two **secondary** entries, ``gated_forecast_tcn_seed0`` and ``gated_forecast_tcn_seed2``, are
+the seed-sensitivity arm: ``gated_forecast_tcn`` with the other two ``tcn_quantile`` seeds and
+nothing else changed. They are reported as secondary, never as the ``gated_forecast_tcn``
+result.
 
 The law
 -------
@@ -90,6 +96,8 @@ __all__ = [
     "GatedForecast",
     "make_gated_forecast",
     "make_gated_forecast_tcn",
+    "make_gated_forecast_tcn_seed0",
+    "make_gated_forecast_tcn_seed2",
 ]
 
 #: Column indices of ``lo`` and ``hi`` in a :class:`~rld.deck.forecast.DeckForecast` band.
@@ -350,3 +358,33 @@ def make_gated_forecast_tcn(config_path: Path, spec: ControlSpec) -> GatedForeca
         ``reset(seed, motion_feed=feed)`` before use.
     """
     return GatedForecast(load_gated_forecast(config_path), spec, name="gated_forecast_tcn")
+
+
+def make_gated_forecast_tcn_seed0(config_path: Path, spec: ControlSpec) -> GatedForecast:
+    """Registry factory for ``gated_forecast_tcn_seed0``: SECONDARY, seed sensitivity.
+
+    ``gated_forecast_tcn`` with ``tcn_quantile`` seed 0 instead of the selected seed 1.
+
+    Args:
+        config_path: ``configs/control/gated_forecast_tcn_seed0.yaml`` or an override.
+        spec: Committed environment configs.
+
+    Returns:
+        A fresh :class:`GatedForecast` named ``gated_forecast_tcn_seed0``.
+    """
+    return GatedForecast(load_gated_forecast(config_path), spec, name="gated_forecast_tcn_seed0")
+
+
+def make_gated_forecast_tcn_seed2(config_path: Path, spec: ControlSpec) -> GatedForecast:
+    """Registry factory for ``gated_forecast_tcn_seed2``: SECONDARY, seed sensitivity.
+
+    ``gated_forecast_tcn`` with ``tcn_quantile`` seed 2 instead of the selected seed 1.
+
+    Args:
+        config_path: ``configs/control/gated_forecast_tcn_seed2.yaml`` or an override.
+        spec: Committed environment configs.
+
+    Returns:
+        A fresh :class:`GatedForecast` named ``gated_forecast_tcn_seed2``.
+    """
+    return GatedForecast(load_gated_forecast(config_path), spec, name="gated_forecast_tcn_seed2")

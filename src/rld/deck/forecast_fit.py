@@ -140,11 +140,15 @@ __all__ = [
     "ForecasterSpec",
     "SmokeSettings",
     "INTERVAL_MODELS",
+    "PRIMARY_ROLE",
+    "SECONDARY_ROLE",
     "calibrate_only",
     "calibrate_pad_vz",
     "canonical_key_list",
     "check_corpus",
     "corpus_frame",
+    "export_seed",
+    "seed_export_name",
     "fit_forecasters",
     "key_list_sha256",
     "load_norm_scale",
@@ -196,6 +200,12 @@ FitKind = Literal["closed_form", "sgd"]
 
 #: The models whose pad-v_z band is conformal-calibrated (quantile heads).
 INTERVAL_MODELS: tuple[str, ...] = ("residual_interval", "tcn_quantile")
+
+#: ``role`` of a model directory holding the pre-registered, deployed model.
+PRIMARY_ROLE: str = "primary (pre-registered selection)"
+
+#: ``role`` of a secondary seed export (results-skeptic M5): reported, never selected.
+SECONDARY_ROLE: str = "seed-sensitivity, not selected"
 
 #: Nominal miscoverage of the pad-v_z calibration (the 90 % band).
 CONFORMAL_ALPHA: float = 0.1
@@ -530,11 +540,16 @@ def _model_meta(
     selected_seed: int,
     smoke: bool,
     files: Mapping[str, str],
+    *,
+    name: str | None = None,
+    role: str = PRIMARY_ROLE,
 ) -> dict[str, Any]:
     """Return ``meta.json``: how to rebuild the model, and what was fitted on what."""
     return {
         "schema": SCHEMA_VERSION,
-        "model": spec.name,
+        "model": name or spec.name,
+        "role": role,
+        "parent": spec.name,
         "dmf_name": cfg.name,
         "label": cfg.label,
         "head": cfg.head,
@@ -568,8 +583,15 @@ def _write_deployed(
     model_dir: Path,
     selected_seed: int,
     smoke: SmokeSettings | None,
+    *,
+    name: str | None = None,
+    role: str = PRIMARY_ROLE,
 ) -> dict[str, Any]:
-    """Write the deployed model's artifacts and return their record for the manifest."""
+    """Write a deployable model directory and return its record for the manifest.
+
+    ``name``/``role`` label a secondary seed-sensitivity export (:func:`export_seed`); the
+    default is the pre-registered, selected model.
+    """
     model_dir.mkdir(parents=True, exist_ok=True)
     model.to("cpu").eval()
     torch.save(model.state_dict(), model_dir / "state_dict.pt")
@@ -580,7 +602,9 @@ def _write_deployed(
         name: sha256_file(model_dir / name)
         for name in ("state_dict.pt", "norm_stats.npz", "model.onnx")
     }
-    meta = _model_meta(spec, cfg, data_cfg, window, selected_seed, smoke is not None, files)
+    meta = _model_meta(
+        spec, cfg, data_cfg, window, selected_seed, smoke is not None, files, name=name, role=role
+    )
     (model_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
     return {
         "state_dict_sha256": files["state_dict.pt"],
@@ -1174,9 +1198,9 @@ def calibrate_only(
         ValueError: If a model is not an interval model, is absent from the manifest, or the
             manifest's pools differ.
     """
-    bad = [m for m in models if m not in INTERVAL_MODELS]
+    bad = [m for m in models if _parent(m) not in INTERVAL_MODELS]
     if bad:
-        raise ValueError(f"{bad} are not interval models {INTERVAL_MODELS}")
+        raise ValueError(f"{bad} are not interval models {INTERVAL_MODELS} or their seed exports")
     sim_cfg = load_sim(DMF_CORPUS_CONFIG)
     window = window_spec_from_config(load_data(DMF_DATA_CONFIG))
     _, tune_keys = pool_keys(sim_cfg, smoke)
@@ -1196,6 +1220,124 @@ def calibrate_only(
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     log(f"[calibrate] updated {manifest_path}")
     return manifest
+
+
+def _parent(name: str) -> str:
+    """Return the fitted model a directory name belongs to (``tcn_quantile_seed0`` -> ...)."""
+    head, sep, tail = name.rpartition("_seed")
+    return head if sep and tail.isdigit() and head in FORECASTERS else name
+
+
+def seed_export_name(model: str, seed: int) -> str:
+    """Return the directory name of a secondary seed export, e.g. ``tcn_quantile_seed0``."""
+    return f"{model}_seed{seed}"
+
+
+def export_seed(
+    model: str,
+    seed: int,
+    *,
+    corpus_root: Path = DEFAULT_CORPUS_ROOT,
+    out_root: Path = DEFAULT_ARTIFACT_ROOT,
+    record_dir: Path = DEFAULT_RECORD_DIR,
+    log: Any = print,
+) -> dict[str, Any]:
+    """Export a **non-selected** SGD seed as a self-contained, secondary model directory.
+
+    The results-skeptic seed-sensitivity arm (M5). Same procedure as the deployed model --
+    the seed's best-epoch checkpoint from ``<model>/seeds/``, the same train-partition
+    normalisation (asserted byte-identical to the primary's), ONNX export and dmf parity,
+    and, for an interval model, the tune-pool pad-v_z calibration -- written to
+    ``<out>/<model>_seed<k>/`` and recorded in the manifest with
+    ``role = "seed-sensitivity, not selected"``. The pre-registered selection and the
+    primary directory are not touched.
+
+    Args:
+        model: An SGD model name, e.g. ``"tcn_quantile"``.
+        seed: A fitted seed that is **not** the selected one.
+        corpus_root: dmf corpus root.
+        out_root: Artifact root.
+        record_dir: Where ``fit_manifest.json`` lives.
+        log: Progress sink.
+
+    Returns:
+        The manifest entry written.
+
+    Raises:
+        ValueError: If the model is not an SGD model in the manifest, the seed is the
+            selected one or was never fitted, the pools differ, or the normalisation would
+            differ from the primary's.
+    """
+    spec = FORECASTERS.get(model)
+    if spec is None or spec.kind != "sgd":
+        raise ValueError(f"{model!r} is not an SGD forecaster")
+    manifest_path = record_dir / "fit_manifest.json"
+    manifest: dict[str, Any] = json.loads(manifest_path.read_text(encoding="utf-8"))
+    primary = manifest["models"].get(model)
+    if primary is None:
+        raise ValueError(f"{model} is not in {manifest_path}; fit it first")
+    if seed == primary["selected_seed"]:
+        raise ValueError(f"seed {seed} is {model}'s selected seed; it is the primary directory")
+    seeds_dir = out_root / model / "seeds"
+    records = _seed_records(seeds_dir)
+    if seed not in records:
+        raise ValueError(f"{model} seed {seed} was never fitted ({sorted(records)} on disk)")
+    record = records[seed]
+    sim_cfg = load_sim(DMF_CORPUS_CONFIG)
+    data_cfg = load_data(DMF_DATA_CONFIG)
+    window = window_spec_from_config(data_cfg)
+    train_keys, tune_keys = pool_keys(sim_cfg)
+    for part, keys in (("train", train_keys), ("tune", tune_keys)):
+        if manifest["pools"][part]["sha256"] != key_list_sha256(keys):
+            raise ValueError(f"{manifest_path} was fitted on a different {part} pool")
+    check_corpus(corpus_root, sim_cfg, train_keys + tune_keys)
+    train_ds, tune_ds = _datasets(corpus_root, data_cfg, train_keys, tune_keys)
+    cfg = load_model(spec.model_config)
+    net = build_model(cfg, window, len(train_ds.input_columns), len(train_ds.target_columns))
+    checkpoint = seeds_dir / str(record["checkpoint"])
+    if sha256_file(checkpoint) != record["checkpoint_sha256"]:
+        raise ValueError(f"{checkpoint} does not match its seed record")
+    net.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=True), strict=True)
+    name = seed_export_name(model, seed)
+    model_dir = out_root / name
+    deployed = _write_deployed(
+        spec, cfg, net, data_cfg, window, train_ds, tune_ds, model_dir, seed, None,
+        name=name, role=SECONDARY_ROLE,
+    )  # fmt: skip
+    if deployed["norm_stats_sha256"] != primary["norm_stats_sha256"]:
+        raise ValueError(f"{name}: normalisation differs from the primary {model}'s")
+    if model in INTERVAL_MODELS:
+        deployed["conformal_padvz"] = calibrate_pad_vz(
+            model_dir, corpus_root, window, tune_keys, log=log
+        )
+        deployed["meta_sha256"] = sha256_file(model_dir / "meta.json")
+    entry: dict[str, Any] = {
+        "role": SECONDARY_ROLE,
+        "parent": model,
+        "seed": seed,
+        "kind": spec.kind,
+        "dmf_name": cfg.name,
+        "head": cfg.head,
+        "model_config": str(spec.model_config.relative_to(DMF_ROOT)),
+        "fitted_on": FITTED_ON,
+        "tuned_on": TUNED_ON,
+        "selected_seed_of_parent": primary["selected_seed"],
+        "tune_loss": float(record["tune_loss"]),
+        "tune_loss_name": record["tune_loss_name"],
+        "best_epoch": record["best_epoch"],
+        "epochs_run": record["epochs_run"],
+        "checkpoint": f"{model}/seeds/{record['checkpoint']}",
+        "checkpoint_sha256": record["checkpoint_sha256"],
+        **deployed,
+    }
+    manifest["models"][name] = entry
+    manifest["models"] = {k: manifest["models"][k] for k in sorted(manifest["models"])}
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    log(
+        f"[export] {name}: tune {entry['tune_loss_name']} {entry['tune_loss']:.6f}; parity "
+        f"max_abs_err {deployed['parity']['worst']['max_abs_err']:.2e}; wrote {model_dir}"
+    )
+    return entry
 
 
 def _ort_version() -> str:

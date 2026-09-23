@@ -21,7 +21,7 @@ THROUGHPUT_CSV ?= results/env_throughput.csv
 THROUGHPUT_LANDING_CSV ?= results/env_throughput_landing.csv
 
 .PHONY: test lint format throughput throughput-landing env-sanity \
-        deck-stats baselines dmf-forecasters train-bg eval bench report all
+        deck-stats baselines dmf-forecasters forecast-report train-bg eval bench report all
 
 # --- implemented ------------------------------------------------------------------
 
@@ -73,6 +73,9 @@ DMF_SEEDS   ?= 0 1 2
 DMF_DEVICE  ?= cuda
 $(DMF_CORPUS)/manifest.parquet:
 	$(PY) $(DMF_ROOT)/scripts/generate_corpus.py --config $(DMF_ROOT)/configs/sim/corpus.yaml --out $(DMF_CORPUS) --workers $(WORKERS)
+# Phase 4 -- regenerate results/forecast/{parity,cost,coverage,band_feasibility}.csv from the
+# fitted artifacts. Plain `make test` asserts the same checks and writes nothing.
+forecast-report: ; RLD_WRITE_RESULTS=1 $(PYTEST) tests/test_deck_forecast.py -rs
 dmf-forecasters: $(DMF_CORPUS)/manifest.parquet
 	$(PY) scripts/fit_dmf_forecasters.py --corpus $(DMF_CORPUS) --out artifacts/dmf --models $(DMF_MODELS) --seeds $(DMF_SEEDS) --device $(DMF_DEVICE)
 # Phase 5 -- rl-trainer: background training run; status in artifacts/runs/*/status.json

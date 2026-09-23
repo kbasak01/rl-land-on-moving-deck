@@ -172,11 +172,15 @@ def test_registry_marks_exactly_the_oracle_privileged():
         "oracle_gated",
         "gated_forecast",
         "gated_forecast_tcn",
+        "gated_forecast_tcn_seed0",
+        "gated_forecast_tcn_seed2",
     ]
     assert [n for n, e in REGISTRY.items() if e.privileged] == ["oracle_gated"]
     assert [n for n, e in REGISTRY.items() if e.needs_motion_feed] == [
         "gated_forecast",
         "gated_forecast_tcn",
+        "gated_forecast_tcn_seed0",
+        "gated_forecast_tcn_seed2",
     ]
     for name, item in REGISTRY.items():
         assert item.config_path.is_file()

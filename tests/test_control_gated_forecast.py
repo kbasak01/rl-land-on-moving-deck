@@ -51,6 +51,9 @@ from rld.deck.forecast import DEFAULT_MODEL_ROOT, HI, LO, DeckForecast
 from rld.envs.landing_env import DeckLandingAviary, EpisodeRecord
 
 NAMES = ("gated_forecast", "gated_forecast_tcn")
+
+#: The SECONDARY seed-sensitivity arm: gated_forecast_tcn with the unselected TCN seeds.
+SEED_NAMES = {"gated_forecast_tcn_seed0": 0, "gated_forecast_tcn_seed2": 2}
 NAME = "gated_forecast"
 
 #: Absolute model time of the synthetic episodes' start inside the record, s model.
@@ -272,6 +275,38 @@ def test_config_is_gated_yaml_plus_the_forecaster(name: str) -> None:
     model = "residual_interval" if name == "gated_forecast" else "tcn_quantile"
     assert cfg.forecaster_dir.is_absolute()
     assert cfg.forecaster_dir.parts[-3:] == ("artifacts", "dmf", model)
+
+
+@pytest.mark.parametrize("name", sorted(SEED_NAMES))
+def test_seed_arm_differs_from_gated_forecast_tcn_only_in_forecaster_dir(name: str) -> None:
+    """Secondary seed-sensitivity entries: same YAML keys and values but the model dir.
+
+    Checked on the raw YAML mappings (every key, not only the ones the loader reads) and on
+    the loaded configs; plus the flags and the "secondary" label the tables will print.
+    """
+    seed = SEED_NAMES[name]
+    base_path = entry("gated_forecast_tcn").config_path
+    raw_base = yaml.safe_load(base_path.read_text(encoding="utf-8"))
+    raw_seed = yaml.safe_load(entry(name).config_path.read_text(encoding="utf-8"))
+    assert set(raw_seed) == set(raw_base)
+    assert {k for k in raw_base if raw_seed[k] != raw_base[k]} == {"forecaster_dir"}
+    assert raw_base["forecaster_dir"] == "artifacts/dmf/tcn_quantile"
+    assert raw_seed["forecaster_dir"] == f"artifacts/dmf/tcn_quantile_seed{seed}"
+
+    cfg_base = load_gated_forecast(base_path)
+    cfg_seed = load_gated_forecast(entry(name).config_path)
+    assert cfg_seed == dataclasses.replace(cfg_base, forecaster_dir=cfg_seed.forecaster_dir)
+    assert cfg_seed.forecaster_dir.parts[-3:] == ("artifacts", "dmf", f"tcn_quantile_seed{seed}")
+
+    item = entry(name)
+    assert item.privileged is False and item.needs_motion_feed is True
+    assert item.description.startswith("secondary: seed sensitivity")
+    header = entry(name).config_path.read_text(encoding="utf-8").splitlines()[:6]
+    assert "SECONDARY" in header[0] and "seed-sensitivity" in header[0]
+    # Construction needs no artifacts (the forecaster loads lazily, at the first reset).
+    controller = make_controller(name)
+    assert controller.name == name
+    assert controller.privileged is False and controller.needs_motion_feed is True
 
 
 def test_band_columns_match_the_adapter() -> None:

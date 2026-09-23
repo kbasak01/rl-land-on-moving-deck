@@ -17,13 +17,22 @@ Units: none (text comparison).
 import csv
 import hashlib
 import io
+import re
+import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from rld.eval.report import SkipRecord, read_rows, summarise, summary_columns
 from rld.eval.runner import EPISODE_COLUMNS, episode_rows_csv
 
-__all__ = ["compare_to_reference", "summary_provenance_differences"]
+__all__ = [
+    "compare_to_reference",
+    "git_state",
+    "resummarise",
+    "skip_records_from_summary",
+    "summary_provenance_differences",
+]
 
 #: Columns that identify one episode row of one method.
 _ROW_KEY: tuple[str, ...] = ("method", "run_seed", "pad", "regime", "ss", "index")
@@ -69,7 +78,7 @@ def compare_to_reference(
         pad: The pad whose rows are compared (the reference's pad).
 
     Returns:
-        ``{"reference": path, "reference_sha256", "pad", "header_identical",
+        ``{"reference": path, "reference_sha256", "pad", "applicable", "header_identical",
         "all_identical", "methods": {method: {"n_compared", "n_identical", "n_differ",
         "n_missing_in_reference", "n_reference_rows", "first_mismatch"}}}``.
     """
@@ -108,6 +117,9 @@ def compare_to_reference(
         "reference": str(reference_csv),
         "reference_sha256": hashlib.sha256(ref_text.encode("utf-8")).hexdigest(),
         "pad": pad,
+        # False when no evaluated method is in the reference (e.g. seed-sensitivity arms
+        # only): there is nothing to reproduce, and the check neither passes nor fails.
+        "applicable": bool(methods),
         "header_identical": header_ok,
         "all_identical": bool(
             header_ok
@@ -151,3 +163,125 @@ def summary_provenance_differences(
         }
         for (method, column, committed), n in counts.items()
     ]
+
+
+def git_state(repo_root: Path) -> dict[str, Any]:
+    """Return the checkout's commit and whether it has uncommitted changes.
+
+    Args:
+        repo_root: The repository root.
+
+    Returns:
+        ``{"git_sha": <HEAD or "unknown">, "git_dirty": bool | None, "git_dirty_paths":
+        [porcelain lines, at most 50]}``; ``git_dirty`` is None when git is unavailable.
+    """
+
+    def run(*args: str) -> str | None:
+        try:
+            out = subprocess.run(
+                ["git", *args], cwd=repo_root, capture_output=True, text=True, check=True
+            )
+        except (OSError, subprocess.CalledProcessError):
+            return None
+        return out.stdout
+
+    sha = run("rev-parse", "HEAD")
+    status = run("status", "--porcelain", "--untracked-files=normal")
+    paths = [] if status is None else [line for line in status.splitlines() if line]
+    return {
+        "git_sha": "unknown" if sha is None else sha.strip(),
+        "git_dirty": None if status is None else bool(paths),
+        "git_dirty_paths": paths[:50],
+    }
+
+
+_SKIP_PREFIX = re.compile(r"^\d+ of \d+ not run: (.*)$")
+
+
+def skip_records_from_summary(records: Sequence[Mapping[str, str]]) -> list[SkipRecord]:
+    """Rebuild the :class:`SkipRecord` s behind a summary's not-run cells.
+
+    Args:
+        records: ``summary.csv`` rows as text; those with ``n_episodes == 0`` are expanded
+            into ``n_listed`` records with the reason parsed from ``skip_reason``.
+
+    Returns:
+        The records, in summary order.
+
+    Raises:
+        ValueError: If a not-run cell's ``skip_reason`` cannot be parsed.
+    """
+    skipped: list[SkipRecord] = []
+    for record in records:
+        if int(record["n_episodes"]) != 0:
+            continue
+        match = _SKIP_PREFIX.match(record["skip_reason"])
+        if match is None:
+            raise ValueError(f"cannot parse skip_reason {record['skip_reason']!r}")
+        skipped += [
+            SkipRecord(
+                record["method"],
+                record["privileged"] == "True",
+                int(record["run_seed"]),
+                record.get("pad") or "aft",
+                record["regime"],
+                record["ss"],
+                match.group(1),
+            )
+        ] * int(record["n_listed"])
+    return skipped
+
+
+def resummarise(out_dir: Path) -> tuple[list[dict[str, Any]], list[str], list[str]]:
+    """Recompute ``summary.csv`` from ``episodes.csv`` with today's columns, changing nothing old.
+
+    No episode is flown. The method order, the skipped cells (``n_episodes == 0`` rows:
+    their ``n_listed`` and reason) and every per-method and provenance column are taken
+    from the existing ``summary.csv``, as recorded when the run was made; only the
+    metrics are recomputed from the episodes. Every column the old file has must come out
+    byte-identical, row for row, or nothing is returned.
+
+    Args:
+        out_dir: A run directory holding ``episodes.csv`` and ``summary.csv``.
+
+    Returns:
+        ``(rows, columns, added_columns)``: the new summary rows (write with
+        :func:`rld.eval.report.write_rows` and ``columns``) and the columns that are new.
+
+    Raises:
+        ValueError: If a provenance column is not constant within a method, a skip reason
+            cannot be parsed, or any existing column would change.
+    """
+    episodes = read_rows(out_dir / "episodes.csv")
+    old = read_rows(out_dir / "summary.csv")
+    old_columns = list(old[0])
+    methods = list(dict.fromkeys(r["method"] for r in old))
+    base = summary_columns([])
+    extras = [c for c in old_columns if c not in base]
+    per_method: dict[str, dict[str, str]] = {}
+    for record in old:
+        values = {c: record[c] for c in extras}
+        if per_method.setdefault(record["method"], values) != values:
+            raise ValueError(f"{record['method']}: provenance columns are not constant")
+    skipped = skip_records_from_summary(old)
+    rows = summarise(episodes, methods, per_method, None, skipped)
+    columns = summary_columns(extras)
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(columns)
+    for row in rows:
+        writer.writerow(
+            [repr(float(row[c])) if isinstance(row[c], float) else row[c] for c in columns]
+        )
+    new = list(csv.DictReader(io.StringIO(buffer.getvalue())))
+    if len(new) != len(old):
+        raise ValueError(f"{len(new)} summary rows recomputed, {len(old)} committed")
+    for fresh, committed in zip(new, old, strict=True):
+        for column in old_columns:
+            if fresh.get(column) != committed[column]:
+                raise ValueError(
+                    f"{committed['method']}/{committed.get('pad', 'aft')}/{committed['regime']}"
+                    f"/{committed['ss']}: column {column} {committed[column]!r} -> "
+                    f"{fresh.get(column)!r}"
+                )
+    return rows, columns, [c for c in columns if c not in old_columns]

@@ -9,6 +9,8 @@ Examples::
     python scripts/fit_dmf_forecasters.py --models tcn tcn_quantile --seeds 0 1 2 --device cuda
     # pad-v_z conformal calibration only, on an already-fitted interval model
     python scripts/fit_dmf_forecasters.py --calibrate-only --models tcn_quantile
+    # secondary seed-sensitivity exports of non-selected seeds (never the deployed model)
+    python scripts/fit_dmf_forecasters.py --export-seed tcn_quantile:0 tcn_quantile:2
     # toy-size pipeline check into a scratch directory
     python scripts/fit_dmf_forecasters.py --smoke --out /tmp/dmf_smoke
 
@@ -29,6 +31,7 @@ from rld.deck.forecast_fit import (
     FORECASTERS,
     SMOKE,
     calibrate_only,
+    export_seed,
     fit_forecasters,
 )
 
@@ -54,6 +57,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Only (re)fit the pad-v_z conformal factors of already-fitted interval models.",
     )
+    parser.add_argument(
+        "--export-seed",
+        nargs="+",
+        metavar="MODEL:SEED",
+        default=None,
+        help="Export non-selected SGD seeds as secondary model dirs (seed-sensitivity arm).",
+    )
     return parser
 
 
@@ -64,6 +74,13 @@ def main(argv: list[str] | None = None) -> int:
     if record_dir is None:
         record_dir = args.out / "record" if args.smoke else DEFAULT_RECORD_DIR
     workers = args.workers if args.workers is not None else (0 if args.smoke else None)
+    if args.export_seed:
+        for item in args.export_seed:
+            model, _, seed = item.partition(":")
+            export_seed(
+                model, int(seed), corpus_root=args.corpus, out_root=args.out, record_dir=record_dir
+            )
+        return 0
     if args.calibrate_only:
         calibrate_only(
             models=args.models,

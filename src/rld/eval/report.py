@@ -34,6 +34,7 @@ scale, angles degrees; rates and fractions dimensionless.
 import csv
 import hashlib
 import io
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
@@ -42,9 +43,11 @@ from typing import Any
 from rld.envs.touchdown import OUTCOMES
 from rld.eval.episodes import REGIME_CELLS
 from rld.eval.metrics import CELL_METRIC_COLUMNS, CellMetrics, as_bool, as_float, cell_metrics
+from rld.eval.stats import wilson_interval
 
 __all__ = [
     "CELL_STATUS_COLUMNS",
+    "QUIET_COLUMNS",
     "DEFAULT_PAD",
     "FORBIDDEN_RENDERED_PHRASES",
     "METHOD_LABELS",
@@ -55,6 +58,7 @@ __all__ = [
     "method_label",
     "read_rows",
     "render_success_vs_seastate",
+    "secondary_seed_arm",
     "sha256_file",
     "summarise",
     "summary_columns",
@@ -67,6 +71,21 @@ SUMMARY_KEY_COLUMNS: tuple[str, ...] = ("method", "privileged", "run_seed", "pad
 
 #: Per-cell status columns, after the metrics: the listed N and why any of it was not run.
 CELL_STATUS_COLUMNS: tuple[str, ...] = ("n_listed", "skip_reason")
+
+#: Quiet-touchdown columns, after the status columns (results-skeptic M1, Gate 4). The
+#: touchdown-conditional fraction ``frac_td_in_quiescent_window`` (a metric column) divides by
+#: ``n_touchdowns``, so a method that rarely touches down can print a fraction near the
+#: oracle's while landing quietly no more often than ``gated``. These columns give that
+#: fraction its Wilson 95 % CI, and add the **per-listed-episode** rate
+#: ``quiet_landings_per_listed = n_td_in_quiescent_window / n_listed`` with its own Wilson CI.
+#: Both are NaN for a cell that was not run (``n_episodes == 0``).
+QUIET_COLUMNS: tuple[str, ...] = (
+    "frac_td_in_quiescent_window_wilson_lo",
+    "frac_td_in_quiescent_window_wilson_hi",
+    "quiet_landings_per_listed",
+    "quiet_landings_per_listed_wilson_lo",
+    "quiet_landings_per_listed_wilson_hi",
+)
 
 #: The pad of a summary or episode row that predates the ``pad`` key (the frozen aft pad).
 DEFAULT_PAD: str = "aft"
@@ -170,6 +189,37 @@ def _pad_rank(pad: str) -> tuple[int, str]:
     return (PAD_ORDER.index(pad), "") if pad in PAD_ORDER else (len(PAD_ORDER), pad)
 
 
+def _quiet_columns(record: Mapping[str, Any]) -> dict[str, float]:
+    """Return :data:`QUIET_COLUMNS` for one summary record (metrics and ``n_listed`` set).
+
+    Args:
+        record: A summary record holding ``n_episodes``, ``n_touchdowns``,
+            ``n_td_in_quiescent_window`` and ``n_listed`` (counts).
+
+    Returns:
+        The Wilson 95 % CI of the touchdown-conditional quiet fraction (NaN without a
+        touchdown), and quiet landings per listed episode with its Wilson 95 % CI (NaN for a
+        cell that was not run). Dimensionless.
+    """
+    nan = float("nan")
+    n_quiet = int(record["n_td_in_quiescent_window"])
+    n_td = int(record["n_touchdowns"])
+    n_listed = int(record["n_listed"])
+    td_lo, td_hi = wilson_interval(n_quiet, n_td) if n_td > 0 else (nan, nan)
+    if int(record["n_episodes"]) == 0:
+        rate, lo, hi = nan, nan, nan
+    else:
+        rate = n_quiet / n_listed
+        lo, hi = wilson_interval(n_quiet, n_listed)
+    return {
+        "frac_td_in_quiescent_window_wilson_lo": td_lo,
+        "frac_td_in_quiescent_window_wilson_hi": td_hi,
+        "quiet_landings_per_listed": rate,
+        "quiet_landings_per_listed_wilson_lo": lo,
+        "quiet_landings_per_listed_wilson_hi": hi,
+    }
+
+
 def _empty_metrics() -> dict[str, Any]:
     """Metrics of a cell with no flown episode: counts 0, every rate and statistic NaN."""
     out: dict[str, Any] = {}
@@ -200,7 +250,8 @@ def summarise(
 
     Returns:
         Rows keyed :data:`SUMMARY_KEY_COLUMNS`, then
-        :data:`~rld.eval.metrics.CELL_METRIC_COLUMNS`, then :data:`CELL_STATUS_COLUMNS`,
+        :data:`~rld.eval.metrics.CELL_METRIC_COLUMNS`, then :data:`CELL_STATUS_COLUMNS` and
+        :data:`QUIET_COLUMNS`,
         then the per-method and provenance columns. Ordered by pad (:data:`PAD_ORDER`),
         ``method_order``, run seed, then the committed cell order. Cells with neither a
         flown nor a skipped episode are absent -- and :func:`render_success_vs_seastate`
@@ -261,6 +312,7 @@ def summarise(
                         else f"{len(cell_skips)} of {record['n_listed']} not run: "
                         + "; ".join(reasons)
                     )
+                    record.update(_quiet_columns(record))
                     record.update(dict((per_method or {}).get(method, {})))
                     record.update(dict(provenance or {}))
                     out.append(record)
@@ -305,12 +357,37 @@ def method_label(method: str, privileged: bool) -> str:
         privileged: Its privileged flag.
 
     Returns:
-        The label from :data:`METHOD_LABELS`, or ``"<method> (privileged)"`` for a privileged
-        method without one, or the bare name.
+        The label from :data:`METHOD_LABELS`; for a seed-sensitivity arm
+        (:func:`secondary_seed_arm`) ``"<method> (secondary: seed sensitivity; ...)"``; else
+        ``"<method> (privileged)"`` for a privileged method, or the bare name.
     """
     if method in METHOD_LABELS:
         return METHOD_LABELS[method]
+    seed = secondary_seed_arm(method)
+    if seed is not None:
+        label = (
+            f"{method} (secondary: seed sensitivity; {seed[0]} with its forecaster fitted at "
+            f"training seed {seed[1]}, not the selected seed; not the primary arm)"
+        )
+        return f"{label} (privileged)" if privileged else label
     return f"{method} (privileged)" if privileged else method
+
+
+def secondary_seed_arm(method: str) -> tuple[str, int] | None:
+    """Return ``(primary method, seed)`` for a seed-sensitivity arm, else ``None``.
+
+    A seed-sensitivity arm is a registry entry named ``<primary>_seed<k>`` (e.g.
+    ``gated_forecast_tcn_seed0``): the primary controller with its forecaster fitted at
+    another training seed. Its rows are secondary, never a headline.
+
+    Args:
+        method: Method name.
+
+    Returns:
+        ``(primary, k)`` or ``None``.
+    """
+    match = re.fullmatch(r"(.+)_seed(\d+)", method)
+    return None if match is None else (match.group(1), int(match.group(2)))
 
 
 def _pct(value: float) -> str:
@@ -360,6 +437,49 @@ def _check_phrases(text: str) -> str:
     return text
 
 
+_PREDICATE = (
+    "TRUE deck satisfied the permissive quiescence predicate "
+    "(`rld.control.quiescence.QuiescenceRule`: 12 samples 1/30 s apart, |roll| <= 3.0 deg, "
+    "|pitch| <= 2.0 deg, |pad v_z| <= 0.16 m/s model) starting at the contact touchdown; "
+    "evaluation ground truth, never a controller input"
+)
+
+#: The quiet-touchdown bullet of a summary without :data:`QUIET_COLUMNS` (e01, unchanged).
+_QUIET_BULLETS_V1: tuple[str, ...] = (
+    f"- `quiet td` is, of the touched-down episodes, the fraction whose {_PREDICATE}. `–` "
+    "when nothing touched down.",
+)
+
+#: The quiet-touchdown bullets once :data:`QUIET_COLUMNS` exist (results-skeptic M1).
+_QUIET_BULLETS_V2: tuple[str, ...] = (
+    "- `td n` is the number of episodes that touched down (contact detector).",
+    "- `quiet | td` (the column `quiet \\| td`) is, **of the touched-down episodes only**, "
+    "the fraction whose "
+    f"{_PREDICATE}; Wilson 95 % CI in brackets, then k/`td n`. `–` when nothing touched down. "
+    "It is conditional on touching down: a controller that rarely touches down can score "
+    "high here while landing quietly no more often than another.",
+    "- `quiet landings / listed` is the number of quiet touchdowns divided by the number of "
+    "listed episodes in the cell (timeouts count as not quiet); Wilson 95 % CI in brackets, "
+    "then k/N. This is the per-episode rate to compare across controllers.",
+)
+
+
+def _quiet_cells(record: Mapping[str, str]) -> list[str]:
+    """Return ``td n``, ``quiet | td`` and ``quiet landings / listed`` cells for one record."""
+    n_quiet = record["n_td_in_quiescent_window"]
+    return [
+        record["n_touchdowns"],
+        f"{_num(as_float(record['frac_td_in_quiescent_window']), 3)} "
+        f"[{_num(as_float(record['frac_td_in_quiescent_window_wilson_lo']), 3)}, "
+        f"{_num(as_float(record['frac_td_in_quiescent_window_wilson_hi']), 3)}] "
+        f"({n_quiet}/{record['n_touchdowns']})",
+        f"{_num(as_float(record['quiet_landings_per_listed']), 3)} "
+        f"[{_num(as_float(record['quiet_landings_per_listed_wilson_lo']), 3)}, "
+        f"{_num(as_float(record['quiet_landings_per_listed_wilson_hi']), 3)}] "
+        f"({n_quiet}/{record['n_listed']})",
+    ]
+
+
 def _is_skipped(record: Mapping[str, str]) -> bool:
     """Return whether a summary record is a cell with no flown episode."""
     return int(record["n_episodes"]) == 0
@@ -395,6 +515,7 @@ def render_success_vs_seastate(summary: Sequence[Mapping[str, str]], title: str)
         m: list(dict.fromkeys(r["run_seed"] for r in summary if r["method"] == m)) for m in methods
     }
     multi_pad = len(pads) > 1
+    quiet_v2 = bool(summary) and all(c in summary[0] for c in QUIET_COLUMNS)
     lines: list[str] = [f"# {title}", ""]
     lines += [f"- {caveat}" for caveat in _caveats(pads)]
     lines += [
@@ -402,11 +523,7 @@ def render_success_vs_seastate(summary: Sequence[Mapping[str, str]], title: str)
         "Wilson 95 % CI in brackets, then k/N. Success is never pooled across sea states.",
         "- `in-dist` is the fraction of the cell's episodes whose grid cell is in the "
         "development pool (P3-D2); `id` SS6 and every 90 deg episode are outside it.",
-        "- `quiet td` is, of the touched-down episodes, the fraction whose TRUE deck satisfied "
-        "the permissive quiescence predicate (`rld.control.quiescence.QuiescenceRule`: 12 "
-        "samples 1/30 s apart, |roll| <= 3.0 deg, |pitch| <= 2.0 deg, |pad v_z| <= 0.16 m/s "
-        "model) starting at the contact touchdown; evaluation ground truth, never a "
-        "controller input. `–` when nothing touched down.",
+        *(_QUIET_BULLETS_V2 if quiet_v2 else _QUIET_BULLETS_V1),
         "- `oracle_gated` is privileged: it reads the true future deck motion. It bounds commit "
         "timing under the gated rule, not success, and is never a deployable result.",
     ]
@@ -416,6 +533,16 @@ def render_success_vs_seastate(summary: Sequence[Mapping[str, str]], title: str)
             "observation plus the past-only history of dmf's six clean ship channels (an ideal "
             "noise-free, zero-latency ship motion reference unit that never reaches past the "
             "runner's clock) and a dmf forecaster fitted on the P3-D2 dev pool (P4-D1, P4-D3)."
+        )
+    secondary = [m for m in methods if secondary_seed_arm(m) is not None]
+    if secondary:
+        lines.append(
+            "- Rows labelled **secondary: seed sensitivity** ("
+            + ", ".join(f"`{m}`" for m in secondary)
+            + ") fly a primary controller with its forecaster fitted at another training "
+            "seed than the selected one (P4-D2), on the same episodes. They show how much the "
+            "primary arm's numbers depend on the forecaster's seed. They are not additional "
+            "methods, and they never replace the primary row."
         )
     if multi_pad:
         lines.append(
@@ -467,7 +594,11 @@ def render_success_vs_seastate(summary: Sequence[Mapping[str, str]], title: str)
                 "t_td p50 (s)",
                 "disagree",
                 "tunnel",
-                "quiet td",
+                *(
+                    ("td n", "quiet \\| td", "quiet landings / listed")
+                    if quiet_v2
+                    else ("quiet td",)
+                ),
                 "in-dist",
             ]
             lines += ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
@@ -493,7 +624,11 @@ def render_success_vs_seastate(summary: Sequence[Mapping[str, str]], title: str)
                             _num(as_float(rec["time_to_touchdown_p50_s"]), 2),
                             f"{rec['disagreement_n']}/{rec['n_episodes']}",
                             rec["tunnelling_n"],
-                            _num(as_float(rec["frac_td_in_quiescent_window"]), 3),
+                            *(
+                                _quiet_cells(rec)
+                                if quiet_v2
+                                else [_num(as_float(rec["frac_td_in_quiescent_window"]), 3)]
+                            ),
                             _num(as_float(rec["frac_in_training_distribution"]), 3),
                         ]
                         lines.append("| " + " | ".join(str(v) for v in values) + " |")
@@ -509,6 +644,12 @@ def summary_columns(extra: Iterable[str]) -> list[str]:
 
     Returns:
         :data:`SUMMARY_KEY_COLUMNS` + :data:`~rld.eval.metrics.CELL_METRIC_COLUMNS` +
-        :data:`CELL_STATUS_COLUMNS` + ``extra``.
+        :data:`CELL_STATUS_COLUMNS` + :data:`QUIET_COLUMNS` + ``extra``.
     """
-    return [*SUMMARY_KEY_COLUMNS, *CELL_METRIC_COLUMNS, *CELL_STATUS_COLUMNS, *extra]
+    return [
+        *SUMMARY_KEY_COLUMNS,
+        *CELL_METRIC_COLUMNS,
+        *CELL_STATUS_COLUMNS,
+        *QUIET_COLUMNS,
+        *extra,
+    ]

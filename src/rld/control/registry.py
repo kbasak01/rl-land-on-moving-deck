@@ -9,7 +9,10 @@ controller's test asserts that its own flags agree with the registry's.
 ``gated_forecast`` and ``gated_forecast_tcn`` are one class and law
 (:class:`rld.control.gated_forecast.GatedForecast`) with two forecasters (dmf's
 ``residual_interval`` and ``tcn_quantile``). They need the feed and are **not** privileged:
-the feed never reaches beyond the runner's clock.
+the feed never reaches beyond the runner's clock. ``gated_forecast_tcn_seed0`` and
+``gated_forecast_tcn_seed2`` are the same controller with the two ``tcn_quantile`` seeds the
+pre-registered rule did not select (P4-D2): a **secondary** seed-sensitivity arm, never the
+``gated_forecast_tcn`` result.
 
 ``pid_feedforward_lowvz`` is ``pid_feedforward``'s class and law with a second gain set,
 selected from the existing tuning log (P3-D3 amendment); it is not a new control law.
@@ -27,7 +30,12 @@ from rld.control.base import Controller, ControlSpec
 from rld.control.config import CONTROL_CONFIG_DIR
 from rld.control.feedforward import make_pid_feedforward, make_pid_feedforward_lowvz
 from rld.control.gated import make_gated
-from rld.control.gated_forecast import make_gated_forecast, make_gated_forecast_tcn
+from rld.control.gated_forecast import (
+    make_gated_forecast,
+    make_gated_forecast_tcn,
+    make_gated_forecast_tcn_seed0,
+    make_gated_forecast_tcn_seed2,
+)
 from rld.control.oracle import make_oracle_gated
 from rld.control.pid import make_pid_track_descend
 
@@ -127,6 +135,28 @@ REGISTRY: dict[str, RegistryEntry] = {
             needs_motion_feed=True,
             description=(
                 "gated_forecast with dmf tcn_quantile's 90 % band (past-only ship-motion feed)"
+            ),
+        ),
+        RegistryEntry(
+            name="gated_forecast_tcn_seed0",
+            factory=make_gated_forecast_tcn_seed0,
+            config_path=CONTROL_CONFIG_DIR / "gated_forecast_tcn_seed0.yaml",
+            privileged=False,
+            needs_motion_feed=True,
+            description=(
+                "secondary: seed sensitivity -- gated_forecast_tcn with tcn_quantile seed 0 "
+                "(not the selected seed 1, P4-D2)"
+            ),
+        ),
+        RegistryEntry(
+            name="gated_forecast_tcn_seed2",
+            factory=make_gated_forecast_tcn_seed2,
+            config_path=CONTROL_CONFIG_DIR / "gated_forecast_tcn_seed2.yaml",
+            privileged=False,
+            needs_motion_feed=True,
+            description=(
+                "secondary: seed sensitivity -- gated_forecast_tcn with tcn_quantile seed 2 "
+                "(not the selected seed 1, P4-D2)"
             ),
         ),
     )

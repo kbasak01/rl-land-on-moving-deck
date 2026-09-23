@@ -578,6 +578,234 @@
         "sha256": "4f80b93c69ce3c19fd6fc755bd5d5cb5c043d6c7c32f91310137c493b61be70f",
         "wall_time_s": 10.073145324000507
       }
+    },
+    "tcn_quantile_seed0": {
+      "role": "seed-sensitivity, not selected",
+      "parent": "tcn_quantile",
+      "seed": 0,
+      "kind": "sgd",
+      "dmf_name": "tcn",
+      "head": "quantile",
+      "model_config": "configs/model/tcn_quantile.yaml",
+      "fitted_on": "dev_pool/train",
+      "tuned_on": "dev_pool/tune",
+      "selected_seed_of_parent": 1,
+      "tune_loss": 0.05036048744842823,
+      "tune_loss_name": "pinball",
+      "best_epoch": 59,
+      "epochs_run": 60,
+      "checkpoint": "tcn_quantile/seeds/tcn_quantile_seed0.pt",
+      "checkpoint_sha256": "58720aad4e318bb222930c37af485604c0d3466a107aeeb8252f947d29bad3a2",
+      "state_dict_sha256": "93ddfc92cfa16b36d17efe1b2b87fa693aaced548b38b47cd83414e94f982595",
+      "onnx_sha256": "344ef7eb7cb9361988762afccc9e7b404f6114eb0e37379f9a7eaf603825a6f2",
+      "norm_stats_sha256": "79dc10fbab6f32376078bd3d29e9d848cbcc5d781d82d10cd0038b4f7dfd29f8",
+      "meta_sha256": "0ce6875e6005f9a5a4b3fc1dc0b8673ffc074a87f08f68d6464d1e0ebc7b546e",
+      "parity": {
+        "criterion": "max_abs_err < tolerance * max(1, |y|_max) (dmf P7-D3), worst draw",
+        "passed": true,
+        "passed_absolute": true,
+        "worst": {
+          "max_abs_err": 5.7220458984375e-05,
+          "mean_abs_err": 2.353187629020267e-06,
+          "n_windows": 1000,
+          "tolerance": 0.0001,
+          "passed": true,
+          "output_abs_max": 105.9045639038086,
+          "scale": 105.9045639038086,
+          "scaled_tolerance": 0.01059045639038086,
+          "passed_absolute": true,
+          "seed": 1,
+          "provider": "CPUExecutionProvider"
+        },
+        "draws": [
+          {
+            "seed": 20260909,
+            "max_abs_err": 5.7220458984375e-05
+          },
+          {
+            "seed": 0,
+            "max_abs_err": 6.103515625e-05
+          },
+          {
+            "seed": 1,
+            "max_abs_err": 5.7220458984375e-05
+          },
+          {
+            "seed": 7,
+            "max_abs_err": 4.57763671875e-05
+          },
+          {
+            "seed": 42,
+            "max_abs_err": 6.103515625e-05
+          }
+        ]
+      },
+      "conformal_padvz": {
+        "file": "conformal_padvz.npz",
+        "method": "split conformal, dmf.eval.conformal conventions: CQR ratio score on the interval-arithmetic pad-v_z box, gamma = ceil((n+1)(1-alpha))-th order statistic per lead, band = point +- gamma * box half-width",
+        "alpha": 0.1,
+        "calibrated_on": "dev_pool/tune",
+        "n_windows": 21813,
+        "window_stride": 7,
+        "n_realizations": 135,
+        "calibration_vessel": "frigate",
+        "pads": {
+          "aft": {
+            "x_frac": -0.4,
+            "x_full_m_calibrated": -49.6,
+            "gamma_at_lead_full_s": {
+              "1.0": 0.501923,
+              "2.0": 0.613764,
+              "3.0": 0.603306,
+              "5.0": 0.642339,
+              "7.0": 0.620267,
+              "8.0": 0.623996,
+              "9.3": 0.617539,
+              "10.0": 0.607538,
+              "15.0": 0.598003
+            },
+            "gamma_min": 0.4674137202028911,
+            "gamma_max": 0.645497700798437,
+            "gamma_realization_level_median": 0.3034519139666152,
+            "n_half_widths_floored": 0
+          },
+          "cg": {
+            "x_frac": 0.0,
+            "x_full_m_calibrated": 0.0,
+            "gamma_at_lead_full_s": {
+              "1.0": 0.6281,
+              "2.0": 0.632042,
+              "3.0": 0.726261,
+              "5.0": 0.787015,
+              "7.0": 0.843797,
+              "8.0": 0.893623,
+              "9.3": 0.923601,
+              "10.0": 0.928724,
+              "15.0": 0.980821
+            },
+            "gamma_min": 0.5516774672825915,
+            "gamma_max": 0.980820924355079,
+            "gamma_realization_level_median": 0.44713694297356393,
+            "n_half_widths_floored": 0
+          }
+        },
+        "sha256": "7810749bdc2837521def6982584bf9224bea180c0c8359b7847a0d6b2f756cac",
+        "wall_time_s": 11.022223473999475
+      }
+    },
+    "tcn_quantile_seed2": {
+      "role": "seed-sensitivity, not selected",
+      "parent": "tcn_quantile",
+      "seed": 2,
+      "kind": "sgd",
+      "dmf_name": "tcn",
+      "head": "quantile",
+      "model_config": "configs/model/tcn_quantile.yaml",
+      "fitted_on": "dev_pool/train",
+      "tuned_on": "dev_pool/tune",
+      "selected_seed_of_parent": 1,
+      "tune_loss": 0.05065739185469993,
+      "tune_loss_name": "pinball",
+      "best_epoch": 59,
+      "epochs_run": 60,
+      "checkpoint": "tcn_quantile/seeds/tcn_quantile_seed2.pt",
+      "checkpoint_sha256": "a58d480c7f952eeed6e5914c593d72dc61b1347ba64f60f7ea52b44235478b8f",
+      "state_dict_sha256": "34f91c7905648696abc55819404d4141c002e238ce33050e21dfacf4dcfb2e86",
+      "onnx_sha256": "73c35a08bd05a7073a5efa6ca4a580914c93c5f9ee51933b73438dd0f6d4bba1",
+      "norm_stats_sha256": "79dc10fbab6f32376078bd3d29e9d848cbcc5d781d82d10cd0038b4f7dfd29f8",
+      "meta_sha256": "f0206f1fa5997bf26c569b7a618824c9cd92849db2e9ab705d2b29c62e59919f",
+      "parity": {
+        "criterion": "max_abs_err < tolerance * max(1, |y|_max) (dmf P7-D3), worst draw",
+        "passed": true,
+        "passed_absolute": true,
+        "worst": {
+          "max_abs_err": 9.5367431640625e-05,
+          "mean_abs_err": 2.3961623462727637e-06,
+          "n_windows": 1000,
+          "tolerance": 0.0001,
+          "passed": true,
+          "output_abs_max": 155.39500427246094,
+          "scale": 155.39500427246094,
+          "scaled_tolerance": 0.015539500427246094,
+          "passed_absolute": true,
+          "seed": 0,
+          "provider": "CPUExecutionProvider"
+        },
+        "draws": [
+          {
+            "seed": 20260909,
+            "max_abs_err": 6.4849853515625e-05
+          },
+          {
+            "seed": 0,
+            "max_abs_err": 9.5367431640625e-05
+          },
+          {
+            "seed": 1,
+            "max_abs_err": 6.103515625e-05
+          },
+          {
+            "seed": 7,
+            "max_abs_err": 5.14984130859375e-05
+          },
+          {
+            "seed": 42,
+            "max_abs_err": 6.866455078125e-05
+          }
+        ]
+      },
+      "conformal_padvz": {
+        "file": "conformal_padvz.npz",
+        "method": "split conformal, dmf.eval.conformal conventions: CQR ratio score on the interval-arithmetic pad-v_z box, gamma = ceil((n+1)(1-alpha))-th order statistic per lead, band = point +- gamma * box half-width",
+        "alpha": 0.1,
+        "calibrated_on": "dev_pool/tune",
+        "n_windows": 21813,
+        "window_stride": 7,
+        "n_realizations": 135,
+        "calibration_vessel": "frigate",
+        "pads": {
+          "aft": {
+            "x_frac": -0.4,
+            "x_full_m_calibrated": -49.6,
+            "gamma_at_lead_full_s": {
+              "1.0": 0.538477,
+              "2.0": 0.611149,
+              "3.0": 0.620537,
+              "5.0": 0.641207,
+              "7.0": 0.628284,
+              "8.0": 0.635797,
+              "9.3": 0.629833,
+              "10.0": 0.621911,
+              "15.0": 0.606022
+            },
+            "gamma_min": 0.48494845507179496,
+            "gamma_max": 0.6576300104998756,
+            "gamma_realization_level_median": 0.30747155207066335,
+            "n_half_widths_floored": 0
+          },
+          "cg": {
+            "x_frac": 0.0,
+            "x_full_m_calibrated": 0.0,
+            "gamma_at_lead_full_s": {
+              "1.0": 0.662771,
+              "2.0": 0.632185,
+              "3.0": 0.722297,
+              "5.0": 0.773162,
+              "7.0": 0.855445,
+              "8.0": 0.898784,
+              "9.3": 0.924616,
+              "10.0": 0.945013,
+              "15.0": 0.98182
+            },
+            "gamma_min": 0.5988861398901435,
+            "gamma_max": 0.9890030795071405,
+            "gamma_realization_level_median": 0.4455767576175963,
+            "n_half_widths_floored": 0
+          }
+        },
+        "sha256": "9939d6a38e4e9c7ca40ab4bbb768316bfaf6e709cdc74ace399080c8b43d092b",
+        "wall_time_s": 9.992535261997546
+      }
     }
   }
 }

@@ -34,6 +34,20 @@ line, with the reference ``episodes.csv``, and the per-method counts go into
 committed value differs from the live one (``oracle_gated.yaml``'s comment-only relabel).
 A mismatch is reported and the exit status is 1, after everything is written.
 
+The check is **not applicable** (recorded, never a failure) when no evaluated method is in
+the reference, e.g. a run of seed-sensitivity arms only.
+
+``--carry-from DIR`` copies other methods' rows from an earlier run (``results/e02``) into
+this run's ``episodes.csv`` and tables without re-flying them, so the baselines and the
+primary arm are printed beside new secondary arms (CLAUDE.md non-negotiable 4). Only rows on
+this run's pads and episodes are carried; the source's run-wide provenance must equal this
+run's; ``run_info.json["carried"]`` records the source files' SHA-256s.
+
+``--resummarise`` recomputes ``summary.csv`` from ``episodes.csv`` (no episode flown) to add
+columns introduced after the run; every existing column must come out byte-identical, and
+``run_info.json["resummarised"]`` records it. ``run_info.json`` carries ``git_sha``,
+``git_dirty`` and ``git_dirty_paths`` from the start of every run.
+
 Scratch options -- refused when ``--out-dir`` lies under ``results/``: ``--lists`` (a subset
 of lists), ``--per-cell K`` (the first K listed episodes of each cell), and
 ``--config-override NAME=PATH`` (fly a controller from another YAML, e.g. one pointing at a
@@ -93,7 +107,13 @@ from rld.eval.report import (
     summary_columns,
     write_rows,
 )
-from rld.eval.reproduce import compare_to_reference, summary_provenance_differences
+from rld.eval.reproduce import (
+    compare_to_reference,
+    git_state,
+    resummarise,
+    skip_records_from_summary,
+    summary_provenance_differences,
+)
 from rld.eval.runner import (
     DEFAULT_CHUNK,
     DEFAULT_WORKERS,
@@ -116,6 +136,10 @@ PHASE3_CONTROLLERS: tuple[str, ...] = (
 
 #: Document titles by output directory name; the committed e01 title is unchanged.
 TITLES: dict[str, str] = {
+    "e02_tcn_seeds": (
+        "e02 secondary: seed sensitivity of gated_forecast_tcn (tcn_quantile refitted at "
+        "other seeds), aft pad and pad at CG, beside e02's rows (frozen episode lists)"
+    ),
     "e01": "e01 — classical baselines: success versus sea state (frozen episode lists)",
     "e02": (
         "e02 — baselines, gated and forecast-gated controllers, aft pad and pad at CG: "
@@ -149,6 +173,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reference-dir", type=Path, default=REPO_ROOT / "results" / "e01")
     parser.add_argument("--title", default=None, help="document title (default: by out-dir)")
     parser.add_argument("--render-only", action="store_true")
+    parser.add_argument(
+        "--resummarise",
+        action="store_true",
+        help="recompute summary.csv from episodes.csv (no episode flown; old columns unchanged)",
+    )
+    parser.add_argument(
+        "--carry-from",
+        type=Path,
+        default=None,
+        help="copy (not re-fly) other methods' rows from this run dir into the tables",
+    )
+    parser.add_argument(
+        "--carry-methods", nargs="+", default=None, help="methods to carry (default: all)"
+    )
     scratch = parser.add_argument_group("scratch only (refused under results/)")
     scratch.add_argument("--lists", nargs="+", default=None, help="subset of list names")
     scratch.add_argument("--per-cell", type=int, default=None, help="first K episodes per cell")
@@ -208,12 +246,90 @@ def parse_overrides(items: Sequence[str]) -> dict[str, Path]:
     return out
 
 
+def do_resummarise(out_dir: Path, title: str) -> None:
+    """Recompute ``summary.csv`` from ``episodes.csv``, check old columns, re-render."""
+    rows, columns, added = resummarise(out_dir)
+    write_rows(out_dir / "summary.csv", rows, columns)
+    render(out_dir, title)
+    info_path = out_dir / "run_info.json"
+    info = json.loads(info_path.read_text(encoding="utf-8")) if info_path.is_file() else {}
+    info.setdefault("resummarised", []).append(
+        {
+            "timestamp_utc": environment_provenance(REPO_ROOT)["timestamp_utc"],
+            **git_state(REPO_ROOT),
+            "added_columns": added,
+            "existing_columns_unchanged": True,
+            "episodes_flown": 0,
+        }
+    )
+    info_path.write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
+    print(f"{len(rows)} summary rows recomputed; added {added}; every existing column unchanged")
+
+
+def carry_rows(
+    source: Path,
+    methods: Sequence[str] | None,
+    flown: Sequence[str],
+    pads: set[str],
+    episodes: Sequence[ListedEpisode],
+    provenance: dict[str, str],
+) -> tuple[list[dict[str, str]], list[str], dict[str, dict[str, str]], list[SkipRecord]]:
+    """Return rows of already-evaluated methods to print beside new ones, without re-flying.
+
+    Only rows on the pads and listed episodes of this run are carried. The source's
+    run-wide provenance must equal this run's (same package versions, configs and lists), or
+    the carried rows would be mislabelled; their per-method provenance is the source's.
+
+    Returns:
+        ``(rows, methods, per-method provenance, skip records)``.
+    """
+    src_rows = read_rows(source / "episodes.csv")
+    src_summary = read_rows(source / "summary.csv")
+    if tuple(src_rows[0]) != EPISODE_COLUMNS:
+        raise SystemExit(f"{source}/episodes.csv: columns differ from EPISODE_COLUMNS")
+    available = list(dict.fromkeys(r["method"] for r in src_summary))
+    chosen = [m for m in available if m not in flown and (methods is None or m in methods)]
+    if methods is not None and set(methods) - set(chosen):
+        raise SystemExit(f"cannot carry {sorted(set(methods) - set(chosen))} from {source}")
+    for column, value in provenance.items():
+        if src_summary[0].get(column) != value:
+            raise SystemExit(
+                f"--carry-from {source}: {column} {src_summary[0].get(column)!r} != live {value!r}"
+            )
+    keys = {(e.regime, e.ss, str(e.index)) for e in episodes}
+    regimes = {e.regime for e in episodes}
+    rows = [
+        r
+        for r in src_rows
+        if r["method"] in chosen and r["pad"] in pads and (r["regime"], r["ss"], r["index"]) in keys
+    ]
+    per_method = {
+        m: {c: next(r[c] for r in src_summary if r["method"] == m) for c in PROVENANCE_COLUMNS}
+        for m in chosen
+    }
+    # A source cell that was not run is not run here either, for this run's listed N.
+    listed: dict[tuple[str, str], int] = {}
+    for e in episodes:
+        listed[(e.regime, e.ss)] = listed.get((e.regime, e.ss), 0) + 1
+    cells = {
+        (s.method, s.pad, s.regime, s.ss): s
+        for s in skip_records_from_summary(src_summary)
+        if s.method in chosen and s.pad in pads and s.regime in regimes
+    }
+    skips = [s for s in cells.values() for _ in range(listed.get((s.regime, s.ss), 0))]
+    return rows, chosen, per_method, skips
+
+
 def main() -> int:
     args = parse_args()
     title = title_for(args.out_dir, args.title)
     if args.render_only:
         render(args.out_dir, title)
         return 0
+    if args.resummarise:
+        do_resummarise(args.out_dir, title)
+        return 0
+    git = git_state(REPO_ROOT)
     unknown = sorted(set(args.controllers) - set(REGISTRY))
     if unknown:
         raise SystemExit(f"unknown controllers {unknown}")
@@ -288,7 +404,26 @@ def main() -> int:
             "driver": cfgs.landing.platform.driver,
         },
     )
-    summary = summarise(rows, order, per_method, provenance, skipped)
+    carried: dict[str, object] | None = None
+    method_order = list(order)
+    if args.carry_from is not None:
+        pads = {"aft" if p is None else p for p in PAD_ARMS[args.pad]}
+        c_rows, c_methods, c_prov, c_skips = carry_rows(
+            args.carry_from, args.carry_methods, order, pads, episodes, provenance
+        )
+        rows = [*c_rows, *rows]
+        method_order = [*c_methods, *order]
+        per_method = {**c_prov, **per_method}
+        skipped = [*c_skips, *skipped]
+        carried = {
+            "from": str(args.carry_from),
+            "episodes_sha256": file_sha256(args.carry_from / "episodes.csv"),
+            "summary_sha256": file_sha256(args.carry_from / "summary.csv"),
+            "methods": c_methods,
+            "rows": len(c_rows),
+            "note": "copied from the source run, not re-flown",
+        }
+    summary = summarise(rows, method_order, per_method, provenance, skipped)
     extra_cols = [*PROVENANCE_COLUMNS, *provenance]
 
     write_rows(args.out_dir / "episodes.csv", rows, EPISODE_COLUMNS)
@@ -309,6 +444,8 @@ def main() -> int:
         "wall_s": round(wall_s, 1),
         "episodes": len(rows),
         "controllers": order,
+        **git,
+        "carried": carried,
         "pads": ["aft" if p is None else p for p in PAD_ARMS[args.pad]],
         "lists": names,
         "per_cell": args.per_cell,
@@ -339,8 +476,11 @@ def main() -> int:
     print(f"{len(rows)} episode rows, {len(summary)} summary rows -> {args.out_dir}")
     print(f"{wall_s:.1f} s wall with {args.workers} worker(s)")
     if reference_check is not None:
-        print(f"reference check vs {ref_dir}: all_identical={reference_check['all_identical']}")
-        if not reference_check["all_identical"]:
+        print(
+            f"reference check vs {ref_dir}: applicable={reference_check['applicable']} "
+            f"all_identical={reference_check['all_identical']}"
+        )
+        if reference_check["applicable"] and not reference_check["all_identical"]:
             print("REFERENCE MISMATCH: see run_info.json['reference_check']", file=sys.stderr)
             return 1
     return 0

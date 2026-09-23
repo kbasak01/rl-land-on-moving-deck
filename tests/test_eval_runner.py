@@ -92,6 +92,8 @@ def test_registry_privilege_flags() -> None:
         "oracle_gated": True,
         "gated_forecast": False,
         "gated_forecast_tcn": False,
+        "gated_forecast_tcn_seed0": False,
+        "gated_forecast_tcn_seed2": False,
     }
     for name in REGISTRY:
         assert controller_spec(name).privileged is REGISTRY[name].privileged

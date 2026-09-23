@@ -1383,8 +1383,17 @@ by construction, and the manifest flags this.
 **The feed (`rld.deck.forecast.ShipMotionFeed`).**
 - *What it is.* The past-only history of dmf's 6 clean channels, full scale. It is an ideal
   (noise-free, zero-latency) ship motion reference unit, **past only**.
-- *Privilege.* It is not privileged. Observation noise is `enabled: false` in every evaluation, so
-  it gives `gated_forecast` no information advantage over `gated`.
+- *Privilege.* It is not privileged **with respect to the future**: it never reads deck motion after
+  the current time.
+  - It is, however, an **extra ideal ship motion sensor** that `gated` and the PID controllers do
+    not have. It supplies 4.0 s model of pre-episode history, plus heave, roll and pitch rates. The
+    observation vector carries neither.
+  - Comparisons between forecast-using and non-forecast methods (`gated_forecast*` against `gated`
+    here; `ppo_forecast` against `ppo` in Phase 6) therefore compare different sensor suites as well
+    as different decision rules.
+  - Observation noise is `enabled: false` in every evaluation, and this feed is noise-free too.
+  - *Correction (2026-09-23, results-skeptic M3).* An earlier version of this bullet said the feed
+    gives "no information advantage over `gated`". That was wrong.
 - *Clock.* The runner advances its clock with `advance_to` before each `act`. The source is never
   evaluated at a time later than the clock.
 - *Grid.* Samples lie on dmf's absolute 10 Hz full-scale grid, bit-identical to the corpus `t`
@@ -1470,6 +1479,73 @@ covers it, at a lead of 8.0 s full with the calibrated band.
 - Unlike `residual_interval`, the TCN arm is therefore expected to commit at the aft pad.
 - Its pass rate falls well below the base rate as sea state rises.
 - This is evidence, not a new scored prediction. Expectation 3 stands as written.
+
+*Erratum (2026-09-23, results-skeptic M2; the text above is left as written).* The heading's
+"before any `gated_forecast` episode on the frozen lists" is **not true as written**.
+
+What happened:
+- A wiring smoke run at about 10:23 local (`run_info` 14:23 UTC, in the session scratchpad) flew
+  366 frozen-list episodes. It took the first 3 episodes of each `id` and `unseen_vessel` cell,
+  plus 3 static, for all 7 controllers × 2 pads.
+- That included 24 aft `gated_forecast` episodes with the real `residual_interval` model, all
+  timeouts. It also included a smoke-checkpoint `tcn_quantile`, whose numbers are meaningless.
+- P4-D4a was written into the working tree in the same period. Its order relative to the smoke run
+  is not established.
+- P4-D4a was first committed in `9e8061f` at 14:25:57 local. The addendum's "14:30" stamp is wrong:
+  it was written shortly before that commit. e02 started at 14:26:24.
+
+What this means:
+- Expectation 1 should be read as recorded after, or at best alongside, a 24-episode smoke run.
+- It was grounded in the tune-pool band analysis (the fraction of forecasts whose band passes was
+  0.000 at SS3–SS5), which predates both.
+- Nothing was tuned after the smoke run. For the same episodes, the smoke rows and the e02 rows are
+  identical in outcome, steps, touchdown time, touchdown speed and `td_in_quiescent_window`, as
+  checked by the results-skeptic.
+
+**Other records for P4-D2 and P4-D3.**
+- *TCN training.* Every TCN fit ran to the 60-epoch cap without early stopping: best epochs 59/56/56
+  for `tcn` and 59/59/59 for `tcn_quantile`. So the models may be under-trained against dmf's own
+  budget, which was kept unchanged. Tune losses: `tcn` MSE 0.09920 / 0.09950 / 0.09911, selected
+  seed 2; `tcn_quantile` pinball 0.05036 / 0.05034 / 0.05066, selected seed 1.
+- *Seed sensitivity (user decision, 2026-09-23).* The top two `tcn_quantile` seeds differ by 0.03 %
+  in tune loss, so the selection is effectively arbitrary. Seeds 0 and 2 are therefore evaluated as
+  **secondary** arms, `gated_forecast_tcn_seed0` and `gated_forecast_tcn_seed2`, in
+  `results/e02_tcn_seeds/`. The pre-registered selected seed stays the primary arm.
+- *Coverage.* The coverage P4-D3 quotes (0.896–0.903) is in-sample, because the band was
+  calibrated on the same tune pool. Its 2-fold out-of-sample counterpart is in
+  `results/forecast/coverage.csv`.
+- *Deferred.* Plan task 3's forecast block for the RL observation is **deferred to Phase 6**:
+  - `rld.deck.forecast.leads_full_s` provides pad z and v_z at leads of 1/2/3 s full scale;
+  - it is not wired into `rld.envs.observation`;
+  - it is not a Gate 4 criterion.
+
+### P4-D5 — `oracle_gated` relabel and its config hash (2026-09-23)
+
+Plan note (c) and P3-D4 asked for this relabel. The stale "upper bound" labels were replaced by
+"commit-timing oracle (privileged)":
+- in `configs/control/oracle_gated.yaml` line 1;
+- in the `registry.py` module docstring and description;
+- in the `PrivilegedContext` and `oracle.py` docstrings;
+- in one test docstring.
+
+All of these are comment and docstring changes only. No value or behaviour changed.
+
+**The hash.** `oracle_gated.yaml` SHA-256 moved:
+- old: `e8bc4efd5615cea1a07f05f0368f226b682e11d78968b2a8d6b03c8f0862b4f1`, which remains in the 14
+  `oracle_gated` rows of `results/e01/summary.csv` and is left as committed;
+- new: `5daca06e217fc765611af98af2fc70f312ca4cbdafffe408d5827eae8138bce3`, carried by
+  `results/e02/summary.csv`.
+
+`resolved_gains_sha256` is unchanged at `dec9793d…`.
+
+**Evidence the change is harmless.** `results/e02/run_info.json["reference_check"]` shows the 2 800
+aft `oracle_gated` rows of e02 byte-identical to `results/e01/episodes.csv`, and likewise for all
+five Phase 3 controllers (14 000 of 14 000 rows). The only provenance difference it lists is this
+hash.
+
+`results/e01/success_vs_seastate.md` was re-rendered with `--render-only`. Only the `oracle_gated`
+label lines changed. A render-time guard (`rld.eval.report`) now refuses any output containing
+"upper bound".
 
 **The pad-at-CG control arm.** It evaluates `gated`, `oracle_gated`, both forecast-gated arms and
 the three PID baselines on the **same** frozen episodes, with the pad at the CG. It is added here
