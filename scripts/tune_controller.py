@@ -8,8 +8,9 @@ Usage::
     # tune both, same budget, same draw (writes results/e01/tuning_<controller>.csv)
     python scripts/tune_controller.py --controller pid_track_descend pid_feedforward
 
-    # after the winners are in configs/control/*.yaml: every registry controller at its
-    # committed configs on the same tune draw (writes results/e01/tune_pool_final.csv)
+    # after the winners are in configs/control/*.yaml: the five Phase 3 controllers
+    # (rld.control.tuning.FINAL_CONTROLLERS, pinned) at their committed configs on the same
+    # tune draw (writes results/e01/tune_pool_final.csv)
     python scripts/tune_controller.py --final
 
 Tune pool only: frigate, SS3-SS5, heading != 90 deg, seed ordinals 27-31. Never the frozen
@@ -28,9 +29,10 @@ from typing import Any
 
 from dmf.config import load_sim
 
-from rld.control.registry import REGISTRY, entry
+from rld.control.registry import entry
 from rld.control.tuning import (
     DEFAULT_CHUNK,
+    FINAL_CONTROLLERS,
     TUNED_CONTROLLERS,
     TUNING_CONFIG,
     TrialResult,
@@ -79,8 +81,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--final",
         action="store_true",
-        help="instead of tuning, run every registry controller at its committed "
-        "configs on the tune draw and write tune_pool_final.csv",
+        help="instead of tuning, run the five Phase 3 controllers (FINAL_CONTROLLERS) at "
+        "their committed configs on the tune draw and write tune_pool_final.csv",
     )
     parser.add_argument("--out-dir", type=Path, default=REPO_ROOT / "results" / "e01")
     parser.add_argument("--workers", type=int, default=30)
@@ -155,7 +157,7 @@ def main() -> int:
 
     if args.final:
         results: list[TrialResult] = []
-        for name in REGISTRY:
+        for name in FINAL_CONTROLLERS:
             started = time.perf_counter()
             rows = run_trials(name, [{}], episodes, cfgs, workers=args.workers, chunk=args.chunk)
             result = summarise_trial(name, 0, {}, rows, tuning.sea_states)

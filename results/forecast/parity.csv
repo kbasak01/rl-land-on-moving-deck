@@ -1,0 +1,17 @@
+model,check,n_windows,max_abs_err,worst_err_over_tol,tolerance,gated,passed,smoke_fit
+dlinear_ols,a_corpus_ort,48,4.339e-07,0.00133,"1e-4*max(1,|y|) elementwise, full-scale corpus units",True,True,False
+dlinear_ols,a_corpus_torch,48,4.339e-07,0.00133,"1e-4*max(1,|y|) elementwise, full-scale corpus units",True,True,False
+dlinear_ols,b_bridge_feed_ort,12,1.158e-06,0.00289,"1e-4*max(1,|y|) elementwise, full-scale corpus units",True,True,False
+dlinear_ols,"b_bridge_feed_ort_without_float32_cast (measured, not gated)",12,1.050e-03,8.67943,"1e-4*max(1,|y|) elementwise, full-scale corpus units",False,False,False
+residual_interval,a_corpus_ort,48,5.496e-07,0.00166,"1e-4*max(1,|y|) elementwise, full-scale corpus units",True,True,False
+residual_interval,a_corpus_torch,48,5.496e-07,0.00166,"1e-4*max(1,|y|) elementwise, full-scale corpus units",True,True,False
+residual_interval,b_bridge_feed_ort,12,1.293e-06,0.00328,"1e-4*max(1,|y|) elementwise, full-scale corpus units",True,True,False
+residual_interval,"b_bridge_feed_ort_without_float32_cast (measured, not gated)",12,1.050e-03,9.8302,"1e-4*max(1,|y|) elementwise, full-scale corpus units",False,False,False
+tcn,a_corpus_ort,48,2.759e-06,0.02759,"1e-4*max(1,|y|) elementwise, full-scale corpus units",True,True,False
+tcn,a_corpus_torch,48,4.288e-07,0.00137,"1e-4*max(1,|y|) elementwise, full-scale corpus units",True,True,False
+tcn,b_bridge_feed_ort,12,3.663e-06,0.01474,"1e-4*max(1,|y|) elementwise, full-scale corpus units",True,True,False
+tcn,"b_bridge_feed_ort_without_float32_cast (measured, not gated)",12,4.649e-06,0.02891,"1e-4*max(1,|y|) elementwise, full-scale corpus units",False,True,False
+tcn_quantile,a_corpus_ort,48,4.128e-06,0.04128,"1e-4*max(1,|y|) elementwise, full-scale corpus units",True,True,False
+tcn_quantile,a_corpus_torch,48,5.089e-07,0.00141,"1e-4*max(1,|y|) elementwise, full-scale corpus units",True,True,False
+tcn_quantile,b_bridge_feed_ort,12,4.086e-06,0.01572,"1e-4*max(1,|y|) elementwise, full-scale corpus units",True,True,False
+tcn_quantile,"b_bridge_feed_ort_without_float32_cast (measured, not gated)",12,4.102e-06,0.01936,"1e-4*max(1,|y|) elementwise, full-scale corpus units",False,True,False

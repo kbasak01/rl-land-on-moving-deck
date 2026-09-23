@@ -162,7 +162,7 @@ def test_step_clock_counts_and_catches_a_missed_reset():
 
 
 def test_registry_marks_exactly_the_oracle_privileged():
-    """One privileged entry, and each controller's own flag agrees with the registry."""
+    """One privileged entry, and each controller's own flags agree with the registry."""
     spec = committed_spec()
     assert list(REGISTRY) == [
         "pid_track_descend",
@@ -170,10 +170,33 @@ def test_registry_marks_exactly_the_oracle_privileged():
         "pid_feedforward_lowvz",
         "gated",
         "oracle_gated",
+        "gated_forecast",
+        "gated_forecast_tcn",
     ]
     assert [n for n, e in REGISTRY.items() if e.privileged] == ["oracle_gated"]
+    assert [n for n, e in REGISTRY.items() if e.needs_motion_feed] == [
+        "gated_forecast",
+        "gated_forecast_tcn",
+    ]
     for name, item in REGISTRY.items():
         assert item.config_path.is_file()
         controller = make_controller(name, spec)
         assert controller.name == name
         assert controller.privileged == item.privileged
+        assert controller.needs_motion_feed == item.needs_motion_feed
+
+
+def test_controllers_without_the_feed_refuse_one():
+    """Handing a ship-motion feed to a controller that does not consume it is a runner bug.
+
+    The object's type does not matter: ``reset`` refuses anything that is not ``None``
+    before looking at it, so a sentinel stands in for a real feed.
+    """
+    spec = committed_spec()
+    sentinel = object()
+    for name, item in REGISTRY.items():
+        if item.needs_motion_feed:
+            continue
+        controller = make_controller(name, spec)
+        with pytest.raises(ValueError, match="ShipMotionFeed"):
+            controller.reset(0, None, sentinel)  # type: ignore[arg-type]

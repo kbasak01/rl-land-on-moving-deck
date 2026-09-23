@@ -1,0 +1,13 @@
+model,smoke_fit,part,backend,intra_op_threads,steps,ctrl_hz_model,control_period_ms,p50_ms,p99_ms,mean_ms,max_ms,onnxruntime,cpu,host,omp_num_threads
+dlinear_ols,False,advance_to,onnxruntime-cpu,1,2000,30.0,33.333,0.5637,0.7614,0.5102,0.9269,1.29.0,x86_64,DATTA-BASAK,1
+dlinear_ols,False,forecast,onnxruntime-cpu,1,2000,30.0,33.333,0.3102,0.4213,0.3208,0.4997,1.29.0,x86_64,DATTA-BASAK,1
+dlinear_ols,False,total,onnxruntime-cpu,1,2000,30.0,33.333,0.8724,1.137,0.831,1.3377,1.29.0,x86_64,DATTA-BASAK,1
+residual_interval,False,advance_to,onnxruntime-cpu,1,2000,30.0,33.333,0.5693,0.7725,0.5179,0.844,1.29.0,x86_64,DATTA-BASAK,1
+residual_interval,False,forecast,onnxruntime-cpu,1,2000,30.0,33.333,0.5276,0.6782,0.5403,0.7617,1.29.0,x86_64,DATTA-BASAK,1
+residual_interval,False,total,onnxruntime-cpu,1,2000,30.0,33.333,1.0854,1.4056,1.0582,1.5721,1.29.0,x86_64,DATTA-BASAK,1
+tcn,False,advance_to,onnxruntime-cpu,1,2000,30.0,33.333,0.5754,0.7954,0.5248,1.1839,1.29.0,x86_64,DATTA-BASAK,1
+tcn,False,forecast,onnxruntime-cpu,1,2000,30.0,33.333,0.967,1.234,0.9915,2.1736,1.29.0,x86_64,DATTA-BASAK,1
+tcn,False,total,onnxruntime-cpu,1,2000,30.0,33.333,1.5289,1.9723,1.5163,3.0195,1.29.0,x86_64,DATTA-BASAK,1
+tcn_quantile,False,advance_to,onnxruntime-cpu,1,2000,30.0,33.333,0.577,0.7672,0.5218,0.9727,1.29.0,x86_64,DATTA-BASAK,1
+tcn_quantile,False,forecast,onnxruntime-cpu,1,2000,30.0,33.333,1.2491,1.5326,1.2712,2.0656,1.29.0,x86_64,DATTA-BASAK,1
+tcn_quantile,False,total,onnxruntime-cpu,1,2000,30.0,33.333,1.8075,2.219,1.793,2.7306,1.29.0,x86_64,DATTA-BASAK,1

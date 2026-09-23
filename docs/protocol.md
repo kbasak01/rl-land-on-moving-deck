@@ -1311,6 +1311,171 @@ Success fractions:
   (SHA-256 of `episodes.csv` `c5852090…`, identical to the committed file). Phase 7's
   `make eval` records the second worker count in `run_info.json`.
 
+## Phase 4
+
+### P4-D1 — Forecasters are fitted on the development pool, not on dmf's `id` train partition (2026-09-23)
+
+*Decision (user, 2026-09-23).* `dlinear_ols`, `residual_interval`, `tcn` and `tcn_quantile` are
+fitted on `rld.deck.splits.dev_pool(sim_cfg)[0]`:
+- 729 realizations: frigate, SS3–SS5, 45/135/180°, 0/6/12 kn, seed ordinals 0–26;
+- canonical key-list SHA-256 `346b50fa…`.
+
+`dev_pool()[1]` is used for early stopping, seed selection and every calibration:
+- 135 realizations, seed ordinals 27–31;
+- SHA-256 `ea4a2cf2…`.
+
+The full key lists and hashes are in `results/forecast/fit_keys.json` and
+`results/forecast/fit_manifest.json`.
+
+*Reason.* The kickoff prompt and plan task 1 said "fit on the `id` regime". dmf's `id` train
+partition is frigate seeds 0–26 over **all** sea states and headings, 1 296 realizations. It
+therefore contains SS6 and 90° realizations, and those are `unseen_seastate`-test and
+`unseen_heading`-test episodes on the frozen lists (P3-D2). The plan's Phase 4 note (a) supersedes
+the task text.
+
+*How dmf is driven.* dmf selects training data by regime name only.
+`rld.deck.forecast_fit` therefore uses dmf as a library:
+- it builds a `dmf.data.splits.Split` whose `train_keys` / `val_keys` are the two pools (label
+  `dev_pool`);
+- it uses dmf's own dataset, fitting, export and parity code, unmodified.
+
+The corpus is regenerated with dmf's `generate_corpus.py` into `artifacts/dmf/corpus`:
+- 2 304 realizations, 1.11 GB, manifest SHA-256 `64ff4a17…`;
+- the dmf submodule SHA is `e9fa15cc…`, unchanged;
+- `third_party/` is untouched (`git status` clean).
+
+*Test.* `tests/test_deck_forecast.py` reads the fitted keys back and checks them against the
+manifest hashes. It asserts that both pools are disjoint from every realization in all five
+`results/episodes/` lists.
+
+### P4-D2 — Model set, seeds, selection and what is stored (2026-09-23)
+
+**Models and configs.** Every model uses dmf's own configs: `configs/model/*.yaml` and
+`configs/data/default.yaml`, with SHA-256s in the manifest.
+
+| model | head | how it is fitted | train settings from |
+|---|---|---|---|
+| `dlinear_ols` | point | closed form | `e02_deep.yaml` |
+| `residual_interval` | quantile | DLinear-OLS point plus empirical 5/95 % residual quantiles fitted on the tune pool; the band's width does not depend on the input | `e03_probabilistic.yaml` |
+| `tcn` | point | AdamW, bf16, 60-epoch cap, batch 1024, lr 2e-3 | `e02_deep.yaml` |
+| `tcn_quantile` | 9-level fan | same as `tcn` | `e03_probabilistic.yaml` |
+
+**TCN seeds.** Seeds 0, 1 and 2 (dmf's minimum). Each seed gets its own data loader, shuffled by
+that seed.
+- *Selection rule, fixed here before any fit finished:* the deployed checkpoint is the seed with
+  the lowest tune-pool loss (MSE for `tcn`, pinball loss for `tcn_quantile`).
+- The losses of all seeds are recorded in the manifest.
+
+**What is stored.** dmf does not store `NormStats`, and never saves DLinear-OLS. So each
+`artifacts/dmf/<model>/` holds:
+- `state_dict.pt`;
+- `norm_stats.npz`, the per-channel train-partition std that dmf divides by. dmf de-means each
+  window by its own mean;
+- `model.onnx`, from `dmf.deploy.export_onnx`;
+- `conformal_padvz.npz` (P4-D3);
+- `meta.json`, which holds the SHA-256 of every file and is verified on load.
+
+torch↔ORT parity is checked with `dmf.deploy.parity`. `residual_interval`'s tune loss is in-sample
+by construction, and the manifest flags this.
+
+### P4-D3 — Online adapter semantics (2026-09-23)
+
+**The feed (`rld.deck.forecast.ShipMotionFeed`).**
+- *What it is.* The past-only history of dmf's 6 clean channels, full scale. It is an ideal
+  (noise-free, zero-latency) ship motion reference unit, **past only**.
+- *Privilege.* It is not privileged. Observation noise is `enabled: false` in every evaluation, so
+  it gives `gated_forecast` no information advantage over `gated`.
+- *Clock.* The runner advances its clock with `advance_to` before each `act`. The source is never
+  evaluated at a time later than the clock.
+- *Grid.* Samples lie on dmf's absolute 10 Hz full-scale grid, bit-identical to the corpus `t`
+  column. The 200-sample ring buffer is pre-filled from `[t0 − 4.0 s, t0]` model, i.e. before the
+  episode (P2-D7).
+- *Where it cannot run.* The static list has no vessel, so the feed cannot be built on it.
+
+**The float32 cast.** The adapter reproduces dmf's pipeline including the corpus's float32 storage
+cast.
+- Without the cast, bridge-fed parity is 8.7× (`dlinear_ols`) and 9.8× (`residual_interval`) the
+  `1e-4·max(1,|y|)` tolerance.
+- The cause is the model's conditioning: DLinear-OLS `remainder` rows have L1 norms up to 6 512.
+- The uncast figure is recorded, non-gated, in `results/forecast/parity.csv`.
+
+**Pad quantities.** For a centreline pad, `z = heave + x·sin(pitch)` and
+`v_z = heave_rate + x·cos(pitch)·pitch_rate`. They are converted to model units at z × λ and
+v_z × √λ.
+
+**The pad-v_z band: a conformal-calibrated box** (user decision, 2026-09-23).
+- *Construction.*
+  - Take the interval-arithmetic box from the channel bands, which is exact and conservative.
+  - Rescale its half-width about the point by one split-conformal γ per lead.
+  - Fit γ on the tune pool to 90 % pad-v_z coverage. dmf's conventions apply: the score, the
+    `ceil((n+1)(1−α))` order statistic, α = 0.1.
+  - Do this per model and per pad.
+- *Why not the raw box.* The raw box assumes the heave-rate and lever-arm terms are independent.
+  So it over-covers at the aft pad (0.91–0.99).
+- *The γ values for `residual_interval`.* Aft γ = 0.61–0.76; CG γ = 1.00.
+- *Pad matching.* Pads are matched by lever arm as a fraction of vessel length. The s175 aft pad
+  therefore uses the frigate-calibrated γ, a transfer under the vessel shift like the forecaster
+  itself.
+- *What stays uncalibrated.* Roll and pitch keep the model's native 5/95 % bands. Pad z keeps the
+  raw box; no controller reads it.
+- *Coverage.* Calibrated pooled coverage is 0.896–0.903 at every lead and pad. But the band has one
+  width for every sea state, so it under-covers at SS5 (0.81 aft, 0.74 CG at 9.3 s full). See
+  `results/forecast/coverage.csv`.
+
+**`gated_forecast` and `gated_forecast_tcn`.** These use the shared `QuiescenceRule` (P3-D3
+amendment) unchanged:
+- 12 samples, 1/30 s apart, from `t_td = t + h / descent_rate`, the oracle's law, which is now a
+  shared helper.
+- The band is read by linear interpolation of the **forecast** on its 50 Hz model grid. This is an
+  interpolation of predictions, not of deck motion.
+- `max(|lo|, |hi|)` per sample is handed to `verdict`. This is dmf's interval rule: the whole 90 %
+  band inside ±limit.
+- A window past the 3.0 s-model horizon is not quiescent.
+
+**Rates and cost.**
+- One new sample arrives every 0.02 s model, 1–2 per 30 Hz control step.
+- On CPU ORT with 1 thread, a step costs p50 0.86 ms (`dlinear_ols`) and 1.04 ms
+  (`residual_interval`), against the 33.3 ms control period (`results/forecast/cost.csv`).
+
+### P4-D4a — Pre-registered expectation for the forecast-gated arms (2026-09-23, before any `gated_forecast` episode on the frozen lists)
+
+**Evidence.** `results/forecast/band_feasibility.csv`: `residual_interval` on the tune pool, leads
+7.0 / 8.0 / 9.3 s full, which is where `gated_forecast`'s window sits.
+- At the **aft** pad, the calibrated pad-v_z band is 0.35–0.36 m/s model wide at those leads. The
+  permissive limit ±0.16 leaves a window only 0.32 m/s wide. So the fraction of forecasts that pass
+  is **0.000** at SS3, SS4 and SS5, under every construction tried.
+- The true future passes all three limits 0.95 / 0.77 / 0.45 of the time (SS3 / SS4 / SS5).
+- At the **CG**, the band passes 0.92 / 0.69 / 0.38, against a true base rate of 0.96 / 0.88 / 0.59.
+
+**Expectations, recorded before the run:**
+1. `gated_forecast` (`residual_interval`) at the **aft** pad times out on ≥ 95 % of episodes in
+   every regime × sea-state cell. This is a property of a fixed-width band at 7–9 s full-scale
+   leads, not of the deck. If it holds, it is reported as found and not fixed after the fact.
+2. With the pad at the CG, the same controller commits. Its timeout fraction rises with sea
+   state. No numeric prediction is made.
+3. `gated_forecast_tcn` (`tcn_quantile`): no numeric prediction is made. Its band depends on the
+   input and may pass in calm windows.
+
+*Addendum (2026-09-23, 14:30, after the TCN fits and before any e02 episode).* The `tcn_quantile`
+fits finished, and the selected checkpoint is seed 1. The same `band_feasibility.csv` analysis now
+covers it, at a lead of 8.0 s full with the calibrated band.
+
+| aft pad, lead 8.0 s full | SS3 | SS4 | SS5 |
+|---|---|---|---|
+| calibrated band, median width (m/s model) | 0.061 | 0.113 | 0.198 |
+| pad-v_z coverage | 0.91 | 0.90 | 0.89 |
+| all three quantities inside, `tcn_quantile` band | 0.93 | 0.57 | 0.17 |
+| all three quantities inside, true future (base rate) | 0.95 | 0.77 | 0.45 |
+
+- Unlike `residual_interval`, the TCN arm is therefore expected to commit at the aft pad.
+- Its pass rate falls well below the base rate as sea state rises.
+- This is evidence, not a new scored prediction. Expectation 3 stands as written.
+
+**The pad-at-CG control arm.** It evaluates `gated`, `oracle_gated`, both forecast-gated arms and
+the three PID baselines on the **same** frozen episodes, with the pad at the CG. It is added here
+because aft-pad v_z carries dmf's roll/pitch–heave phase defect (CLAUDE.md). It is a control, not
+a new evaluation list.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|

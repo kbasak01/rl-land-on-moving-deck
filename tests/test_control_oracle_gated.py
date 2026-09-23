@@ -1,4 +1,4 @@
-"""``oracle_gated``: the privileged upper bound on commit timing.
+"""``oracle_gated``: the commit-timing oracle (privileged).
 
 Contract checks (shape and bounds, determinism under reset, static-pad landing), and the
 three properties that keep it honest:
@@ -22,7 +22,9 @@ import pytest
 from _control_helpers import (
     assert_actions_in_space,
     committed_spec,
+    deck_normal,
     feed,
+    quiescence_windows,
     run_episode,
     synthetic_obs,
 )
@@ -123,32 +125,6 @@ def test_static_pad_landing_succeeds(landing_env, static_motion):
         assert record.outcome == "success", (seed, record.as_row())
 
 
-def _normal(roll_deg: float, pitch_deg: float) -> tuple[float, float, float]:
-    """P1-D2's unit deck normal from dmf-sign roll and pitch, degrees in."""
-    r, p = np.radians(roll_deg), np.radians(pitch_deg)
-    return (-np.sin(p) * np.cos(r), -np.sin(r), np.cos(p) * np.cos(r))
-
-
-def _windows(rng: np.random.Generator, limits, n: int) -> list[tuple[np.ndarray, ...]]:
-    """Deck windows (roll deg, pitch deg, pad v_z m/s), ``n`` samples each.
-
-    Every value is either well inside its limit (<= 0.9x) or well outside (1.1-2x), so
-    float32 rounding in the observation cannot flip a sample. Half the windows are all
-    quiet; the rest carry one violation in one channel at a random position.
-    """
-    scale = np.array([limits.roll_deg, limits.pitch_deg, limits.pad_vz_m_s])
-    out = []
-    for k in range(40):
-        values = rng.uniform(-0.9, 0.9, size=(n, 3)) * scale
-        if k % 2:
-            j, c = int(rng.integers(n)), int(rng.integers(3))
-            if k in (1, 3):
-                j = 0 if k == 1 else n - 1  # the window's edges
-            values[j, c] = rng.choice([-1.0, 1.0]) * rng.uniform(1.1, 2.0) * scale[c]
-        out.append((values[:, 0], values[:, 1], values[:, 2]))
-    return out
-
-
 def test_oracle_and_gated_give_the_same_verdict_on_the_same_window(env_obs_cfg):
     """The oracle's predicate IS gated's: same count, spacing, thresholds and v_z.
 
@@ -169,7 +145,7 @@ def test_oracle_and_gated_give_the_same_verdict_on_the_same_window(env_obs_cfg):
     size = 3001
     dt = 1.0 / 240.0
     verdicts = []
-    for roll, pitch, vz in _windows(np.random.default_rng(20260922), gated.limits, n):
+    for roll, pitch, vz in quiescence_windows(np.random.default_rng(20260922), gated.limits, n):
         expected = rule.verdict(roll, pitch, vz)
 
         # gated: the window is its observed past, ending now.
@@ -178,7 +154,7 @@ def test_oracle_and_gated_give_the_same_verdict_on_the_same_window(env_obs_cfg):
                 env_obs_cfg,
                 rel_position_w=(0.0, 0.0, -hover),
                 deck_velocity_w=(0.0, 0.0, float(vz[j])),
-                normal_w=_normal(float(roll[j]), float(pitch[j])),
+                normal_w=deck_normal(float(roll[j]), float(pitch[j])),
                 height_m=hover,
             )
             for j in range(n)
@@ -194,7 +170,7 @@ def test_oracle_and_gated_give_the_same_verdict_on_the_same_window(env_obs_cfg):
         start = int(np.ceil(t_td / dt - 1e-9))
         index = start + stride * np.arange(n)
         roll_all[index], pitch_all[index], vz_all[index] = roll, pitch, vz
-        normal = np.array([_normal(r, q) for r, q in zip(roll_all, pitch_all, strict=True)])
+        normal = np.array([deck_normal(r, q) for r, q in zip(roll_all, pitch_all, strict=True)])
         context = PrivilegedContext(
             t0_model_s=10.0,
             physics_dt_s=dt,

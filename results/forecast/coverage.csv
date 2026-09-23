@@ -1,0 +1,289 @@
+model,smoke_fit,pool,band,pad,quantity,units,ss,lead_full_s,lead_model_s,nominal,coverage,mean_width,median_width,n_windows,calibrated_on_this_pool
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,all,1.0,0.2,0.9,0.90072,0.023155,0.023155,38205,True
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,all,2.0,0.4,0.9,0.90124,0.220992,0.220992,38205,True
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,all,3.0,0.6,0.9,0.90145,0.73839,0.73839,38205,True
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,all,7.0,1.4,0.9,0.89965,2.173767,2.173767,38205,True
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,all,8.0,1.6,0.9,0.89946,2.903203,2.903203,38205,True
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,all,9.3,1.86,0.9,0.90166,2.758941,2.758941,38205,True
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,SS3,1.0,0.2,0.9,0.9693,0.023155,0.023155,12735,True
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,SS3,2.0,0.4,0.9,0.9682,0.220992,0.220992,12735,True
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,SS3,3.0,0.6,0.9,0.96631,0.73839,0.73839,12735,True
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,SS3,7.0,1.4,0.9,0.97212,2.173767,2.173767,12735,True
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,SS3,8.0,1.6,0.9,0.96828,2.903203,2.903203,12735,True
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,SS3,9.3,1.86,0.9,0.97118,2.758941,2.758941,12735,True
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,SS4,1.0,0.2,0.9,0.92768,0.023155,0.023155,12735,True
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,SS4,2.0,0.4,0.9,0.92846,0.220992,0.220992,12735,True
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,SS4,3.0,0.6,0.9,0.92886,0.73839,0.73839,12735,True
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,SS4,7.0,1.4,0.9,0.92839,2.173767,2.173767,12735,True
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,SS4,8.0,1.6,0.9,0.92886,2.903203,2.903203,12735,True
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,SS4,9.3,1.86,0.9,0.92988,2.758941,2.758941,12735,True
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,SS5,1.0,0.2,0.9,0.80518,0.023155,0.023155,12735,True
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,SS5,2.0,0.4,0.9,0.80707,0.220992,0.220992,12735,True
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,SS5,3.0,0.6,0.9,0.80919,0.73839,0.73839,12735,True
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,SS5,7.0,1.4,0.9,0.79843,2.173767,2.173767,12735,True
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,SS5,8.0,1.6,0.9,0.80126,2.903203,2.903203,12735,True
+residual_interval,False,dev_pool/tune,native,-,roll_deg,deg,SS5,9.3,1.86,0.9,0.80393,2.758941,2.758941,12735,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,all,1.0,0.2,0.9,0.89695,0.026928,0.026928,38205,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,all,2.0,0.4,0.9,0.89742,0.238178,0.238178,38205,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,all,3.0,0.6,0.9,0.89724,0.729864,0.729864,38205,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,all,7.0,1.4,0.9,0.89941,2.460521,2.460521,38205,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,all,8.0,1.6,0.9,0.9013,2.765191,2.765191,38205,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,all,9.3,1.86,0.9,0.89991,2.786536,2.786536,38205,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,SS3,1.0,0.2,0.9,0.97126,0.026928,0.026928,12735,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,SS3,2.0,0.4,0.9,0.97833,0.238178,0.238178,12735,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,SS3,3.0,0.6,0.9,0.98406,0.729864,0.729864,12735,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,SS3,7.0,1.4,0.9,0.98956,2.460521,2.460521,12735,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,SS3,8.0,1.6,0.9,0.99749,2.765191,2.765191,12735,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,SS3,9.3,1.86,0.9,0.99639,2.786536,2.786536,12735,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,SS4,1.0,0.2,0.9,0.92462,0.026928,0.026928,12735,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,SS4,2.0,0.4,0.9,0.92634,0.238178,0.238178,12735,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,SS4,3.0,0.6,0.9,0.93082,0.729864,0.729864,12735,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,SS4,7.0,1.4,0.9,0.92611,2.460521,2.460521,12735,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,SS4,8.0,1.6,0.9,0.94048,2.765191,2.765191,12735,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,SS4,9.3,1.86,0.9,0.93695,2.786536,2.786536,12735,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,SS5,1.0,0.2,0.9,0.79497,0.026928,0.026928,12735,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,SS5,2.0,0.4,0.9,0.78759,0.238178,0.238178,12735,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,SS5,3.0,0.6,0.9,0.77684,0.729864,0.729864,12735,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,SS5,7.0,1.4,0.9,0.78257,2.460521,2.460521,12735,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,SS5,8.0,1.6,0.9,0.76592,2.765191,2.765191,12735,True
+residual_interval,False,dev_pool/tune,native,-,pitch_deg,deg,SS5,9.3,1.86,0.9,0.76639,2.786536,2.786536,12735,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,all,1.0,0.2,0.9,0.92917,0.006934,0.006935,38205,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,all,2.0,0.4,0.9,0.93336,0.059596,0.059598,38205,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,all,3.0,0.6,0.9,0.941,0.17398,0.173983,38205,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,all,7.0,1.4,0.9,0.95435,0.54687,0.546869,38205,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,all,8.0,1.6,0.9,0.96924,0.560401,0.560402,38205,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,all,9.3,1.86,0.9,0.96671,0.567921,0.567922,38205,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS3,1.0,0.2,0.9,0.95799,0.006935,0.006935,12735,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS3,2.0,0.4,0.9,0.96592,0.059597,0.059598,12735,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS3,3.0,0.6,0.9,0.97354,0.173983,0.173983,12735,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS3,7.0,1.4,0.9,0.99081,0.546869,0.546869,12735,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS3,8.0,1.6,0.9,0.99874,0.560402,0.560402,12735,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS3,9.3,1.86,0.9,0.99812,0.567922,0.567922,12735,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS4,1.0,0.2,0.9,0.9331,0.006934,0.006935,12735,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS4,2.0,0.4,0.9,0.93812,0.059597,0.059598,12735,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS4,3.0,0.6,0.9,0.94613,0.173982,0.173983,12735,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS4,7.0,1.4,0.9,0.96364,0.54687,0.546869,12735,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS4,8.0,1.6,0.9,0.97943,0.560402,0.560402,12735,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS4,9.3,1.86,0.9,0.97715,0.567922,0.567922,12735,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS5,1.0,0.2,0.9,0.89643,0.006934,0.006935,12735,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS5,2.0,0.4,0.9,0.89603,0.059594,0.059598,12735,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS5,3.0,0.6,0.9,0.90334,0.173977,0.173983,12735,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS5,7.0,1.4,0.9,0.9086,0.54687,0.546869,12735,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS5,8.0,1.6,0.9,0.92956,0.560399,0.560402,12735,True
+residual_interval,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS5,9.3,1.86,0.9,0.92485,0.567919,0.567922,12735,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,all,1.0,0.2,0.9,0.90088,0.005277,0.005278,38205,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,all,2.0,0.4,0.9,0.90093,0.043868,0.043869,38205,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,all,3.0,0.6,0.9,0.90171,0.12406,0.124062,38205,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,all,7.0,1.4,0.9,0.8959,0.365481,0.36548,38205,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,all,8.0,1.6,0.9,0.89685,0.343107,0.343108,38205,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,all,9.3,1.86,0.9,0.8992,0.355546,0.355546,38205,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS3,1.0,0.2,0.9,0.94229,0.005277,0.005278,12735,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS3,2.0,0.4,0.9,0.94637,0.043869,0.043869,12735,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS3,3.0,0.6,0.9,0.95202,0.124062,0.124062,12735,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS3,7.0,1.4,0.9,0.96278,0.36548,0.36548,12735,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS3,8.0,1.6,0.9,0.97684,0.343108,0.343108,12735,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS3,9.3,1.86,0.9,0.97456,0.355546,0.355546,12735,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS4,1.0,0.2,0.9,0.90538,0.005277,0.005278,12735,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS4,2.0,0.4,0.9,0.90648,0.043868,0.043869,12735,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS4,3.0,0.6,0.9,0.90821,0.124061,0.124062,12735,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS4,7.0,1.4,0.9,0.90616,0.365481,0.36548,12735,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS4,8.0,1.6,0.9,0.90797,0.343108,0.343108,12735,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS4,9.3,1.86,0.9,0.91425,0.355546,0.355546,12735,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS5,1.0,0.2,0.9,0.85497,0.005277,0.005278,12735,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS5,2.0,0.4,0.9,0.84994,0.043866,0.043869,12735,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS5,3.0,0.6,0.9,0.84492,0.124058,0.124062,12735,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS5,7.0,1.4,0.9,0.81877,0.365481,0.36548,12735,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS5,8.0,1.6,0.9,0.80573,0.343106,0.343108,12735,True
+residual_interval,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS5,9.3,1.86,0.9,0.80879,0.355545,0.355546,12735,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,all,1.0,0.2,0.9,0.90158,0.001074,0.001074,38205,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,all,2.0,0.4,0.9,0.90294,0.009956,0.009956,38205,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,all,3.0,0.6,0.9,0.90137,0.031938,0.031938,38205,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,all,7.0,1.4,0.9,0.90124,0.109647,0.109647,38205,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,all,8.0,1.6,0.9,0.89857,0.132633,0.132633,38205,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,all,9.3,1.86,0.9,0.89941,0.130381,0.130381,38205,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS3,1.0,0.2,0.9,0.99686,0.001074,0.001074,12735,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS3,2.0,0.4,0.9,0.99859,0.009956,0.009956,12735,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS3,3.0,0.6,0.9,0.99937,0.031938,0.031938,12735,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS3,7.0,1.4,0.9,0.99929,0.109647,0.109647,12735,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS3,8.0,1.6,0.9,1.0,0.132633,0.132633,12735,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS3,9.3,1.86,0.9,1.0,0.130381,0.130381,12735,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS4,1.0,0.2,0.9,0.9565,0.001074,0.001074,12735,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS4,2.0,0.4,0.9,0.95964,0.009956,0.009956,12735,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS4,3.0,0.6,0.9,0.96254,0.031938,0.031938,12735,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS4,7.0,1.4,0.9,0.95367,0.109647,0.109647,12735,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS4,8.0,1.6,0.9,0.96569,0.132633,0.132633,12735,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS4,9.3,1.86,0.9,0.96294,0.130381,0.130381,12735,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS5,1.0,0.2,0.9,0.75139,0.001074,0.001074,12735,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS5,2.0,0.4,0.9,0.75061,0.009956,0.009956,12735,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS5,3.0,0.6,0.9,0.74221,0.031938,0.031938,12735,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS5,7.0,1.4,0.9,0.75077,0.109647,0.109647,12735,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS5,8.0,1.6,0.9,0.73004,0.132633,0.132633,12735,True
+residual_interval,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS5,9.3,1.86,0.9,0.7353,0.130381,0.130381,12735,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,all,1.0,0.2,0.9,0.90174,0.001074,0.001074,38205,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,all,2.0,0.4,0.9,0.90297,0.009958,0.009958,38205,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,all,3.0,0.6,0.9,0.90145,0.031953,0.031953,38205,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,all,7.0,1.4,0.9,0.90127,0.10965,0.10965,38205,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,all,8.0,1.6,0.9,0.8986,0.132643,0.132643,38205,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,all,9.3,1.86,0.9,0.89944,0.130406,0.130406,38205,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS3,1.0,0.2,0.9,0.99686,0.001074,0.001074,12735,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS3,2.0,0.4,0.9,0.99859,0.009958,0.009958,12735,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS3,3.0,0.6,0.9,0.99937,0.031953,0.031953,12735,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS3,7.0,1.4,0.9,0.99929,0.10965,0.10965,12735,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS3,8.0,1.6,0.9,1.0,0.132643,0.132643,12735,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS3,9.3,1.86,0.9,1.0,0.130406,0.130406,12735,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS4,1.0,0.2,0.9,0.95665,0.001074,0.001074,12735,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS4,2.0,0.4,0.9,0.95964,0.009958,0.009958,12735,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS4,3.0,0.6,0.9,0.96254,0.031953,0.031953,12735,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS4,7.0,1.4,0.9,0.95367,0.10965,0.10965,12735,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS4,8.0,1.6,0.9,0.96569,0.132643,0.132643,12735,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS4,9.3,1.86,0.9,0.96294,0.130406,0.130406,12735,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS5,1.0,0.2,0.9,0.75171,0.001074,0.001074,12735,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS5,2.0,0.4,0.9,0.75069,0.009958,0.009958,12735,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS5,3.0,0.6,0.9,0.74244,0.031953,0.031953,12735,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS5,7.0,1.4,0.9,0.75084,0.10965,0.10965,12735,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS5,8.0,1.6,0.9,0.73011,0.132643,0.132643,12735,True
+residual_interval,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS5,9.3,1.86,0.9,0.73537,0.130406,0.130406,12735,True
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,all,1.0,0.2,0.9,0.99024,0.06337,0.052526,38205,False
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,all,2.0,0.4,0.9,0.99128,0.119301,0.098063,38205,False
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,all,3.0,0.6,0.9,0.98916,0.164352,0.127146,38205,False
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,all,7.0,1.4,0.9,0.95843,0.304835,0.210173,38205,False
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,all,8.0,1.6,0.9,0.94556,0.364156,0.249926,38205,False
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,all,9.3,1.86,0.9,0.94459,0.454409,0.315925,38205,False
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,SS3,1.0,0.2,0.9,0.98885,0.029996,0.027932,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,SS3,2.0,0.4,0.9,0.99215,0.059056,0.060041,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,SS3,3.0,0.6,0.9,0.99144,0.077368,0.084093,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,SS3,7.0,1.4,0.9,0.97958,0.13872,0.15677,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,SS3,8.0,1.6,0.9,0.96773,0.164491,0.189559,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,SS3,9.3,1.86,0.9,0.97181,0.207391,0.240681,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,SS4,1.0,0.2,0.9,0.9934,0.054776,0.052128,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,SS4,2.0,0.4,0.9,0.99435,0.105204,0.103845,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,SS4,3.0,0.6,0.9,0.99215,0.14498,0.149486,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,SS4,7.0,1.4,0.9,0.95948,0.273274,0.282859,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,SS4,8.0,1.6,0.9,0.94707,0.327212,0.348795,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,SS4,9.3,1.86,0.9,0.94441,0.409008,0.435653,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,SS5,1.0,0.2,0.9,0.98846,0.105337,0.100077,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,SS5,2.0,0.4,0.9,0.98736,0.193644,0.194727,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,SS5,3.0,0.6,0.9,0.9839,0.270708,0.281806,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,SS5,7.0,1.4,0.9,0.93624,0.50251,0.523189,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,SS5,8.0,1.6,0.9,0.92187,0.600764,0.644117,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,roll_deg,deg,SS5,9.3,1.86,0.9,0.91755,0.746828,0.800349,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,all,1.0,0.2,0.9,0.98163,0.068351,0.057298,38205,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,all,2.0,0.4,0.9,0.98301,0.157503,0.127504,38205,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,all,3.0,0.6,0.9,0.98218,0.231712,0.188822,38205,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,all,7.0,1.4,0.9,0.93336,0.811424,0.652923,38205,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,all,8.0,1.6,0.9,0.92695,0.976742,0.760494,38205,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,all,9.3,1.86,0.9,0.91938,1.237316,1.005521,38205,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,SS3,1.0,0.2,0.9,0.98312,0.035851,0.033303,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,SS3,2.0,0.4,0.9,0.98822,0.07509,0.06733,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,SS3,3.0,0.6,0.9,0.98948,0.107434,0.098079,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,SS3,7.0,1.4,0.9,0.95901,0.388189,0.345236,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,SS3,8.0,1.6,0.9,0.95092,0.456225,0.426379,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,SS3,9.3,1.86,0.9,0.94111,0.599283,0.595614,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,SS4,1.0,0.2,0.9,0.98382,0.061442,0.057125,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,SS4,2.0,0.4,0.9,0.98626,0.14188,0.12815,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,SS4,3.0,0.6,0.9,0.98634,0.2075,0.193987,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,SS4,7.0,1.4,0.9,0.93404,0.746477,0.682043,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,SS4,8.0,1.6,0.9,0.92988,0.90272,0.817518,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,SS4,9.3,1.86,0.9,0.92124,1.148002,1.144536,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,SS5,1.0,0.2,0.9,0.97793,0.107761,0.101179,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,SS5,2.0,0.4,0.9,0.97456,0.255539,0.237918,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,SS5,3.0,0.6,0.9,0.97071,0.380204,0.364383,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,SS5,7.0,1.4,0.9,0.90703,1.299608,1.233192,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,SS5,8.0,1.6,0.9,0.90004,1.571281,1.45658,12735,False
+tcn_quantile,False,dev_pool/tune,native,-,pitch_deg,deg,SS5,9.3,1.86,0.9,0.8958,1.964662,1.99544,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,all,1.0,0.2,0.9,0.99636,0.020948,0.017017,38205,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,all,2.0,0.4,0.9,0.99066,0.03587,0.029208,38205,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,all,3.0,0.6,0.9,0.9889,0.053865,0.042529,38205,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,all,7.0,1.4,0.9,0.98697,0.17101,0.130453,38205,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,all,8.0,1.6,0.9,0.98665,0.211073,0.171439,38205,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,all,9.3,1.86,0.9,0.98647,0.258996,0.204353,38205,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS3,1.0,0.2,0.9,0.99819,0.010506,0.009165,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS3,2.0,0.4,0.9,0.99388,0.017781,0.016051,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS3,3.0,0.6,0.9,0.99238,0.027889,0.021174,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS3,7.0,1.4,0.9,0.99011,0.083614,0.072762,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS3,8.0,1.6,0.9,0.98869,0.10661,0.0978,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS3,9.3,1.86,0.9,0.9905,0.124749,0.115473,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS4,1.0,0.2,0.9,0.99623,0.018921,0.016628,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS4,2.0,0.4,0.9,0.9927,0.032458,0.02964,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS4,3.0,0.6,0.9,0.99042,0.049322,0.038651,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS4,7.0,1.4,0.9,0.98759,0.158878,0.13258,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS4,8.0,1.6,0.9,0.98634,0.196473,0.181254,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS4,9.3,1.86,0.9,0.98673,0.240749,0.220787,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS5,1.0,0.2,0.9,0.99466,0.033418,0.030464,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS5,2.0,0.4,0.9,0.98539,0.057371,0.053857,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS5,3.0,0.6,0.9,0.9839,0.084383,0.070378,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS5,7.0,1.4,0.9,0.9832,0.270536,0.225828,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS5,8.0,1.6,0.9,0.98492,0.330137,0.317781,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,aft,pad_vz,m/s model,SS5,9.3,1.86,0.9,0.98218,0.41149,0.392795,12735,False
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,all,1.0,0.2,0.9,0.89884,0.010704,0.008695,38205,True
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,all,2.0,0.4,0.9,0.89999,0.021655,0.017633,38205,True
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,all,3.0,0.6,0.9,0.89873,0.032311,0.025511,38205,True
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,all,7.0,1.4,0.9,0.90109,0.106983,0.081611,38205,True
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,all,8.0,1.6,0.9,0.89946,0.1317,0.106969,38205,True
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,all,9.3,1.86,0.9,0.89842,0.161295,0.127265,38205,True
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS3,1.0,0.2,0.9,0.90082,0.005368,0.004683,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS3,2.0,0.4,0.9,0.9104,0.010735,0.00969,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS3,3.0,0.6,0.9,0.90428,0.016729,0.012701,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS3,7.0,1.4,0.9,0.91135,0.052309,0.045519,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS3,8.0,1.6,0.9,0.9075,0.06652,0.061022,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS3,9.3,1.86,0.9,0.90687,0.07769,0.071914,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS4,1.0,0.2,0.9,0.90852,0.009668,0.008497,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS4,2.0,0.4,0.9,0.91512,0.019596,0.017894,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS4,3.0,0.6,0.9,0.91111,0.029586,0.023185,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS4,7.0,1.4,0.9,0.9042,0.099393,0.082942,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS4,8.0,1.6,0.9,0.90153,0.12259,0.113094,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS4,9.3,1.86,0.9,0.89894,0.149931,0.1375,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS5,1.0,0.2,0.9,0.88716,0.017076,0.015567,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS5,2.0,0.4,0.9,0.87444,0.034636,0.032514,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS5,3.0,0.6,0.9,0.8808,0.050618,0.042216,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS5,7.0,1.4,0.9,0.88771,0.169246,0.141277,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS5,8.0,1.6,0.9,0.88936,0.205989,0.19828,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,aft,pad_vz,m/s model,SS5,9.3,1.86,0.9,0.88944,0.256264,0.244621,12735,True
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,all,1.0,0.2,0.9,0.99147,0.004454,0.003651,38205,False
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,all,2.0,0.4,0.9,0.98291,0.00702,0.005715,38205,False
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,all,3.0,0.6,0.9,0.97296,0.010419,0.008302,38205,False
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,all,7.0,1.4,0.9,0.94116,0.031863,0.023229,38205,False
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,all,8.0,1.6,0.9,0.9293,0.039203,0.030745,38205,False
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,all,9.3,1.86,0.9,0.9198,0.05019,0.037214,38205,False
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS3,1.0,0.2,0.9,0.99309,0.002067,0.00194,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS3,2.0,0.4,0.9,0.98367,0.003104,0.002903,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS3,3.0,0.6,0.9,0.98759,0.00449,0.004048,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS3,7.0,1.4,0.9,0.966,0.013419,0.011779,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS3,8.0,1.6,0.9,0.95964,0.017225,0.014647,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS3,9.3,1.86,0.9,0.9554,0.021175,0.017089,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS4,1.0,0.2,0.9,0.99207,0.003957,0.003712,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS4,2.0,0.4,0.9,0.98626,0.006231,0.005873,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS4,3.0,0.6,0.9,0.97652,0.009329,0.008582,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS4,7.0,1.4,0.9,0.94299,0.029071,0.026082,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS4,8.0,1.6,0.9,0.92933,0.035825,0.033844,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS4,9.3,1.86,0.9,0.91967,0.045957,0.040022,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS5,1.0,0.2,0.9,0.98924,0.007338,0.006992,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS5,2.0,0.4,0.9,0.9788,0.011726,0.011383,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS5,3.0,0.6,0.9,0.95477,0.017439,0.016609,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS5,7.0,1.4,0.9,0.91449,0.0531,0.047563,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS5,8.0,1.6,0.9,0.89894,0.064559,0.063042,12735,False
+tcn_quantile,False,dev_pool/tune,raw_box,cg,pad_vz,m/s model,SS5,9.3,1.86,0.9,0.88433,0.083437,0.073515,12735,False
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,all,1.0,0.2,0.9,0.90135,0.002719,0.002229,38205,True
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,all,2.0,0.4,0.9,0.90062,0.00468,0.00381,38205,True
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,all,3.0,0.6,0.9,0.90017,0.00745,0.005936,38205,True
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,all,7.0,1.4,0.9,0.89925,0.02701,0.019691,38205,True
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,all,8.0,1.6,0.9,0.90239,0.035258,0.027651,38205,True
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,all,9.3,1.86,0.9,0.8992,0.046556,0.03452,38205,True
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS3,1.0,0.2,0.9,0.90365,0.001262,0.001184,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS3,2.0,0.4,0.9,0.90137,0.002069,0.001936,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS3,3.0,0.6,0.9,0.92956,0.00321,0.002894,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS3,7.0,1.4,0.9,0.93263,0.011375,0.009985,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS3,8.0,1.6,0.9,0.93922,0.015492,0.013173,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS3,9.3,1.86,0.9,0.94142,0.019642,0.015852,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS4,1.0,0.2,0.9,0.91135,0.002415,0.002266,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS4,2.0,0.4,0.9,0.9159,0.004154,0.003915,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS4,3.0,0.6,0.9,0.91111,0.00667,0.006136,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS4,7.0,1.4,0.9,0.90082,0.024643,0.02211,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS4,8.0,1.6,0.9,0.90247,0.03222,0.030439,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS4,9.3,1.86,0.9,0.89784,0.042629,0.037124,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS5,1.0,0.2,0.9,0.88905,0.004479,0.004268,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS5,2.0,0.4,0.9,0.88457,0.007817,0.007589,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS5,3.0,0.6,0.9,0.85984,0.012468,0.011875,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS5,7.0,1.4,0.9,0.86431,0.045013,0.040319,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS5,8.0,1.6,0.9,0.86549,0.058062,0.056698,12735,True
+tcn_quantile,False,dev_pool/tune,conformal,cg,pad_vz,m/s model,SS5,9.3,1.86,0.9,0.85834,0.077396,0.068193,12735,True

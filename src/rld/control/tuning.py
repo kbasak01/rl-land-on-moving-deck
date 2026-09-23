@@ -69,6 +69,7 @@ from rld.envs.touchdown import OUTCOMES
 
 __all__ = [
     "DEFAULT_CHUNK",
+    "FINAL_CONTROLLERS",
     "PID_PARAMS",
     "TUNED_CONTROLLERS",
     "TUNING_CONFIG",
@@ -92,6 +93,21 @@ TUNING_CONFIG: Path = CONTROL_CONFIG_DIR / "tuning.yaml"
 
 #: Controllers this module tunes. ``gated``/``oracle_gated`` inherit ``pid_feedforward``.
 TUNED_CONTROLLERS: tuple[str, ...] = ("pid_track_descend", "pid_feedforward")
+
+#: The controllers ``scripts/tune_controller.py --final`` runs at their committed configs on
+#: the tune draw, in the row order of ``results/e01/tune_pool_final.csv``: the five Phase 3
+#: controllers, **pinned** rather than read from the registry. The registry has since grown
+#: (``gated_forecast``, ``gated_forecast_tcn``, Phase 4), and those need a
+#: :class:`~rld.deck.forecast.ShipMotionFeed` that this tuning loop does not build; iterating
+#: the registry would raise on them before ``tune_pool_final.csv`` was written. Pinning keeps
+#: the P3-D3 artefact reproducible and makes any addition an explicit, reviewed edit.
+FINAL_CONTROLLERS: tuple[str, ...] = (
+    "pid_track_descend",
+    "pid_feedforward",
+    "pid_feedforward_lowvz",
+    "gated",
+    "oracle_gated",
+)
 
 #: Search-space keys that belong to :class:`~rld.control.config.PidConfig`.
 PID_PARAMS: tuple[str, ...] = (
