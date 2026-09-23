@@ -1,0 +1,63 @@
+# Pure SAC, final runs (docs/protocol.md P3-D1 sections 5-6; plan Phase 5).
+#
+# Budget: 2 M env steps per seed, seeds 0-4 (P3-D1 section 5; NOT equal to PPO's 10 M --
+# every PPO-vs-SAC statement carries that confound). Hyperparameters are the rl-experiment
+# defaults UNTIL the pre-registered search (configs/rl/tune_sac.yaml) has run.
+#
+# device: SAC's device is measured CPU vs GPU once before launch, recorded in the protocol,
+# and then fixed here. Until then: cpu.
+#
+# Units: steps are env control steps (1/30 s model scale each). *_s fields are HOST seconds.
+
+method: sac
+run_group: sac                  # -> artifacts/runs/sac/<seed>/
+algo: sac
+total_steps: 2000000
+n_envs: 8
+vec_env: subproc
+device: cpu
+torch_threads: 1
+pad: aft
+
+policy:
+  width: 256
+  depth: 2
+  activation: relu
+
+ppo: null
+sac:
+  learning_rate: 3.0e-4
+  buffer_size: 1000000
+  batch_size: 256
+  tau: 0.005
+  gamma: 0.99                   # per 1/30 s control step
+  learning_starts: 10000        # uniform-random transitions before the first update
+  train_freq: 1                 # vector steps between updates
+  gradient_steps: -1            # one gradient step per transition collected (UTD = 1)
+  ent_coef: auto
+
+normalize:
+  norm_obs: true
+  norm_reward: false            # reward normalisation is PPO-only
+  clip_obs: 10.0
+  clip_reward: 10.0
+
+# Same tune-pool evaluation as ppo.yaml (the P3-D3 180-episode draw).
+eval:
+  interval_steps: 50000         # 40 evaluations over 2 M
+  n_envs: 8
+  tuning_config: configs/control/tuning.yaml
+  episodes_per_ss: null
+  deterministic: true
+
+curriculum:
+  enabled: true
+  stages: [SS3, SS4, SS5]
+  promote_success: 0.80
+  window_episodes: 100
+
+checkpoint_interval_steps: 250000
+status_interval_s: 60.0
+log_interval: 200                    # SB3 table every 200 episodes
+
+reward: {}

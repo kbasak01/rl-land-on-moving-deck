@@ -1,0 +1,42 @@
+# Pre-registered hyperparameter search for pure PPO (docs/protocol.md P3-D1 section 5).
+#
+# Budget: <= 20 trials (trial 0 = configs/rl/ppo.yaml unchanged; trials 1-19 = the first 19
+# points of ONE scrambled Sobol sequence over the dimensions below, seed `sobol_seed`),
+# each trained for 2 M env steps on the single training seed `trial_seed`, on the P3-D2
+# train pool with the curriculum, exactly like a final run.
+#
+# Score (pre-registered): the FINAL checkpoint on the fixed P3-D3 tune-pool draw (180
+# episodes, SS3-SS5, deterministic policy): mean success over the three sea states; ties
+# -> lower pooled p95 touchdown closing speed -> lower trial index. Failed trials are
+# listed and cannot win. Tune pool only; no frozen-list episode is touched.
+#
+# The reward block tunes WEIGHTS only (configs/env/reward.yaml); v_safe_m_s and
+# gate_height_m are the reward's structure and are rejected by the loader. The same reward
+# ranges are searched for SAC (tune_sac.yaml).
+#
+# Units: steps are env control steps (1/30 s model scale each); weights dimensionless.
+
+method: ppo
+base_config: configs/rl/ppo.yaml
+trials: 20
+sobol_seed: 20260927
+trial_seed: 0
+trial_steps: 2000000
+run_group: tune_ppo             # -> artifacts/runs/tune_ppo/trial_XX/0/
+results_dir: results/tune/ppo
+
+search_space:
+  learning_rate: {targets: [ppo.learning_rate], low: 1.0e-4, high: 1.0e-3, scale: log}
+  n_steps: {targets: [ppo.n_steps], choices: [512, 1024, 2048]}
+  batch_size: {targets: [ppo.batch_size], choices: [1024, 2048, 4096]}
+  n_epochs: {targets: [ppo.n_epochs], choices: [5, 10]}
+  ent_coef: {targets: [ppo.ent_coef], low: 0.0, high: 0.01}
+  net_width: {targets: [policy.width], choices: [128, 256, 512]}
+  # reward weights (shared ranges with tune_sac.yaml)
+  w_progress: {targets: [reward.w_progress], low: 5.0, high: 20.0}
+  w_vz: {targets: [reward.w_vz], low: 0.5, high: 8.0, scale: log}
+  w_smooth: {targets: [reward.w_smooth], low: 0.01, high: 0.2, scale: log}
+  w_time: {targets: [reward.w_time], low: 0.0, high: 0.03}
+  r_success: {targets: [reward.r_success], low: 25.0, high: 100.0}
+  r_fail: {targets: [reward.r_hard_landing, reward.r_off_pad, reward.r_bounce], low: 5.0, high: 30.0}
+  r_crash: {targets: [reward.r_crash], low: 10.0, high: 50.0}

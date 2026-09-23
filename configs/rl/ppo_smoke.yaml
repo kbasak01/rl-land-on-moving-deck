@@ -1,0 +1,64 @@
+# PPO smoke run (plan Phase 5 step 2): 200 k env steps, 16 workers, ~10 evaluations.
+# Checks plumbing and throughput, not learning: healthy = no crash or NaN, fps in the
+# P2-D8 band (514-4 610 steps/s at 16 workers, update excluded), every outcome class
+# reachable, stats checkpoint saved and reloadable. Same hyperparameters as ppo.yaml.
+#
+# Units: steps are env control steps (1/30 s model scale each). *_s fields are HOST seconds.
+
+method: ppo_smoke
+run_group: ppo_smoke            # -> artifacts/runs/ppo_smoke/<seed>/
+algo: ppo
+total_steps: 200000
+n_envs: 16
+vec_env: subproc
+device: cpu
+torch_threads: 1
+pad: aft
+
+policy:
+  width: 256
+  depth: 2
+  activation: tanh
+
+ppo:
+  learning_rate: 3.0e-4
+  lr_schedule: linear
+  n_steps: 1024
+  batch_size: 4096
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.0
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  target_kl: null
+sac: null
+
+normalize:
+  norm_obs: true
+  norm_reward: true
+  clip_obs: 10.0
+  clip_reward: 10.0
+
+# 20 k-step interval: an evaluation fires at every 20 k multiple (mid-rollout is fine; the
+# evaluation workers are separate), i.e. 10 points, plus one at the final step count
+# (212 992 = 13 rollouts of 16 384).
+eval:
+  interval_steps: 20000
+  n_envs: 16
+  tuning_config: configs/control/tuning.yaml
+  episodes_per_ss: null
+  deterministic: true
+
+curriculum:
+  enabled: true
+  stages: [SS3, SS4, SS5]
+  promote_success: 0.80
+  window_episodes: 100
+
+checkpoint_interval_steps: 50000
+status_interval_s: 30.0
+log_interval: 1
+
+reward: {}

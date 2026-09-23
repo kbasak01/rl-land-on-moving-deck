@@ -1,0 +1,432 @@
+"""The pre-registered hyperparameter search for PPO and SAC (P3-D1 section 5).
+
+Procedure (``configs/rl/tune_<method>.yaml``)
+---------------------------------------------
+* **Budget.** At most :data:`MAX_TRIALS` (20) trials per method, each trained for
+  ``trial_steps`` env steps (PPO 2 M, SAC 0.5 M) on **one fixed training seed**
+  (``trial_seed``). Trials train on the P3-D2 train pool exactly as a final run does
+  (curriculum included).
+* **Points.** Trial 0 is the base config unchanged. Trials ``1..n-1`` are the first ``n-1``
+  points of one scrambled Sobol sequence (``sobol_seed``) of dimension = number of search
+  parameters, mapped per parameter: ``linear`` and ``log`` ranges, or a ``choices`` list
+  (``floor(u * k)``). A parameter may set several config keys at once (``targets``), e.g.
+  one failure-penalty magnitude shared by ``r_hard_landing``, ``r_off_pad`` and ``r_bounce``.
+  Reward targets may only be weights; ``v_safe_m_s`` and ``gate_height_m`` are structure
+  and are rejected (:mod:`rld.rl.config`).
+* **Score.** Each trial's **final** checkpoint is scored on the fixed P3-D3 tune-pool draw
+  (180 episodes, SS3-SS5) that every periodic evaluation flies: mean success over the
+  sea states, ties broken by the lower pooled p95 touchdown closing speed, then the lower
+  trial index -- :func:`rld.control.tuning.summarise_trial` and
+  :func:`rld.control.tuning.select_trial`, the rule the baselines were selected by. A
+  failed trial is listed with ``state = failed`` and cannot win; it is never dropped.
+
+Nothing here reads ``results/episodes/``; the tune pool is the only scoring data.
+
+Outputs: ``<results_dir>/configs/trial_XX.yaml`` (the materialised trial configs, written
+before any trial starts), ``<results_dir>/trials.csv`` and ``<results_dir>/selection.json``.
+
+Units: steps are env control steps (1/30 s model scale each); closing speeds metres per
+second model scale; every hyperparameter in its SB3 unit.
+"""
+
+import csv
+import json
+import math
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Literal
+
+import numpy as np
+import yaml
+from scipy.stats import qmc
+
+from rld.config import REPO_ROOT, load_yaml
+from rld.control.tuning import TrialResult, select_trial, summarise_trial
+from rld.rl.config import RUNS_ROOT, apply_overrides, load_train_config, train_config_from_dict
+
+__all__ = [
+    "MAX_TRIALS",
+    "SearchParam",
+    "TuneConfig",
+    "collect_trials",
+    "load_tune_config",
+    "materialize_trials",
+    "trial_points",
+    "trial_raw_configs",
+    "trial_run_dirs",
+]
+
+#: P3-D1 section 5: at most 20 tuning trials per method.
+MAX_TRIALS: int = 20
+
+
+@dataclass(frozen=True)
+class SearchParam:
+    """One search dimension.
+
+    Attributes:
+        name: Label (a ``param_<name>`` column in ``trials.csv``).
+        targets: Dotted config keys it sets, e.g. ``("ppo.learning_rate",)``.
+        kind: ``"linear"``, ``"log"`` or ``"choice"``.
+        low: Range low (linear/log).
+        high: Range high (linear/log).
+        choices: Allowed values (choice).
+    """
+
+    name: str
+    targets: tuple[str, ...]
+    kind: Literal["linear", "log", "choice"]
+    low: float = 0.0
+    high: float = 0.0
+    choices: tuple[Any, ...] = ()
+
+    def value(self, u: float) -> Any:
+        """Map a unit-interval coordinate to a parameter value.
+
+        Args:
+            u: Sobol coordinate in ``[0, 1)``.
+
+        Returns:
+            The value in the parameter's unit.
+        """
+        if self.kind == "choice":
+            return self.choices[min(int(u * len(self.choices)), len(self.choices) - 1)]
+        if self.kind == "log":
+            return float(
+                math.exp(math.log(self.low) + u * (math.log(self.high) - math.log(self.low)))
+            )
+        return float(self.low + u * (self.high - self.low))
+
+
+@dataclass(frozen=True)
+class TuneConfig:
+    """``configs/rl/tune_<method>.yaml``.
+
+    Attributes:
+        method: Tuned method, e.g. ``"ppo"``.
+        base_config: The final-run config whose hyperparameters are searched.
+        trials: Trials including trial 0; at most :data:`MAX_TRIALS`.
+        sobol_seed: Seed of the scrambled Sobol sequence.
+        trial_seed: The training seed every trial uses.
+        trial_steps: Env-step budget per trial.
+        run_group: Runs go to ``artifacts/runs/<run_group>/trial_XX/<trial_seed>/``.
+        results_dir: Where configs, ``trials.csv`` and ``selection.json`` go.
+        params: The search dimensions, in Sobol coordinate order.
+        source: The YAML file.
+    """
+
+    method: str
+    base_config: Path
+    trials: int
+    sobol_seed: int
+    trial_seed: int
+    trial_steps: int
+    run_group: str
+    results_dir: Path
+    params: tuple[SearchParam, ...]
+    source: Path
+
+
+def _rel(path: Path) -> str:
+    """Return ``path`` relative to the repository root when inside it, else as given."""
+    try:
+        return str(path.resolve().relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def _abs(path: str | Path) -> Path:
+    """Return a repository-relative path as absolute."""
+    p = Path(path)
+    return p if p.is_absolute() else REPO_ROOT / p
+
+
+def load_tune_config(path: Path) -> TuneConfig:
+    """Load and validate a search config (every trial config is built and parsed).
+
+    Args:
+        path: ``configs/rl/tune_<method>.yaml``.
+
+    Returns:
+        The :class:`TuneConfig`.
+
+    Raises:
+        ValueError: On a missing key, more than :data:`MAX_TRIALS` trials, a malformed
+            dimension, or any trial config that fails validation.
+    """
+    path = _abs(path)
+    raw = load_yaml(path)
+    needed = (
+        "method",
+        "base_config",
+        "trials",
+        "sobol_seed",
+        "trial_seed",
+        "trial_steps",
+        "run_group",
+        "results_dir",
+        "search_space",
+    )
+    if missing := sorted(set(needed) - set(raw)):
+        raise ValueError(f"{path}: missing {missing} (is this a tune_*.yaml?)")
+    if unknown := sorted(set(raw) - set(needed)):
+        raise ValueError(f"{path}: unknown keys {unknown}")
+    params: list[SearchParam] = []
+    for name, spec in dict(raw["search_space"]).items():
+        spec = dict(spec)
+        targets = tuple(str(t) for t in spec.pop("targets"))
+        if not targets:
+            raise ValueError(f"{path}: {name} has no targets")
+        if "choices" in spec:
+            choices = tuple(spec.pop("choices"))
+            if not choices or spec:
+                raise ValueError(f"{path}: {name}: choices must be alone and non-empty")
+            params.append(SearchParam(str(name), targets, "choice", choices=choices))
+            continue
+        kind = str(spec.pop("scale", "linear"))
+        low, high = float(spec.pop("low")), float(spec.pop("high"))
+        if spec or kind not in ("linear", "log") or not low <= high:
+            raise ValueError(f"{path}: {name}: bad range {low, high, kind} or keys {list(spec)}")
+        if kind == "log" and low <= 0.0:
+            raise ValueError(f"{path}: {name}: a log range needs low > 0")
+        params.append(
+            SearchParam(str(name), targets, "log" if kind == "log" else "linear", low, high)
+        )
+    cfg = TuneConfig(
+        method=str(raw["method"]),
+        base_config=_abs(raw["base_config"]),
+        trials=int(raw["trials"]),
+        sobol_seed=int(raw["sobol_seed"]),
+        trial_seed=int(raw["trial_seed"]),
+        trial_steps=int(raw["trial_steps"]),
+        run_group=str(raw["run_group"]),
+        results_dir=_abs(raw["results_dir"]),
+        params=tuple(params),
+        source=path,
+    )
+    if not 1 <= cfg.trials <= MAX_TRIALS:
+        raise ValueError(f"{path}: trials must be in [1, {MAX_TRIALS}] (P3-D1), got {cfg.trials}")
+    if cfg.trial_steps < 1:
+        raise ValueError(f"{path}: trial_steps must be positive")
+    for index, trial_raw in trial_raw_configs(cfg):
+        train_config_from_dict(trial_raw, f"{path} trial {index}")
+    return cfg
+
+
+def trial_points(cfg: TuneConfig) -> list[dict[str, Any]]:
+    """Return each trial's parameter values by parameter name.
+
+    Args:
+        cfg: The search config.
+
+    Returns:
+        ``cfg.trials`` dicts. Trial 0 is ``{}`` (the base config); the others map every
+        parameter name to its value.
+    """
+    points: list[dict[str, Any]] = [{}]
+    if cfg.trials > 1:
+        m = int(np.ceil(np.log2(cfg.trials - 1))) if cfg.trials > 2 else 0
+        sampler = qmc.Sobol(d=len(cfg.params), scramble=True, seed=cfg.sobol_seed)
+        unit = sampler.random_base2(m=m)[: cfg.trials - 1]
+        for row in unit:
+            points.append({p.name: p.value(float(u)) for p, u in zip(cfg.params, row, strict=True)})
+    return points
+
+
+def _get(raw: Mapping[str, Any], dotted: str) -> Any:
+    """Return a dotted key's value from a raw config, or ``None`` if absent."""
+    node: Any = raw
+    for part in dotted.split("."):
+        if not isinstance(node, Mapping) or part not in node:
+            return None
+        node = node[part]
+    return node
+
+
+def trial_raw_configs(cfg: TuneConfig) -> list[tuple[int, dict[str, Any]]]:
+    """Return every trial's full raw training config.
+
+    Each is the base config with the trial's overrides, ``total_steps = trial_steps``,
+    ``run_group = <run_group>/trial_XX`` and ``method = tune_<method>_tXX``.
+
+    Args:
+        cfg: The search config.
+
+    Returns:
+        ``(trial index, raw config)`` pairs.
+    """
+    base = load_yaml(cfg.base_config)
+    out = []
+    for index, point in enumerate(trial_points(cfg)):
+        overrides: dict[str, Any] = {}
+        for param in cfg.params:
+            if param.name in point:
+                for target in param.targets:
+                    overrides[target] = point[param.name]
+        overrides["total_steps"] = cfg.trial_steps
+        overrides["run_group"] = f"{cfg.run_group}/trial_{index:02d}"
+        overrides["method"] = f"tune_{cfg.method}_t{index:02d}"
+        out.append((index, apply_overrides(base, overrides)))
+    return out
+
+
+def materialize_trials(cfg: TuneConfig) -> list[Path]:
+    """Write every trial config to ``<results_dir>/configs/trial_XX.yaml``.
+
+    Existing files must be byte-identical (a search is never silently changed after it
+    started).
+
+    Args:
+        cfg: The search config.
+
+    Returns:
+        The trial config paths, in trial order.
+
+    Raises:
+        FileExistsError: If a trial config exists with different content.
+    """
+    out_dir = cfg.results_dir / "configs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for index, raw in trial_raw_configs(cfg):
+        header = (
+            f"# Trial {index} of {_rel(cfg.source)} (generated; do not edit).\n"
+            f"# Base: {_rel(cfg.base_config)}; Sobol seed {cfg.sobol_seed}.\n"
+        )
+        text = header + yaml.safe_dump(raw, sort_keys=False)
+        path = out_dir / f"trial_{index:02d}.yaml"
+        if path.exists() and path.read_text() != text:
+            raise FileExistsError(
+                f"{path} exists with different content; refusing to change a search"
+            )
+        path.write_text(text)
+        paths.append(path)
+    return paths
+
+
+def trial_run_dirs(cfg: TuneConfig, index: int, runs_root: Path = RUNS_ROOT) -> list[Path]:
+    """Return every run directory of one trial (the original and any ``_r<k>`` reruns)."""
+    parent = runs_root / cfg.run_group / f"trial_{index:02d}"
+    seed = str(cfg.trial_seed)
+    return sorted(
+        p for p in parent.glob(f"{seed}*") if p.name == seed or p.name.startswith(f"{seed}_r")
+    )
+
+
+def _final_rows(run_dir: Path) -> list[dict[str, Any]]:
+    """Return the final evaluation's episode rows of a run (typed for summarise_trial)."""
+    with (run_dir / "eval_episodes.csv").open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    last = max(int(r["eval_index"]) for r in rows)
+    out = []
+    for r in rows:
+        if int(r["eval_index"]) != last:
+            continue
+        out.append(
+            {
+                **r,
+                "touchdown_contact": r["touchdown_contact"] == "True",
+                "detectors_disagree": r["detectors_disagree"] == "True",
+                "tunnelled": r["tunnelled"] == "True",
+                "closing_speed_normal_m_s": _num(r["closing_speed_normal_m_s"]),
+                "lateral_offset_m": _num(r["lateral_offset_m"]),
+                "rel_tilt_deg": _num(r["rel_tilt_deg"]),
+                "td_t_episode_s": _num(r["td_t_episode_s"]),
+            }
+        )
+    return out
+
+
+def _num(text: str) -> float | None:
+    """Parse a CSV number; empty means ``None``."""
+    return None if text in ("", "None") else float(text)
+
+
+def collect_trials(cfg: TuneConfig, runs_root: Path = RUNS_ROOT) -> list[dict[str, Any]]:
+    """Score every trial and write ``trials.csv`` and ``selection.json``.
+
+    Args:
+        cfg: The search config.
+        runs_root: Root of all runs.
+
+    Returns:
+        One row per trial (every trial, including failed or missing ones).
+    """
+    base = load_yaml(cfg.base_config)
+    points = trial_points(cfg)
+    sea_states = list(load_train_config(cfg.base_config).curriculum.stages)
+    rows: list[dict[str, Any]] = []
+    scored: list[tuple[int, TrialResult]] = []
+    for index, point in enumerate(points):
+        values = {p.name: point.get(p.name, _get(base, p.targets[0])) for p in cfg.params}
+        dirs = trial_run_dirs(cfg, index, runs_root)
+        done = [
+            d
+            for d in dirs
+            if (
+                json.loads((d / "status.json").read_text()) if (d / "status.json").exists() else {}
+            ).get("state")
+            == "done"
+        ]
+        row: dict[str, Any] = {"trial": index, **{f"param_{k}": v for k, v in values.items()}}
+        if not done:
+            state = "missing" if not dirs else "failed"
+            row.update(
+                {
+                    "state": state,
+                    "run_dir": str(dirs[-1]) if dirs else "",
+                    "mean_success": float("nan"),
+                }
+            )
+            rows.append(row)
+            continue
+        run_dir = done[-1]
+        status = json.loads((run_dir / "status.json").read_text())
+        result = summarise_trial(cfg.method, index, values, _final_rows(run_dir), sea_states)
+        scored.append((index, result))
+        row.update(
+            {
+                "state": "done",
+                "run_dir": str(run_dir),
+                "steps": status.get("steps"),
+                "wall_s": status.get("wall_s"),
+                "cpu_hours": status.get("cpu_hours"),
+                "git_sha": status.get("git_sha"),
+                **{
+                    k: v
+                    for k, v in result.row.items()
+                    if k not in ("controller", "trial") and not k.startswith("param_")
+                },
+            }
+        )
+        rows.append(row)
+    winner: int | None = None
+    if scored:
+        winner = scored[select_trial([r for _, r in scored])][0]
+    for row in rows:
+        row["selected"] = row["trial"] == winner
+    cfg.results_dir.mkdir(parents=True, exist_ok=True)
+    fieldnames: list[str] = []
+    for row in rows:
+        fieldnames += [k for k in row if k not in fieldnames]
+    with (cfg.results_dir / "trials.csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    selection = {
+        "method": cfg.method,
+        "rule": "max mean tune-pool success over SS3-SS5 (final checkpoint), then min pooled "
+        "p95 touchdown closing speed, then min trial index; failed trials cannot win",
+        "winner_trial": winner,
+        "winner_params": None
+        if winner is None
+        else {k[6:]: v for k, v in rows[winner].items() if k.startswith("param_")},
+        "n_trials": len(rows),
+        "n_done": len(scored),
+        "tune_config": _rel(cfg.source),
+    }
+    (cfg.results_dir / "selection.json").write_text(
+        json.dumps(selection, indent=2, default=str) + "\n"
+    )
+    return rows
