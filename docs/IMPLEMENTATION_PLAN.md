@@ -446,6 +446,30 @@ committed alongside `gated` and `oracle_gated`.
 
 ### Phase 5 — Pure RL: PPO and SAC (2 days + ~1–2 days compute) · owner: `rl-trainer`
 
+**Before you start (added after Gate 4, 2026-09-23).**
+
+(a) **Still open from P3-D4.** Check that `pid_feedforward_lowvz`'s low-speed bounces are not a
+contact-solver artifact that a residual or pure policy could learn to exploit. Do this before
+Phase 5 training starts.
+
+(b) **Tuning pool.** Item 3's "`id`-validation seeds" means `dev_pool()[1]`, the tune pool (P3-D2).
+Never use `id`-val, which contains frozen SS6 and 90° test realizations.
+
+(c) **Evaluation interface.**
+- `Controller.reset` is now `reset(seed, context=None, motion_feed=None)`.
+- The runner hands a `ShipMotionFeed` only to registry entries with `needs_motion_feed=True`. Pure
+  PPO and SAC must not take one: `CallablePolicy` rejects a feed.
+- `make baselines` and `tune_controller.py --final` are pinned to the five Phase 3 controllers.
+- `run_info.json` now records `git_sha` and `git_dirty`, so launch evaluations from a clean,
+  committed tree.
+
+(d) **Phase 4 results that bear on the training set-up.**
+- Every gated controller fails only by `timeout`, and `pid_feedforward` is at or near the top on
+  success in every cell (P4-D4).
+- The hacking audit's timeout fraction (item 5) should therefore be read against `gated`'s timeout
+  rate, since `gated` fails the same way: it times out on 32–55 % of SS6 episodes on frigate lists and 9–10 % on s175 (`results/e02`).
+- The forecast observation block is **Phase 6** (P4-D4a records), not this phase.
+
 1. `rl/train.py`: SB3 PPO and SAC; `SubprocVecEnv`; `VecNormalize` on observations (reward
    normalisation for PPO only); **statistics saved with every checkpoint and frozen at eval.**
 2. Curriculum (`rl/curriculum.py`): SS3 → SS4 → SS5 by success-rate threshold on a held-out

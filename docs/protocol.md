@@ -1492,15 +1492,20 @@ What happened:
 - P4-D4a was written into the working tree in the same period. Its order relative to the smoke run
   is not established.
 - P4-D4a was first committed in `9e8061f` at 14:25:57 local. The addendum's "14:30" stamp is wrong:
-  it was written shortly before that commit. e02 started at 14:26:24.
+  it was written shortly before that commit.
+- *Corrected at the Gate 4 review.* e02's episodes began at about 14:25:24 local, roughly 33 s
+  **before** that commit. The start is `run_info` `timestamp_utc` 18:53:58, taken at the end of
+  the run, minus `wall_s` 1 714. The run writes no result until it ends, so no e02 result existed
+  before P4-D4a was committed.
 
 What this means:
 - Expectation 1 should be read as recorded after, or at best alongside, a 24-episode smoke run.
 - It was grounded in the tune-pool band analysis (the fraction of forecasts whose band passes was
   0.000 at SS3–SS5), which predates both.
 - Nothing was tuned after the smoke run. For the same episodes, the smoke rows and the e02 rows are
-  identical in outcome, steps, touchdown time, touchdown speed and `td_in_quiescent_window`, as
-  checked by the results-skeptic.
+  identical in outcome, steps, touchdown time, touchdown speed and `td_in_quiescent_window`. This
+  was checked by the results-skeptic against the smoke `run_info` and `episodes.csv` in the session
+  scratchpad. That file is **not committed**, so the check cannot be traced to a committed artifact.
 
 **Other records for P4-D2 and P4-D3.**
 - *TCN training.* Every TCN fit ran to the 60-epoch cap without early stopping: best epochs 59/56/56
@@ -1522,9 +1527,15 @@ What this means:
 ### P4-D4 — Forecast-gated results on the frozen lists (2026-09-23)
 
 **Sources.**
-- `results/e02/` holds 7 controllers × {aft, cg} on all five frozen lists: 38 400 episodes, run at
-  `9e8061f`, 1 714 s at 24 workers. Its summary was re-derived at `12fd9f5` from the unchanged
-  `episodes.csv`, adding per-listed-episode quiet columns.
+- `results/e02/` holds 7 controllers × {aft, cg} on all five frozen lists: 38 400 episodes, 1 714 s at
+  24 workers.
+  - It was launched from the working tree committed as `9e8061f`. That SHA is not recorded in its
+    `run_info`, which predates the `git_sha` field.
+  - Its summary was re-derived from the unchanged `episodes.csv`, adding the per-listed-episode
+    quiet columns. The re-derivation ran from a dirty tree, later committed as `12fd9f5`
+    (`run_info.resummarised`, `episodes_flown: 0`).
+  - Between those commits `gated_forecast.py` changed only in docstrings and factories, and the
+    forecaster file hashes are pinned per row.
 - `results/e02_tcn_seeds/` holds the secondary seed arms, 10 400 new episodes at `12fd9f5` (clean
   tree), plus e02's rows carried.
 - All numbers are simulation only, on a Froude-scaled Crazyflie model and dmf's synthetic JONSWAP
@@ -1550,9 +1561,9 @@ What this means:
 with no multiplicity correction and no pre-registered hypothesis. "Separated" means the two
 intervals do not overlap.
 
-**Outcome classes.** Every forecast-gated failure is a `timeout`:
-- no crash, off-pad or hard landing anywhere;
-- at most 0.005 bounce in any cell.
+**Outcome classes.** Every forecast-gated failure is a `timeout`, except for a few bounces:
+- 2 bounces in e02 and 5 more in the seed arms, at most 0.005 in any cell;
+- no crash, off-pad or hard landing anywhere.
 
 This follows from `fallback_commit_s: null` (P3-D3) and the P3-D1 episode budget: a commit window
 that never arrives is reported as a timeout, not rescued.
@@ -1566,7 +1577,8 @@ that never arrives is reported as a timeout, not rescued.
 
 - For `gated_forecast_tcn`, the loss grows with sea state. For example, `id` SS6 aft success is
   0.165 against 0.63 for `gated`.
-- `pid_feedforward`, ungated, has the highest success in every cell.
+- `pid_feedforward`, ungated, has the highest success, or success within the CI of the highest, in
+  every cell. At CG `unseen_heading` SS5, `oracle_gated` has 0.995 against its 0.990.
 
 **Quiet landings: count them per listed episode, not per touchdown.**
 - Per touchdown, `gated_forecast_tcn` looks close to `oracle_gated` (e.g. `id` SS6 aft 0.64 against
@@ -1588,11 +1600,15 @@ that never arrives is reported as a timeout, not rescued.
 
 **Seed sensitivity** (secondary, `results/e02_tcn_seeds/`).
 - Across `tcn_quantile` seeds 0, 1 (selected) and 2, the largest per-cell spread is 0.075 in
-  success (aft `unseen_heading` SS6: 0.22 / 0.295 / 0.235) and 0.07 in quiet landings per listed
+  success (aft `unseen_heading` SS6: seed 0 0.295, seed 1 0.22, seed 2 0.235) and 0.07 in quiet landings per listed
   episode (aft `unseen_heading` SS5).
 - Every seed is worse than `gated` on success in 8–9 cells and better in none.
 - Every seed has more quiet landings per listed episode than `gated` in 3–6 cells and fewer in 1.
-- So the TCN-arm findings do not depend on which seed was selected.
+- So the **direction** of the TCN-arm findings does not depend on which seed was selected, but the
+  specific cells partly do.
+  - Success: every seed is worse than `gated`, in 8–9 cells, and better in none.
+  - Quiet landings: seed 2 reproduces only 3 of the 5 cells where the selected seed has more than
+    `gated` (aft `id` SS4, CG `id` SS4, CG `id` SS5), and neither `unseen_heading` SS5 cell.
 
 **The aft vs CG control.**
 - At the CG the DLinear band passes and the arm commits. At the aft pad it never does.
@@ -1658,3 +1674,4 @@ a new evaluation list.
 | 1 | 2026-09-21 | PASSED | `make test lint` green (66 tests, 62 s; ruff + ruff-format + mypy --strict clean). `results/deck_stats.csv` 192 rows = 96 cells x {aft, cg}, full grid (2 vessels x SS3-SS6 x 4 headings x 3 speeds), all 2304 realizations, with `z_std_model_m`, `vz_std_model_m_s`, `vz_p99_model_m_s`, `az_p99_model_m_s2` populated and no NaN; plus `deck_stats_seeds.csv` (4608 rows) and `deck_feasibility.csv` (2 rows). lambda = 1/25 and r_pad = -0.4*L confirmed in P1-D1. Feasibility rule PASS: frigate SS6 180 deg 12 kn aft vz p99 = 0.577165 m/s vs the 2.08333 m/s gate threshold, 3.61x inside; the rejected `SPEED_LIMIT` reading is recorded as FAIL beside it. Sign convention and ZYX rotation order corrected and pinned by three hand-computed cases (P1-D2); one project-wide lambda (P1-D3). |
 | 2 | 2026-09-22 | PASSED | `make test lint` green (118 passed, 1 skipped, 107 s; ruff + ruff-format + mypy --strict clean). The 1 skip is by design: `tests/test_platform.py` gates only the configured driver and *measures* the other, and `test_constraint_driver_fails_the_tracking_gate` asserts the rejected one fails. Platform tracking, `kinematic` driver, 10 s model at frigate SS6 180 deg 12 kn aft: body-origin 0.000 mm and plate-corner 2.2e-16 m against the 1 mm gate, orientation 3.0e-8 rad, `getBaseVelocity` linear and angular ratio 0.0 % against the 2 % gate; `constraint` fails every one of those by an order of magnitude and cannot be tuned into passing (24-point sweep, four identical digits) -- P2-D1. `gymnasium.utils.env_checker.check_env` passes; reset determinism bit-identical as the env's 1st and 3rd reset; drop on a static pad registers exactly one touchdown; scripted 0.3 m/s descent on a static pad 100/100 `success`. `results/e00_env_sanity.csv` (4 rows) + `results/e00_env_sanity_episodes.csv` (800 rows) written from the `id` split's val partition, draw seed 20260922: hover 1.000 `timeout` at SS3 and SS5, random 1.000 `crash` at both, no successes under either -- outcome fractions sum to 1.000000 per row. **PyBullet-vs-analytic touchdown disagreement 0/800 = 0.0000** against the < 1 % gate, plus 0/100 on scripted static descents and 0/30 on a moving SS5 deck. `results/env_throughput_landing.csv` (8 rows) records the deck-in-the-loop throughput P3-D1 must size from (P2-D8); `results/env_throughput.csv` untouched. Two flags carried forward, both recorded rather than fixed: one of 800 sanity episodes tunnelled (7.86 mm penetration vs the 5 mm threshold) and it was the only random episode that ever reached contact, so the random arm exercises the touchdown path barely at all -- the scripted tests carry that load; and the plan's "dropped from rest" is not expressible in a velocity-setpoint action space, so the drop test uses the maximum commanded descent (P2-D9). |
 | 3 | 2026-09-22 | PASSED (2nd attempt) | First attempt FAILED on the `results-skeptic` review (BLOCKING B1: the restated H1 was beatable by a slower PID; MAJOR M1-M3), before any RL run; remediated with user decisions (P3-D1 revision 1 §9, P3-D3 amendments). Second attempt: `make test lint` green (233 passed, 1 skipped by design, 162 s; ruff + ruff-format + mypy --strict clean). `pid_feedforward` 200/200 on the static pad and 200/200 at `id` SS3 (Wilson [98.1, 100.0] each) against the >= 95 % gate, from `results/e01/episodes.csv` at `d35f224`. Success-vs-sea-state table `results/e01/success_vs_seastate.md` committed: 5 controllers x 14 cells x N = 200, re-renders byte-identically from `summary.csv`; no crash or off_pad anywhere; detector disagreement 5/14000; tunnelling 14 (all `pid_track_descend`, max 6.5 mm). Frozen lists `results/episodes/` committed at `0780aaa`, MANIFEST SHA-256 `e6f30e55e478d39061b94e38de33959ca99b16e8cac38a3bd99b34f6543ad4a2`, `--check` 10/10 OK. P3-D1 FROZEN revision 1, block SHA-256 **`21465588610e65f1d1253bd26e5ce5db1da938889c6042338e1de8d4d99f5ed2`** (from `### P3-D1 — FROZEN` to the line before `### P3-D2`, UTF-8). Second `results-skeptic` review: no BLOCKING; MAJOR-1 (H1 scope) and MINOR 1-9 folded in by P3-D4 errata without touching the frozen block; three items carried to Phase 4 (P3-D4). |
+| 4 | 2026-09-23 | PASSED | Criteria checked against committed artifacts at `eeb87d5` plus the Gate 4 wording fixes. `make test lint` green: 320 passed, 1 skipped by design (P2-D1), 313 s; ruff, ruff-format and mypy --strict clean. `tests/test_deck_forecast.py` and `tests/test_control_gated_forecast.py` 56/56 with **0 skips**, artifacts present (a fresh clone without `artifacts/dmf/` would skip parity, so this run is the evidence). **Parity:** `results/forecast/parity.csv`, 18 gated checks over 6 model dirs, all pass at `1e-4·max(1,|y|)`, worst 0.041× tolerance; bridge-fed parity needs dmf's float32 cast (P4-D3). **Causality:** the feed-clock spy and the future-perturbation bit-identity tests pass. **Leakage:** 729 train / 135 tune forecaster keys vs 1 273 frozen-list realizations, overlap 0 (recomputed independently from `fit_keys.json`). **Frozen-list results:** `gated_forecast` and `gated_forecast_tcn` committed in `results/e02/` beside `gated`, `oracle_gated` and the three PID baselines, 26 cells × 200 each at aft and CG, with `td_in_quiescent_window`, quiet landings per listed episode and Wilson CIs; the static list is not run for feed controllers, reason recorded. Phase 3 aft rows byte-identical to e01 (14 000/14 000). Secondary seed arms in `results/e02_tcn_seeds/` (`12fd9f5`, clean). Oracle relabel done; P4-D5 records the hash. MANIFEST 10/10; P3-D1 block SHA-256 unchanged. **Results-skeptic:** first review MAJOR M1–M5 remediated (P4-D3 wording, P4-D4a erratum, P4-D5, M1 columns, seed arms); second review no BLOCKING and no MAJOR, 6 MINOR wording and provenance errors fixed in P4-D4/P4-D4a. Headline (P4-D4): pre-registered expectation 1 held, 2 600/2 600 aft `gated_forecast` timeouts; forecast gating lowers success against `gated` in 19 (DLinear) and 9 (TCN) of 26 cells, and improves it in none. |
