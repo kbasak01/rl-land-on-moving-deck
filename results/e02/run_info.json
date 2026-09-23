@@ -1,0 +1,127 @@
+{
+  "omp_num_threads": "1",
+  "cpu_count": "36",
+  "host": "DATTA-BASAK",
+  "timestamp_utc": "2026-09-23T18:53:58+00:00",
+  "workers": 24,
+  "chunk": 25,
+  "wall_s": 1714.2,
+  "episodes": 38400,
+  "controllers": [
+    "pid_track_descend",
+    "pid_feedforward",
+    "pid_feedforward_lowvz",
+    "gated",
+    "oracle_gated",
+    "gated_forecast",
+    "gated_forecast_tcn"
+  ],
+  "pads": [
+    "aft",
+    "cg"
+  ],
+  "lists": [
+    "id",
+    "unseen_seastate",
+    "unseen_heading",
+    "unseen_vessel",
+    "static"
+  ],
+  "per_cell": null,
+  "config_overrides": {},
+  "skipped_episodes": 800,
+  "reference_check": {
+    "reference": "/home/kbasak/projects_02/rl-land-on-moving-deck/results/e01/episodes.csv",
+    "reference_sha256": "c5852090822822fa822dd55d0cafb42c43f6c072b0e4365d223baa1f91e5ad7b",
+    "pad": "aft",
+    "header_identical": true,
+    "all_identical": true,
+    "methods": {
+      "pid_track_descend": {
+        "n_compared": 2800,
+        "n_identical": 2800,
+        "n_differ": 0,
+        "n_missing_in_reference": 0,
+        "n_reference_rows": 2800,
+        "first_mismatch": null
+      },
+      "pid_feedforward": {
+        "n_compared": 2800,
+        "n_identical": 2800,
+        "n_differ": 0,
+        "n_missing_in_reference": 0,
+        "n_reference_rows": 2800,
+        "first_mismatch": null
+      },
+      "pid_feedforward_lowvz": {
+        "n_compared": 2800,
+        "n_identical": 2800,
+        "n_differ": 0,
+        "n_missing_in_reference": 0,
+        "n_reference_rows": 2800,
+        "first_mismatch": null
+      },
+      "gated": {
+        "n_compared": 2800,
+        "n_identical": 2800,
+        "n_differ": 0,
+        "n_missing_in_reference": 0,
+        "n_reference_rows": 2800,
+        "first_mismatch": null
+      },
+      "oracle_gated": {
+        "n_compared": 2800,
+        "n_identical": 2800,
+        "n_differ": 0,
+        "n_missing_in_reference": 0,
+        "n_reference_rows": 2800,
+        "first_mismatch": null
+      }
+    },
+    "summary_provenance_differences": [
+      {
+        "method": "oracle_gated",
+        "column": "controller_config_sha256",
+        "committed": "e8bc4efd5615cea1a07f05f0368f226b682e11d78968b2a8d6b03c8f0862b4f1",
+        "live": "5daca06e217fc765611af98af2fc70f312ca4cbdafffe408d5827eae8138bce3",
+        "n_rows": "14"
+      }
+    ]
+  },
+  "resummarised": [
+    {
+      "timestamp_utc": "2026-09-23T19:08:44+00:00",
+      "git_sha": "9e8061f3980fac9577f25b046c4eb6e2f321e4e5",
+      "git_dirty": true,
+      "git_dirty_paths": [
+        " M Makefile",
+        " M docs/protocol.md",
+        " M results/forecast/cost.csv",
+        " M results/forecast/fit_manifest.json",
+        " M scripts/eval_baselines.py",
+        " M scripts/fit_dmf_forecasters.py",
+        " M src/rld/control/gated_forecast.py",
+        " M src/rld/control/registry.py",
+        " M src/rld/deck/forecast_fit.py",
+        " M src/rld/eval/report.py",
+        " M src/rld/eval/reproduce.py",
+        " M tests/test_control_base.py",
+        " M tests/test_control_gated_forecast.py",
+        " M tests/test_deck_forecast.py",
+        " M tests/test_eval_runner.py",
+        "?? configs/control/gated_forecast_tcn_seed0.yaml",
+        "?? configs/control/gated_forecast_tcn_seed2.yaml",
+        "?? results/e02/"
+      ],
+      "added_columns": [
+        "frac_td_in_quiescent_window_wilson_lo",
+        "frac_td_in_quiescent_window_wilson_hi",
+        "quiet_landings_per_listed",
+        "quiet_landings_per_listed_wilson_lo",
+        "quiet_landings_per_listed_wilson_hi"
+      ],
+      "existing_columns_unchanged": true,
+      "episodes_flown": 0
+    }
+  ]
+}

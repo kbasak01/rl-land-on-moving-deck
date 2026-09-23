@@ -1,4 +1,4 @@
-# oracle_gated -- PRIVILEGED UPPER BOUND, never a deployable result
+# oracle_gated -- commit-timing oracle (privileged), never a deployable result
 # (src/rld/control/oracle.py). Same hover-and-commit as gated, and EXACTLY gated's
 # predicate (rld.control.quiescence.QuiescenceRule: 12 samples, 1/30 s apart, same
 # thresholds, same pad v_z), applied to the TRUE FUTURE deck states at t_td + j/30 s,

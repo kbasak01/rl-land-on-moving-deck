@@ -18,7 +18,7 @@
 | pid_feedforward | 100.0 [98.1, 100.0] (200/200) | 100.0 [98.1, 100.0] (200/200) | 99.0 [96.4, 99.7] (198/200) | 90.5 [85.6, 93.8] (181/200) |
 | pid_feedforward_lowvz (H1a closing-speed reference (P3-D1 §8)) | 100.0 [98.1, 100.0] (200/200) | 98.0 [95.0, 99.2] (196/200) | 95.5 [91.7, 97.6] (191/200) | 85.0 [79.4, 89.3] (170/200) |
 | gated | 100.0 [98.1, 100.0] (200/200) | 98.5 [95.7, 99.5] (197/200) | 89.5 [84.5, 93.0] (179/200) | 63.0 [56.1, 69.4] (126/200) |
-| oracle_gated (privileged — the gated rule applied to the true future deck motion (commit-timing oracle)) | 100.0 [98.1, 100.0] (200/200) | 98.5 [95.7, 99.5] (197/200) | 89.0 [83.9, 92.6] (178/200) | 64.5 [57.7, 70.8] (129/200) |
+| oracle_gated — commit-timing oracle (privileged): the gated rule applied to the true future deck motion | 100.0 [98.1, 100.0] (200/200) | 98.5 [95.7, 99.5] (197/200) | 89.0 [83.9, 92.6] (178/200) | 64.5 [57.7, 70.8] (129/200) |
 
 ### id: outcome breakdown and touchdown audit
 
@@ -40,10 +40,10 @@
 | gated | SS4 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 0.985 | 0.015 | 0.192 / 0.229 | 0.229 | 0.045 | 4.9 | 3.28 | 0/200 | 0 | 0.741 | 0.750 |
 | gated | SS5 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 0.895 | 0.105 | 0.193 / 0.250 | 0.249 | 0.039 | 6.3 | 3.74 | 0/200 | 0 | 0.430 | 0.745 |
 | gated | SS6 | 200 | 0.000 | 0.000 | 0.000 | 0.020 | 0.630 | 0.350 | 0.194 / 0.267 | 0.267 | 0.038 | 7.8 | 4.66 | 0/200 | 0 | 0.169 | 0.000 |
-| oracle_gated (privileged — the gated rule applied to the true future deck motion (commit-timing oracle)) | SS3 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 1.000 | 0.000 | 0.193 / 0.220 | 0.219 | 0.044 | 4.6 | 3.19 | 0/200 | 0 | 0.985 | 0.755 |
-| oracle_gated (privileged — the gated rule applied to the true future deck motion (commit-timing oracle)) | SS4 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 0.985 | 0.015 | 0.194 / 0.236 | 0.237 | 0.044 | 4.4 | 3.29 | 0/200 | 0 | 0.909 | 0.750 |
-| oracle_gated (privileged — the gated rule applied to the true future deck motion (commit-timing oracle)) | SS5 | 200 | 0.000 | 0.000 | 0.000 | 0.005 | 0.890 | 0.105 | 0.191 / 0.252 | 0.252 | 0.042 | 5.1 | 3.60 | 0/200 | 0 | 0.771 | 0.745 |
-| oracle_gated (privileged — the gated rule applied to the true future deck motion (commit-timing oracle)) | SS6 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 0.645 | 0.355 | 0.190 / 0.254 | 0.253 | 0.043 | 5.9 | 4.80 | 0/200 | 0 | 0.682 | 0.000 |
+| oracle_gated — commit-timing oracle (privileged): the gated rule applied to the true future deck motion | SS3 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 1.000 | 0.000 | 0.193 / 0.220 | 0.219 | 0.044 | 4.6 | 3.19 | 0/200 | 0 | 0.985 | 0.755 |
+| oracle_gated — commit-timing oracle (privileged): the gated rule applied to the true future deck motion | SS4 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 0.985 | 0.015 | 0.194 / 0.236 | 0.237 | 0.044 | 4.4 | 3.29 | 0/200 | 0 | 0.909 | 0.750 |
+| oracle_gated — commit-timing oracle (privileged): the gated rule applied to the true future deck motion | SS5 | 200 | 0.000 | 0.000 | 0.000 | 0.005 | 0.890 | 0.105 | 0.191 / 0.252 | 0.252 | 0.042 | 5.1 | 3.60 | 0/200 | 0 | 0.771 | 0.745 |
+| oracle_gated — commit-timing oracle (privileged): the gated rule applied to the true future deck motion | SS6 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 0.645 | 0.355 | 0.190 / 0.254 | 0.253 | 0.043 | 5.9 | 4.80 | 0/200 | 0 | 0.682 | 0.000 |
 
 ## unseen_seastate
 
@@ -53,7 +53,7 @@
 | pid_feedforward | 90.0 [85.1, 93.4] (180/200) |
 | pid_feedforward_lowvz (H1a closing-speed reference (P3-D1 §8)) | 86.0 [80.5, 90.1] (172/200) |
 | gated | 64.5 [57.7, 70.8] (129/200) |
-| oracle_gated (privileged — the gated rule applied to the true future deck motion (commit-timing oracle)) | 65.0 [58.2, 71.3] (130/200) |
+| oracle_gated — commit-timing oracle (privileged): the gated rule applied to the true future deck motion | 65.0 [58.2, 71.3] (130/200) |
 
 ### unseen_seastate: outcome breakdown and touchdown audit
 
@@ -63,7 +63,7 @@
 | pid_feedforward | SS6 | 200 | 0.000 | 0.000 | 0.030 | 0.070 | 0.900 | 0.000 | 0.193 / 0.250 | 0.247 | 0.036 | 13.1 | 4.46 | 1/200 | 0 | 0.105 | 0.000 |
 | pid_feedforward_lowvz (H1a closing-speed reference (P3-D1 §8)) | SS6 | 200 | 0.000 | 0.000 | 0.035 | 0.105 | 0.860 | 0.000 | 0.107 / 0.152 | 0.155 | 0.035 | 13.8 | 7.66 | 1/200 | 0 | 0.080 | 0.000 |
 | gated | SS6 | 200 | 0.000 | 0.000 | 0.000 | 0.010 | 0.645 | 0.345 | 0.195 / 0.243 | 0.244 | 0.040 | 7.2 | 4.93 | 0/200 | 0 | 0.214 | 0.000 |
-| oracle_gated (privileged — the gated rule applied to the true future deck motion (commit-timing oracle)) | SS6 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 0.650 | 0.350 | 0.195 / 0.240 | 0.241 | 0.035 | 5.5 | 4.37 | 0/200 | 0 | 0.662 | 0.000 |
+| oracle_gated — commit-timing oracle (privileged): the gated rule applied to the true future deck motion | SS6 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 0.650 | 0.350 | 0.195 / 0.240 | 0.241 | 0.035 | 5.5 | 4.37 | 0/200 | 0 | 0.662 | 0.000 |
 
 ## unseen_heading
 
@@ -73,7 +73,7 @@
 | pid_feedforward | 100.0 [98.1, 100.0] (200/200) | 100.0 [98.1, 100.0] (200/200) | 99.5 [97.2, 99.9] (199/200) | 77.0 [70.7, 82.3] (154/200) |
 | pid_feedforward_lowvz (H1a closing-speed reference (P3-D1 §8)) | 100.0 [98.1, 100.0] (200/200) | 99.0 [96.4, 99.7] (198/200) | 96.5 [93.0, 98.3] (193/200) | 70.0 [63.3, 75.9] (140/200) |
 | gated | 100.0 [98.1, 100.0] (200/200) | 100.0 [98.1, 100.0] (200/200) | 98.0 [95.0, 99.2] (196/200) | 42.0 [35.4, 48.9] (84/200) |
-| oracle_gated (privileged — the gated rule applied to the true future deck motion (commit-timing oracle)) | 100.0 [98.1, 100.0] (200/200) | 100.0 [98.1, 100.0] (200/200) | 99.5 [97.2, 99.9] (199/200) | 46.5 [39.7, 53.4] (93/200) |
+| oracle_gated — commit-timing oracle (privileged): the gated rule applied to the true future deck motion | 100.0 [98.1, 100.0] (200/200) | 100.0 [98.1, 100.0] (200/200) | 99.5 [97.2, 99.9] (199/200) | 46.5 [39.7, 53.4] (93/200) |
 
 ### unseen_heading: outcome breakdown and touchdown audit
 
@@ -95,10 +95,10 @@
 | gated | SS4 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 1.000 | 0.000 | 0.190 / 0.210 | 0.209 | 0.047 | 5.3 | 3.23 | 0/200 | 0 | 0.885 | 0.000 |
 | gated | SS5 | 200 | 0.000 | 0.000 | 0.000 | 0.005 | 0.980 | 0.015 | 0.192 / 0.219 | 0.220 | 0.043 | 6.2 | 3.50 | 0/200 | 0 | 0.508 | 0.000 |
 | gated | SS6 | 200 | 0.000 | 0.000 | 0.000 | 0.035 | 0.420 | 0.545 | 0.189 / 0.218 | 0.218 | 0.036 | 7.3 | 5.36 | 0/200 | 0 | 0.253 | 0.000 |
-| oracle_gated (privileged — the gated rule applied to the true future deck motion (commit-timing oracle)) | SS3 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 1.000 | 0.000 | 0.193 / 0.204 | 0.204 | 0.047 | 4.5 | 3.25 | 0/200 | 0 | 1.000 | 0.000 |
-| oracle_gated (privileged — the gated rule applied to the true future deck motion (commit-timing oracle)) | SS4 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 1.000 | 0.000 | 0.190 / 0.210 | 0.210 | 0.049 | 5.3 | 3.25 | 0/200 | 0 | 0.985 | 0.000 |
-| oracle_gated (privileged — the gated rule applied to the true future deck motion (commit-timing oracle)) | SS5 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 0.995 | 0.005 | 0.197 / 0.220 | 0.221 | 0.042 | 5.5 | 3.61 | 0/200 | 0 | 0.789 | 0.000 |
-| oracle_gated (privileged — the gated rule applied to the true future deck motion (commit-timing oracle)) | SS6 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 0.465 | 0.535 | 0.191 / 0.215 | 0.215 | 0.034 | 6.3 | 5.60 | 0/200 | 0 | 0.634 | 0.000 |
+| oracle_gated — commit-timing oracle (privileged): the gated rule applied to the true future deck motion | SS3 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 1.000 | 0.000 | 0.193 / 0.204 | 0.204 | 0.047 | 4.5 | 3.25 | 0/200 | 0 | 1.000 | 0.000 |
+| oracle_gated — commit-timing oracle (privileged): the gated rule applied to the true future deck motion | SS4 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 1.000 | 0.000 | 0.190 / 0.210 | 0.210 | 0.049 | 5.3 | 3.25 | 0/200 | 0 | 0.985 | 0.000 |
+| oracle_gated — commit-timing oracle (privileged): the gated rule applied to the true future deck motion | SS5 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 0.995 | 0.005 | 0.197 / 0.220 | 0.221 | 0.042 | 5.5 | 3.61 | 0/200 | 0 | 0.789 | 0.000 |
+| oracle_gated — commit-timing oracle (privileged): the gated rule applied to the true future deck motion | SS6 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 0.465 | 0.535 | 0.191 / 0.215 | 0.215 | 0.034 | 6.3 | 5.60 | 0/200 | 0 | 0.634 | 0.000 |
 
 ## unseen_vessel
 
@@ -108,7 +108,7 @@
 | pid_feedforward | 100.0 [98.1, 100.0] (200/200) | 100.0 [98.1, 100.0] (200/200) | 99.5 [97.2, 99.9] (199/200) | 98.5 [95.7, 99.5] (197/200) |
 | pid_feedforward_lowvz (H1a closing-speed reference (P3-D1 §8)) | 100.0 [98.1, 100.0] (200/200) | 100.0 [98.1, 100.0] (200/200) | 99.5 [97.2, 99.9] (199/200) | 95.0 [91.0, 97.3] (190/200) |
 | gated | 100.0 [98.1, 100.0] (200/200) | 100.0 [98.1, 100.0] (200/200) | 93.5 [89.2, 96.2] (187/200) | 90.0 [85.1, 93.4] (180/200) |
-| oracle_gated (privileged — the gated rule applied to the true future deck motion (commit-timing oracle)) | 100.0 [98.1, 100.0] (200/200) | 100.0 [98.1, 100.0] (200/200) | 95.0 [91.0, 97.3] (190/200) | 89.0 [83.9, 92.6] (178/200) |
+| oracle_gated — commit-timing oracle (privileged): the gated rule applied to the true future deck motion | 100.0 [98.1, 100.0] (200/200) | 100.0 [98.1, 100.0] (200/200) | 95.0 [91.0, 97.3] (190/200) | 89.0 [83.9, 92.6] (178/200) |
 
 ### unseen_vessel: outcome breakdown and touchdown audit
 
@@ -130,10 +130,10 @@
 | gated | SS4 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 1.000 | 0.000 | 0.192 / 0.227 | 0.228 | 0.046 | 4.9 | 3.25 | 0/200 | 0 | 0.815 | 0.000 |
 | gated | SS5 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 0.935 | 0.065 | 0.194 / 0.248 | 0.247 | 0.043 | 5.0 | 3.40 | 0/200 | 0 | 0.604 | 0.000 |
 | gated | SS6 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 0.900 | 0.100 | 0.189 / 0.249 | 0.248 | 0.038 | 6.5 | 4.23 | 1/200 | 0 | 0.256 | 0.000 |
-| oracle_gated (privileged — the gated rule applied to the true future deck motion (commit-timing oracle)) | SS3 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 1.000 | 0.000 | 0.191 / 0.218 | 0.218 | 0.048 | 4.5 | 3.17 | 0/200 | 0 | 1.000 | 0.000 |
-| oracle_gated (privileged — the gated rule applied to the true future deck motion (commit-timing oracle)) | SS4 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 1.000 | 0.000 | 0.191 / 0.224 | 0.223 | 0.044 | 4.5 | 3.24 | 0/200 | 0 | 0.910 | 0.000 |
-| oracle_gated (privileged — the gated rule applied to the true future deck motion (commit-timing oracle)) | SS5 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 0.950 | 0.050 | 0.194 / 0.238 | 0.238 | 0.043 | 5.0 | 3.51 | 0/200 | 0 | 0.847 | 0.000 |
-| oracle_gated (privileged — the gated rule applied to the true future deck motion (commit-timing oracle)) | SS6 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 0.890 | 0.110 | 0.193 / 0.235 | 0.235 | 0.035 | 5.4 | 4.81 | 0/200 | 0 | 0.781 | 0.000 |
+| oracle_gated — commit-timing oracle (privileged): the gated rule applied to the true future deck motion | SS3 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 1.000 | 0.000 | 0.191 / 0.218 | 0.218 | 0.048 | 4.5 | 3.17 | 0/200 | 0 | 1.000 | 0.000 |
+| oracle_gated — commit-timing oracle (privileged): the gated rule applied to the true future deck motion | SS4 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 1.000 | 0.000 | 0.191 / 0.224 | 0.223 | 0.044 | 4.5 | 3.24 | 0/200 | 0 | 0.910 | 0.000 |
+| oracle_gated — commit-timing oracle (privileged): the gated rule applied to the true future deck motion | SS5 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 0.950 | 0.050 | 0.194 / 0.238 | 0.238 | 0.043 | 5.0 | 3.51 | 0/200 | 0 | 0.847 | 0.000 |
+| oracle_gated — commit-timing oracle (privileged): the gated rule applied to the true future deck motion | SS6 | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 0.890 | 0.110 | 0.193 / 0.235 | 0.235 | 0.035 | 5.4 | 4.81 | 0/200 | 0 | 0.781 | 0.000 |
 
 ## static
 
@@ -143,7 +143,7 @@
 | pid_feedforward | 100.0 [98.1, 100.0] (200/200) |
 | pid_feedforward_lowvz (H1a closing-speed reference (P3-D1 §8)) | 100.0 [98.1, 100.0] (200/200) |
 | gated | 100.0 [98.1, 100.0] (200/200) |
-| oracle_gated (privileged — the gated rule applied to the true future deck motion (commit-timing oracle)) | 100.0 [98.1, 100.0] (200/200) |
+| oracle_gated — commit-timing oracle (privileged): the gated rule applied to the true future deck motion | 100.0 [98.1, 100.0] (200/200) |
 
 ### static: outcome breakdown and touchdown audit
 
@@ -153,4 +153,4 @@
 | pid_feedforward | static | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 1.000 | 0.000 | 0.190 / 0.203 | 0.203 | 0.031 | 4.2 | 4.53 | 0/200 | 0 | 1.000 | 0.000 |
 | pid_feedforward_lowvz (H1a closing-speed reference (P3-D1 §8)) | static | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 1.000 | 0.000 | 0.101 / 0.109 | 0.109 | 0.031 | 4.1 | 7.77 | 0/200 | 0 | 1.000 | 0.000 |
 | gated | static | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 1.000 | 0.000 | 0.193 / 0.204 | 0.204 | 0.045 | 4.5 | 3.14 | 0/200 | 0 | 1.000 | 0.000 |
-| oracle_gated (privileged — the gated rule applied to the true future deck motion (commit-timing oracle)) | static | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 1.000 | 0.000 | 0.193 / 0.204 | 0.204 | 0.045 | 4.5 | 3.14 | 0/200 | 0 | 1.000 | 0.000 |
+| oracle_gated — commit-timing oracle (privileged): the gated rule applied to the true future deck motion | static | 200 | 0.000 | 0.000 | 0.000 | 0.000 | 1.000 | 0.000 | 0.193 / 0.204 | 0.204 | 0.045 | 4.5 | 3.14 | 0/200 | 0 | 1.000 | 0.000 |

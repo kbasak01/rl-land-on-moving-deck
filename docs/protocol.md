@@ -1311,6 +1311,362 @@ Success fractions:
   (SHA-256 of `episodes.csv` `c5852090…`, identical to the committed file). Phase 7's
   `make eval` records the second worker count in `run_info.json`.
 
+## Phase 4
+
+### P4-D1 — Forecasters are fitted on the development pool, not on dmf's `id` train partition (2026-09-23)
+
+*Decision (user, 2026-09-23).* `dlinear_ols`, `residual_interval`, `tcn` and `tcn_quantile` are
+fitted on `rld.deck.splits.dev_pool(sim_cfg)[0]`:
+- 729 realizations: frigate, SS3–SS5, 45/135/180°, 0/6/12 kn, seed ordinals 0–26;
+- canonical key-list SHA-256 `346b50fa…`.
+
+`dev_pool()[1]` is used for early stopping, seed selection and every calibration:
+- 135 realizations, seed ordinals 27–31;
+- SHA-256 `ea4a2cf2…`.
+
+The full key lists and hashes are in `results/forecast/fit_keys.json` and
+`results/forecast/fit_manifest.json`.
+
+*Reason.* The kickoff prompt and plan task 1 said "fit on the `id` regime". dmf's `id` train
+partition is frigate seeds 0–26 over **all** sea states and headings, 1 296 realizations. It
+therefore contains SS6 and 90° realizations, and those are `unseen_seastate`-test and
+`unseen_heading`-test episodes on the frozen lists (P3-D2). The plan's Phase 4 note (a) supersedes
+the task text.
+
+*How dmf is driven.* dmf selects training data by regime name only.
+`rld.deck.forecast_fit` therefore uses dmf as a library:
+- it builds a `dmf.data.splits.Split` whose `train_keys` / `val_keys` are the two pools (label
+  `dev_pool`);
+- it uses dmf's own dataset, fitting, export and parity code, unmodified.
+
+The corpus is regenerated with dmf's `generate_corpus.py` into `artifacts/dmf/corpus`:
+- 2 304 realizations, 1.11 GB, manifest SHA-256 `64ff4a17…`;
+- the dmf submodule SHA is `e9fa15cc…`, unchanged;
+- `third_party/` is untouched (`git status` clean).
+
+*Test.* `tests/test_deck_forecast.py` reads the fitted keys back and checks them against the
+manifest hashes. It asserts that both pools are disjoint from every realization in all five
+`results/episodes/` lists.
+
+### P4-D2 — Model set, seeds, selection and what is stored (2026-09-23)
+
+**Models and configs.** Every model uses dmf's own configs: `configs/model/*.yaml` and
+`configs/data/default.yaml`, with SHA-256s in the manifest.
+
+| model | head | how it is fitted | train settings from |
+|---|---|---|---|
+| `dlinear_ols` | point | closed form | `e02_deep.yaml` |
+| `residual_interval` | quantile | DLinear-OLS point plus empirical 5/95 % residual quantiles fitted on the tune pool; the band's width does not depend on the input | `e03_probabilistic.yaml` |
+| `tcn` | point | AdamW, bf16, 60-epoch cap, batch 1024, lr 2e-3 | `e02_deep.yaml` |
+| `tcn_quantile` | 9-level fan | same as `tcn` | `e03_probabilistic.yaml` |
+
+**TCN seeds.** Seeds 0, 1 and 2 (dmf's minimum). Each seed gets its own data loader, shuffled by
+that seed.
+- *Selection rule, fixed here before any fit finished:* the deployed checkpoint is the seed with
+  the lowest tune-pool loss (MSE for `tcn`, pinball loss for `tcn_quantile`).
+- The losses of all seeds are recorded in the manifest.
+
+**What is stored.** dmf does not store `NormStats`, and never saves DLinear-OLS. So each
+`artifacts/dmf/<model>/` holds:
+- `state_dict.pt`;
+- `norm_stats.npz`, the per-channel train-partition std that dmf divides by. dmf de-means each
+  window by its own mean;
+- `model.onnx`, from `dmf.deploy.export_onnx`;
+- `conformal_padvz.npz` (P4-D3);
+- `meta.json`, which holds the SHA-256 of every file and is verified on load.
+
+torch↔ORT parity is checked with `dmf.deploy.parity`. `residual_interval`'s tune loss is in-sample
+by construction, and the manifest flags this.
+
+### P4-D3 — Online adapter semantics (2026-09-23)
+
+**The feed (`rld.deck.forecast.ShipMotionFeed`).**
+- *What it is.* The past-only history of dmf's 6 clean channels, full scale. It is an ideal
+  (noise-free, zero-latency) ship motion reference unit, **past only**.
+- *Privilege.* It is not privileged **with respect to the future**: it never reads deck motion after
+  the current time.
+  - It is, however, an **extra ideal ship motion sensor** that `gated` and the PID controllers do
+    not have. It supplies 4.0 s model of pre-episode history, plus heave, roll and pitch rates. The
+    observation vector carries neither.
+  - Comparisons between forecast-using and non-forecast methods (`gated_forecast*` against `gated`
+    here; `ppo_forecast` against `ppo` in Phase 6) therefore compare different sensor suites as well
+    as different decision rules.
+  - Observation noise is `enabled: false` in every evaluation, and this feed is noise-free too.
+  - *Correction (2026-09-23, results-skeptic M3).* An earlier version of this bullet said the feed
+    gives "no information advantage over `gated`". That was wrong.
+- *Clock.* The runner advances its clock with `advance_to` before each `act`. The source is never
+  evaluated at a time later than the clock.
+- *Grid.* Samples lie on dmf's absolute 10 Hz full-scale grid, bit-identical to the corpus `t`
+  column. The 200-sample ring buffer is pre-filled from `[t0 − 4.0 s, t0]` model, i.e. before the
+  episode (P2-D7).
+- *Where it cannot run.* The static list has no vessel, so the feed cannot be built on it.
+
+**The float32 cast.** The adapter reproduces dmf's pipeline including the corpus's float32 storage
+cast.
+- Without the cast, bridge-fed parity is 8.7× (`dlinear_ols`) and 9.8× (`residual_interval`) the
+  `1e-4·max(1,|y|)` tolerance.
+- The cause is the model's conditioning: DLinear-OLS `remainder` rows have L1 norms up to 6 512.
+- The uncast figure is recorded, non-gated, in `results/forecast/parity.csv`.
+
+**Pad quantities.** For a centreline pad, `z = heave + x·sin(pitch)` and
+`v_z = heave_rate + x·cos(pitch)·pitch_rate`. They are converted to model units at z × λ and
+v_z × √λ.
+
+**The pad-v_z band: a conformal-calibrated box** (user decision, 2026-09-23).
+- *Construction.*
+  - Take the interval-arithmetic box from the channel bands, which is exact and conservative.
+  - Rescale its half-width about the point by one split-conformal γ per lead.
+  - Fit γ on the tune pool to 90 % pad-v_z coverage. dmf's conventions apply: the score, the
+    `ceil((n+1)(1−α))` order statistic, α = 0.1.
+  - Do this per model and per pad.
+- *Why not the raw box.* The raw box assumes the heave-rate and lever-arm terms are independent.
+  So it over-covers at the aft pad (0.91–0.99).
+- *The γ values for `residual_interval`.* Aft γ = 0.61–0.76; CG γ = 1.00.
+- *Pad matching.* Pads are matched by lever arm as a fraction of vessel length. The s175 aft pad
+  therefore uses the frigate-calibrated γ, a transfer under the vessel shift like the forecaster
+  itself.
+- *What stays uncalibrated.* Roll and pitch keep the model's native 5/95 % bands. Pad z keeps the
+  raw box; no controller reads it.
+- *Coverage.* Calibrated pooled coverage is 0.896–0.903 at every lead and pad. But the band has one
+  width for every sea state, so it under-covers at SS5 (0.81 aft, 0.74 CG at 9.3 s full). See
+  `results/forecast/coverage.csv`.
+
+**`gated_forecast` and `gated_forecast_tcn`.** These use the shared `QuiescenceRule` (P3-D3
+amendment) unchanged:
+- 12 samples, 1/30 s apart, from `t_td = t + h / descent_rate`, the oracle's law, which is now a
+  shared helper.
+- The band is read by linear interpolation of the **forecast** on its 50 Hz model grid. This is an
+  interpolation of predictions, not of deck motion.
+- `max(|lo|, |hi|)` per sample is handed to `verdict`. This is dmf's interval rule: the whole 90 %
+  band inside ±limit.
+- A window past the 3.0 s-model horizon is not quiescent.
+
+**Rates and cost.**
+- One new sample arrives every 0.02 s model, 1–2 per 30 Hz control step.
+- On CPU ORT with 1 thread, a step costs p50 0.86 ms (`dlinear_ols`) and 1.04 ms
+  (`residual_interval`), against the 33.3 ms control period (`results/forecast/cost.csv`).
+
+### P4-D4a — Pre-registered expectation for the forecast-gated arms (2026-09-23, before any `gated_forecast` episode on the frozen lists)
+
+**Evidence.** `results/forecast/band_feasibility.csv`: `residual_interval` on the tune pool, leads
+7.0 / 8.0 / 9.3 s full, which is where `gated_forecast`'s window sits.
+- At the **aft** pad, the calibrated pad-v_z band is 0.35–0.36 m/s model wide at those leads. The
+  permissive limit ±0.16 leaves a window only 0.32 m/s wide. So the fraction of forecasts that pass
+  is **0.000** at SS3, SS4 and SS5, under every construction tried.
+- The true future passes all three limits 0.95 / 0.77 / 0.45 of the time (SS3 / SS4 / SS5).
+- At the **CG**, the band passes 0.92 / 0.69 / 0.38, against a true base rate of 0.96 / 0.88 / 0.59.
+
+**Expectations, recorded before the run:**
+1. `gated_forecast` (`residual_interval`) at the **aft** pad times out on ≥ 95 % of episodes in
+   every regime × sea-state cell. This is a property of a fixed-width band at 7–9 s full-scale
+   leads, not of the deck. If it holds, it is reported as found and not fixed after the fact.
+2. With the pad at the CG, the same controller commits. Its timeout fraction rises with sea
+   state. No numeric prediction is made.
+3. `gated_forecast_tcn` (`tcn_quantile`): no numeric prediction is made. Its band depends on the
+   input and may pass in calm windows.
+
+*Addendum (2026-09-23, 14:30, after the TCN fits and before any e02 episode).* The `tcn_quantile`
+fits finished, and the selected checkpoint is seed 1. The same `band_feasibility.csv` analysis now
+covers it, at a lead of 8.0 s full with the calibrated band.
+
+| aft pad, lead 8.0 s full | SS3 | SS4 | SS5 |
+|---|---|---|---|
+| calibrated band, median width (m/s model) | 0.061 | 0.113 | 0.198 |
+| pad-v_z coverage | 0.91 | 0.90 | 0.89 |
+| all three quantities inside, `tcn_quantile` band | 0.93 | 0.57 | 0.17 |
+| all three quantities inside, true future (base rate) | 0.95 | 0.77 | 0.45 |
+
+- Unlike `residual_interval`, the TCN arm is therefore expected to commit at the aft pad.
+- Its pass rate falls well below the base rate as sea state rises.
+- This is evidence, not a new scored prediction. Expectation 3 stands as written.
+
+*Erratum (2026-09-23, results-skeptic M2; the text above is left as written).* The heading's
+"before any `gated_forecast` episode on the frozen lists" is **not true as written**.
+
+What happened:
+- A wiring smoke run at about 10:23 local (`run_info` 14:23 UTC, in the session scratchpad) flew
+  366 frozen-list episodes. It took the first 3 episodes of each `id` and `unseen_vessel` cell,
+  plus 3 static, for all 7 controllers × 2 pads.
+- That included 24 aft `gated_forecast` episodes with the real `residual_interval` model, all
+  timeouts. It also included a smoke-checkpoint `tcn_quantile`, whose numbers are meaningless.
+- P4-D4a was written into the working tree in the same period. Its order relative to the smoke run
+  is not established.
+- P4-D4a was first committed in `9e8061f` at 14:25:57 local. The addendum's "14:30" stamp is wrong:
+  it was written shortly before that commit.
+- *Corrected at the Gate 4 review.* e02's episodes began at about 14:25:24 local, roughly 33 s
+  **before** that commit. The start is `run_info` `timestamp_utc` 18:53:58, taken at the end of
+  the run, minus `wall_s` 1 714. The run writes no result until it ends, so no e02 result existed
+  before P4-D4a was committed.
+
+What this means:
+- Expectation 1 should be read as recorded after, or at best alongside, a 24-episode smoke run.
+- It was grounded in the tune-pool band analysis (the fraction of forecasts whose band passes was
+  0.000 at SS3–SS5), which predates both.
+- Nothing was tuned after the smoke run. For the same episodes, the smoke rows and the e02 rows are
+  identical in outcome, steps, touchdown time, touchdown speed and `td_in_quiescent_window`. This
+  was checked by the results-skeptic against the smoke `run_info` and `episodes.csv` in the session
+  scratchpad. That file is **not committed**, so the check cannot be traced to a committed artifact.
+
+**Other records for P4-D2 and P4-D3.**
+- *TCN training.* Every TCN fit ran to the 60-epoch cap without early stopping: best epochs 59/56/56
+  for `tcn` and 59/59/59 for `tcn_quantile`. So the models may be under-trained against dmf's own
+  budget, which was kept unchanged. Tune losses: `tcn` MSE 0.09920 / 0.09950 / 0.09911, selected
+  seed 2; `tcn_quantile` pinball 0.05036 / 0.05034 / 0.05066, selected seed 1.
+- *Seed sensitivity (user decision, 2026-09-23).* The top two `tcn_quantile` seeds differ by 0.03 %
+  in tune loss, so the selection is effectively arbitrary. Seeds 0 and 2 are therefore evaluated as
+  **secondary** arms, `gated_forecast_tcn_seed0` and `gated_forecast_tcn_seed2`, in
+  `results/e02_tcn_seeds/`. The pre-registered selected seed stays the primary arm.
+- *Coverage.* The coverage P4-D3 quotes (0.896–0.903) is in-sample, because the band was
+  calibrated on the same tune pool. Its 2-fold out-of-sample counterpart is in
+  `results/forecast/coverage.csv`.
+- *Deferred.* Plan task 3's forecast block for the RL observation is **deferred to Phase 6**:
+  - `rld.deck.forecast.leads_full_s` provides pad z and v_z at leads of 1/2/3 s full scale;
+  - it is not wired into `rld.envs.observation`;
+  - it is not a Gate 4 criterion.
+
+### P4-D4 — Forecast-gated results on the frozen lists (2026-09-23)
+
+**Sources.**
+- `results/e02/` holds 7 controllers × {aft, cg} on all five frozen lists: 38 400 episodes, 1 714 s at
+  24 workers.
+  - It was launched from the working tree committed as `9e8061f`. That SHA is not recorded in its
+    `run_info`, which predates the `git_sha` field.
+  - Its summary was re-derived from the unchanged `episodes.csv`, adding the per-listed-episode
+    quiet columns. The re-derivation ran from a dirty tree, later committed as `12fd9f5`
+    (`run_info.resummarised`, `episodes_flown: 0`).
+  - Between those commits `gated_forecast.py` changed only in docstrings and factories, and the
+    forecaster file hashes are pinned per row.
+- `results/e02_tcn_seeds/` holds the secondary seed arms, 10 400 new episodes at `12fd9f5` (clean
+  tree), plus e02's rows carried.
+- All numbers are simulation only, on a Froude-scaled Crazyflie model and dmf's synthetic JONSWAP
+  deck motion. Nothing here concerns real flight or real deck data.
+
+**Reproduction.**
+- The e02 aft rows of the five Phase 3 controllers are byte-identical to `results/e01/episodes.csv`
+  (14 000 of 14 000; `run_info.json["reference_check"]`).
+- The episode-list MANIFEST is 10/10 OK.
+- The P3-D1 block SHA-256 verifies before each run.
+
+**Scoring of P4-D4a.**
+1. **Expectation 1 held.** `gated_forecast` (`residual_interval`) at the aft pad: 2 600 of 2 600
+   moving-deck episodes time out, with zero touchdowns in all 13 regime × SS cells.
+2. **Expectation 2.** Recorded as "timeouts rise with sea state"; scored as non-decreasing. At the
+   CG the same controller commits, and its success falls with sea state:
+   - `id`: SS3 0.995, SS4 0.955, SS5 0.79, SS6 0.315;
+   - `unseen_heading`: flat at SS3 and SS4 (1.000, 1.000).
+3. **Expectation 3** made no prediction. `gated_forecast_tcn` commits at the aft pad (`id` success
+   1.00 / 0.95 / 0.60 / 0.165, SS3 → SS6).
+
+**Findings.** They are descriptive: per-cell Wilson 95 % CIs, compared over 26 moving-deck cells,
+with no multiplicity correction and no pre-registered hypothesis. "Separated" means the two
+intervals do not overlap.
+
+**Outcome classes.** Every forecast-gated failure is a `timeout`, except for a few bounces:
+- 2 bounces in e02 and 5 more in the seed arms, at most 0.005 in any cell;
+- no crash, off-pad or hard landing anywhere.
+
+This follows from `fallback_commit_s: null` (P3-D3) and the P3-D1 episode budget: a commit window
+that never arrives is reported as a timeout, not rescued.
+
+**Success: forecast gating lowers it.** Counts are cells with separated CIs:
+
+| arm | worse than `gated` | better than `gated` | worse than `pid_feedforward` |
+|---|---|---|---|
+| `gated_forecast` | 19 of 26 | 0 | 20 of 26 |
+| `gated_forecast_tcn` | 9 of 26 | 0 | 12 of 26 |
+
+- For `gated_forecast_tcn`, the loss grows with sea state. For example, `id` SS6 aft success is
+  0.165 against 0.63 for `gated`.
+- `pid_feedforward`, ungated, has the highest success, or success within the CI of the highest, in
+  every cell. At CG `unseen_heading` SS5, `oracle_gated` has 0.995 against its 0.990.
+
+**Quiet landings: count them per listed episode, not per touchdown.**
+- Per touchdown, `gated_forecast_tcn` looks close to `oracle_gated` (e.g. `id` SS6 aft 0.64 against
+  0.68). But it touches down on only 33 of 200 episodes, against 129.
+- Per **listed** episode (`quiet_landings_per_listed`), the separated-CI cells against `gated` are:
+
+  | arm | more than `gated` | fewer than `gated` |
+  |---|---|---|
+  | `gated_forecast_tcn` | 5 of 26 (aft `id` SS4, aft `unseen_heading` SS5, CG `id` SS4, CG `id` SS5, CG `unseen_heading` SS5) | 1 (aft `unseen_vessel` SS6) |
+  | `gated_forecast` | 2 | 13 |
+
+- Against `oracle_gated`, both arms have fewer quiet landings in 12–17 cells and more in none.
+- **Supported:** at SS4–SS5 the TCN arm converts some of `gated`'s non-quiet landings into quiet
+  ones, and pays in timeouts.
+- **Not supported:**
+  - that forecast gating improves commit timing overall;
+  - that it approaches the commit-timing oracle;
+  - that it helps at SS6.
+
+**Seed sensitivity** (secondary, `results/e02_tcn_seeds/`).
+- Across `tcn_quantile` seeds 0, 1 (selected) and 2, the largest per-cell spread is 0.075 in
+  success (aft `unseen_heading` SS6: seed 0 0.295, seed 1 0.22, seed 2 0.235) and 0.07 in quiet landings per listed
+  episode (aft `unseen_heading` SS5).
+- Every seed is worse than `gated` on success in 8–9 cells and better in none.
+- Every seed has more quiet landings per listed episode than `gated` in 3–6 cells and fewer in 1.
+- So the **direction** of the TCN-arm findings does not depend on which seed was selected, but the
+  specific cells partly do.
+  - Success: every seed is worse than `gated`, in 8–9 cells, and better in none.
+  - Quiet landings: seed 2 reproduces only 3 of the 5 cells where the selected seed has more than
+    `gated` (aft `id` SS4, CG `id` SS4, CG `id` SS5), and neither `unseen_heading` SS5 cell.
+
+**The aft vs CG control.**
+- At the CG the DLinear band passes and the arm commits. At the aft pad it never does.
+- The aft band's excess width comes from the lever-arm term (P4-D3, `band_feasibility.csv`).
+- Aft-pad v_z is where dmf's roll/pitch–heave phase defect enters. So the aft-pad null for the
+  fixed-width forecaster is reported together with this caveat, as the CG arm requires.
+
+**Distribution caveats.**
+- The forecasters were fitted on frigate SS3–SS5 at 45/135/180°.
+- The SS6, 90° and s175 cells are therefore outside the forecasters' training range, as they are for
+  every learned method (P3-D2).
+- The s175 aft pad uses the frigate-calibrated γ (P4-D3).
+
+**Cost.** Per 30 Hz control step, CPU ORT with 1 thread, p50 / p99 (`results/forecast/cost.csv`):
+
+| model | p50 | p99 |
+|---|---|---|
+| `dlinear_ols` | 0.94 ms | 1.20 ms |
+| `residual_interval` | 1.15 ms | 1.49 ms |
+| `tcn` | 1.60 ms | 2.02 ms |
+| `tcn_quantile` | 1.88 ms | 3.08 ms |
+
+That is against a 33.3 ms control period. The `cost.csv` regenerated at `12fd9f5` supersedes the
+earlier P4-D3 figures. A feed `reset` (200 dmf evaluations) costs about 52 ms, once per episode.
+
+### P4-D5 — `oracle_gated` relabel and its config hash (2026-09-23)
+
+Plan note (c) and P3-D4 asked for this relabel. The stale "upper bound" labels were replaced by
+"commit-timing oracle (privileged)":
+- in `configs/control/oracle_gated.yaml` line 1;
+- in the `registry.py` module docstring and description;
+- in the `PrivilegedContext` and `oracle.py` docstrings;
+- in one test docstring.
+
+All of these are comment and docstring changes only. No value or behaviour changed.
+
+**The hash.** `oracle_gated.yaml` SHA-256 moved:
+- old: `e8bc4efd5615cea1a07f05f0368f226b682e11d78968b2a8d6b03c8f0862b4f1`, which remains in the 14
+  `oracle_gated` rows of `results/e01/summary.csv` and is left as committed;
+- new: `5daca06e217fc765611af98af2fc70f312ca4cbdafffe408d5827eae8138bce3`, carried by
+  `results/e02/summary.csv`.
+
+`resolved_gains_sha256` is unchanged at `dec9793d…`.
+
+**Evidence the change is harmless.** `results/e02/run_info.json["reference_check"]` shows the 2 800
+aft `oracle_gated` rows of e02 byte-identical to `results/e01/episodes.csv`, and likewise for all
+five Phase 3 controllers (14 000 of 14 000 rows). The only provenance difference it lists is this
+hash.
+
+`results/e01/success_vs_seastate.md` was re-rendered with `--render-only`. Only the `oracle_gated`
+label lines changed. A render-time guard (`rld.eval.report`) now refuses any output containing
+"upper bound".
+
+**The pad-at-CG control arm.** It evaluates `gated`, `oracle_gated`, both forecast-gated arms and
+the three PID baselines on the **same** frozen episodes, with the pad at the CG. It is added here
+because aft-pad v_z carries dmf's roll/pitch–heave phase defect (CLAUDE.md). It is a control, not
+a new evaluation list.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|
@@ -1318,3 +1674,4 @@ Success fractions:
 | 1 | 2026-09-21 | PASSED | `make test lint` green (66 tests, 62 s; ruff + ruff-format + mypy --strict clean). `results/deck_stats.csv` 192 rows = 96 cells x {aft, cg}, full grid (2 vessels x SS3-SS6 x 4 headings x 3 speeds), all 2304 realizations, with `z_std_model_m`, `vz_std_model_m_s`, `vz_p99_model_m_s`, `az_p99_model_m_s2` populated and no NaN; plus `deck_stats_seeds.csv` (4608 rows) and `deck_feasibility.csv` (2 rows). lambda = 1/25 and r_pad = -0.4*L confirmed in P1-D1. Feasibility rule PASS: frigate SS6 180 deg 12 kn aft vz p99 = 0.577165 m/s vs the 2.08333 m/s gate threshold, 3.61x inside; the rejected `SPEED_LIMIT` reading is recorded as FAIL beside it. Sign convention and ZYX rotation order corrected and pinned by three hand-computed cases (P1-D2); one project-wide lambda (P1-D3). |
 | 2 | 2026-09-22 | PASSED | `make test lint` green (118 passed, 1 skipped, 107 s; ruff + ruff-format + mypy --strict clean). The 1 skip is by design: `tests/test_platform.py` gates only the configured driver and *measures* the other, and `test_constraint_driver_fails_the_tracking_gate` asserts the rejected one fails. Platform tracking, `kinematic` driver, 10 s model at frigate SS6 180 deg 12 kn aft: body-origin 0.000 mm and plate-corner 2.2e-16 m against the 1 mm gate, orientation 3.0e-8 rad, `getBaseVelocity` linear and angular ratio 0.0 % against the 2 % gate; `constraint` fails every one of those by an order of magnitude and cannot be tuned into passing (24-point sweep, four identical digits) -- P2-D1. `gymnasium.utils.env_checker.check_env` passes; reset determinism bit-identical as the env's 1st and 3rd reset; drop on a static pad registers exactly one touchdown; scripted 0.3 m/s descent on a static pad 100/100 `success`. `results/e00_env_sanity.csv` (4 rows) + `results/e00_env_sanity_episodes.csv` (800 rows) written from the `id` split's val partition, draw seed 20260922: hover 1.000 `timeout` at SS3 and SS5, random 1.000 `crash` at both, no successes under either -- outcome fractions sum to 1.000000 per row. **PyBullet-vs-analytic touchdown disagreement 0/800 = 0.0000** against the < 1 % gate, plus 0/100 on scripted static descents and 0/30 on a moving SS5 deck. `results/env_throughput_landing.csv` (8 rows) records the deck-in-the-loop throughput P3-D1 must size from (P2-D8); `results/env_throughput.csv` untouched. Two flags carried forward, both recorded rather than fixed: one of 800 sanity episodes tunnelled (7.86 mm penetration vs the 5 mm threshold) and it was the only random episode that ever reached contact, so the random arm exercises the touchdown path barely at all -- the scripted tests carry that load; and the plan's "dropped from rest" is not expressible in a velocity-setpoint action space, so the drop test uses the maximum commanded descent (P2-D9). |
 | 3 | 2026-09-22 | PASSED (2nd attempt) | First attempt FAILED on the `results-skeptic` review (BLOCKING B1: the restated H1 was beatable by a slower PID; MAJOR M1-M3), before any RL run; remediated with user decisions (P3-D1 revision 1 §9, P3-D3 amendments). Second attempt: `make test lint` green (233 passed, 1 skipped by design, 162 s; ruff + ruff-format + mypy --strict clean). `pid_feedforward` 200/200 on the static pad and 200/200 at `id` SS3 (Wilson [98.1, 100.0] each) against the >= 95 % gate, from `results/e01/episodes.csv` at `d35f224`. Success-vs-sea-state table `results/e01/success_vs_seastate.md` committed: 5 controllers x 14 cells x N = 200, re-renders byte-identically from `summary.csv`; no crash or off_pad anywhere; detector disagreement 5/14000; tunnelling 14 (all `pid_track_descend`, max 6.5 mm). Frozen lists `results/episodes/` committed at `0780aaa`, MANIFEST SHA-256 `e6f30e55e478d39061b94e38de33959ca99b16e8cac38a3bd99b34f6543ad4a2`, `--check` 10/10 OK. P3-D1 FROZEN revision 1, block SHA-256 **`21465588610e65f1d1253bd26e5ce5db1da938889c6042338e1de8d4d99f5ed2`** (from `### P3-D1 — FROZEN` to the line before `### P3-D2`, UTF-8). Second `results-skeptic` review: no BLOCKING; MAJOR-1 (H1 scope) and MINOR 1-9 folded in by P3-D4 errata without touching the frozen block; three items carried to Phase 4 (P3-D4). |
+| 4 | 2026-09-23 | PASSED | Criteria checked against committed artifacts at `eeb87d5` plus the Gate 4 wording fixes. `make test lint` green: 320 passed, 1 skipped by design (P2-D1), 313 s; ruff, ruff-format and mypy --strict clean. `tests/test_deck_forecast.py` and `tests/test_control_gated_forecast.py` 56/56 with **0 skips**, artifacts present (a fresh clone without `artifacts/dmf/` would skip parity, so this run is the evidence). **Parity:** `results/forecast/parity.csv`, 18 gated checks over 6 model dirs, all pass at `1e-4·max(1,|y|)`, worst 0.041× tolerance; bridge-fed parity needs dmf's float32 cast (P4-D3). **Causality:** the feed-clock spy and the future-perturbation bit-identity tests pass. **Leakage:** 729 train / 135 tune forecaster keys vs 1 273 frozen-list realizations, overlap 0 (recomputed independently from `fit_keys.json`). **Frozen-list results:** `gated_forecast` and `gated_forecast_tcn` committed in `results/e02/` beside `gated`, `oracle_gated` and the three PID baselines, 26 cells × 200 each at aft and CG, with `td_in_quiescent_window`, quiet landings per listed episode and Wilson CIs; the static list is not run for feed controllers, reason recorded. Phase 3 aft rows byte-identical to e01 (14 000/14 000). Secondary seed arms in `results/e02_tcn_seeds/` (`12fd9f5`, clean). Oracle relabel done; P4-D5 records the hash. MANIFEST 10/10; P3-D1 block SHA-256 unchanged. **Results-skeptic:** first review MAJOR M1–M5 remediated (P4-D3 wording, P4-D4a erratum, P4-D5, M1 columns, seed arms); second review no BLOCKING and no MAJOR, 6 MINOR wording and provenance errors fixed in P4-D4/P4-D4a. Headline (P4-D4): pre-registered expectation 1 held, 2 600/2 600 aft `gated_forecast` timeouts; forecast gating lowers success against `gated` in 19 (DLinear) and 9 (TCN) of 26 cells, and improves it in none. |

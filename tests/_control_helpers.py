@@ -1,7 +1,7 @@
 """Shared helpers for the ``tests/test_control_*.py`` files.
 
-Not a test module (the leading underscore keeps pytest from collecting it). Two things live
-here so the four controller test files do not each re-derive them:
+Not a test module (the leading underscore keeps pytest from collecting it). These live here
+so the controller test files do not each re-derive them:
 
 * :func:`synthetic_obs` -- an observation vector built **through the declared layout**, from
   world-frame quantities, with the drone-yaw rotation applied the way the environment
@@ -9,6 +9,8 @@ here so the four controller test files do not each re-derive them:
 * :func:`run_episode` -- one episode of a controller in a real environment, returning the
   action stream and the final record, with the privileged context built exactly as the
   evaluation runner will build it.
+* :func:`quiescence_windows` and :func:`deck_normal` -- the 40 seeded deck windows on which
+  ``oracle_gated`` and ``gated_forecast`` are both checked against ``QuiescenceRule``.
 
 Units: metres, metres per second and seconds model scale; angles radians in the vector.
 """
@@ -189,3 +191,40 @@ def selected_trial_params(csv_path: str) -> dict[str, float]:
         rows = [row for row in csv.DictReader(handle) if row["selected"] == "True"]
     assert len(rows) == 1, f"{csv_path}: expected exactly one selected trial, got {len(rows)}"
     return {k[len("param_") :]: float(v) for k, v in rows[0].items() if k.startswith("param_")}
+
+
+def deck_normal(roll_deg: float, pitch_deg: float) -> tuple[float, float, float]:
+    """P1-D2's unit deck normal from dmf-sign roll and pitch, degrees in, world frame."""
+    r, p = np.radians(roll_deg), np.radians(pitch_deg)
+    return (-np.sin(p) * np.cos(r), -np.sin(r), np.cos(p) * np.cos(r))
+
+
+def quiescence_windows(
+    rng: np.random.Generator, limits: Any, n: int
+) -> list[tuple[np.ndarray, ...]]:
+    """Deck windows (roll deg, pitch deg, pad v_z m/s model), ``n`` samples each, 40 windows.
+
+    Every value is either well inside its limit (<= 0.9x) or well outside (1.1-2x), so
+    float32 rounding in the observation cannot flip a sample. Half the windows are all
+    quiet; the rest carry one violation in one channel at a random position. Shared by the
+    ``oracle_gated`` and ``gated_forecast`` tests, which must see the **same** windows.
+
+    Args:
+        rng: Seeded generator (both tests use ``default_rng(20260922)``).
+        limits: :class:`rld.control.quiescence.ModelQuiescenceLimits`.
+        n: Samples per window, dimensionless.
+
+    Returns:
+        ``[(roll, pitch, v_z), ...]``, each ``(n,)``.
+    """
+    scale = np.array([limits.roll_deg, limits.pitch_deg, limits.pad_vz_m_s])
+    out = []
+    for k in range(40):
+        values = rng.uniform(-0.9, 0.9, size=(n, 3)) * scale
+        if k % 2:
+            j, c = int(rng.integers(n)), int(rng.integers(3))
+            if k in (1, 3):
+                j = 0 if k == 1 else n - 1  # the window's edges
+            values[j, c] = rng.choice([-1.0, 1.0]) * rng.uniform(1.1, 2.0) * scale[c]
+        out.append((values[:, 0], values[:, 1], values[:, 2]))
+    return out

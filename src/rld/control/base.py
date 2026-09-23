@@ -5,7 +5,8 @@ The contract
 Every controller in this project -- the four classical baselines here and, from Phase 6, the
 residual wrapper around ``pid_feedforward`` -- implements :class:`Controller`:
 
-* ``reset(seed, context=None)`` at the start of every episode, **after** ``env.reset``;
+* ``reset(seed, context=None, motion_feed=None)`` at the start of every episode, **after**
+  ``env.reset`` (and after the feed's own ``reset``, when there is one);
 * ``act(obs)`` exactly once per control step, starting with the observation ``env.reset``
   returned, and returning a ``(3,)`` float32 action in ``[-1, 1]^3``.
 
@@ -41,6 +42,18 @@ episode. The evaluation runner builds it with :meth:`PrivilegedContext.from_env`
 so it is the trajectory the plate is driven along, bit for bit; ``rld.envs`` is not edited
 to provide it.
 
+The ship-motion feed
+--------------------
+A :class:`rld.deck.forecast.ShipMotionFeed` is the **past-only** history of dmf's six clean
+ship channels (an ideal, noise-free, zero-latency ship motion reference unit). It is not
+privileged: it never returns a sample later than its clock, and the runner alone advances
+that clock (``feed.reset(t0)`` after ``env.reset``, then ``feed.advance_to(t0 + k / 30)``
+before the ``k``-th ``act``). The runner passes it **only** to controllers whose registry
+entry sets ``needs_motion_feed=True`` (``gated_forecast``, ``gated_forecast_tcn``). Both
+directions are enforced in ``reset``: a controller that needs the feed raises without it,
+and one that does not raises if handed one, so a runner that wires the wrong controller
+fails loudly instead of running a different experiment.
+
 Units and scales
 ----------------
 Metres, metres per second and seconds are **model** scale throughout (one model second is
@@ -68,6 +81,9 @@ from rld.envs.config import (
 from rld.envs.platform import build_trajectory
 
 if TYPE_CHECKING:
+    # Type-only: rld.deck.forecast imports torch, which no classical controller should pay
+    # for at import time (nor every spawned evaluation worker).
+    from rld.deck.forecast import ShipMotionFeed
     from rld.envs.landing_env import DeckLandingAviary
 
 __all__ = [
@@ -76,6 +92,7 @@ __all__ = [
     "DeckWindow",
     "PrivilegedContext",
     "StepClock",
+    "reject_motion_feed",
 ]
 
 
@@ -168,7 +185,8 @@ class PrivilegedContext:
     """The true deck-point trajectory of one episode, read-only.
 
     **Privileged.** Only a controller the registry marks ``privileged=True`` may receive
-    it, and any result computed with it is an upper bound, never a deployable result.
+    it, and any result computed with it is a commit-timing oracle (privileged) -- not a bound
+    on success or on landing quality -- and never a deployable result.
 
     Attributes:
         t0_model_s: The episode's start offset inside the committed dmf record, seconds
@@ -332,6 +350,24 @@ class StepClock:
         return t
 
 
+def reject_motion_feed(name: str, motion_feed: "ShipMotionFeed | None") -> None:
+    """Raise if a controller that does not consume the ship-motion feed is handed one.
+
+    Args:
+        name: The controller's registry name, for the message.
+        motion_feed: What the runner passed.
+
+    Raises:
+        ValueError: If ``motion_feed`` is not ``None`` -- the runner passed a feed to a
+            controller whose registry entry has ``needs_motion_feed=False``, a wiring bug.
+    """
+    if motion_feed is not None:
+        raise ValueError(
+            f"{name} does not consume a ShipMotionFeed (needs_motion_feed=False in the "
+            "registry), but reset() was given one: the runner is wiring the wrong controller"
+        )
+
+
 @runtime_checkable
 class Controller(Protocol):
     """A landing controller in the shared normalised action space.
@@ -340,12 +376,22 @@ class Controller(Protocol):
         name: Registry name, e.g. ``"pid_feedforward"``.
         privileged: True if the controller reads anything a deployed vehicle could not
             (the true future deck trajectory). Must equal the registry's flag.
+        needs_motion_feed: True if the controller consumes the past-only
+            :class:`~rld.deck.forecast.ShipMotionFeed` (the forecast-gated controllers).
+            Must equal the registry's flag. Not a privilege: the feed never reaches beyond
+            the runner's clock.
     """
 
     name: str
     privileged: bool
+    needs_motion_feed: bool
 
-    def reset(self, seed: int, context: PrivilegedContext | None = None) -> None:
+    def reset(
+        self,
+        seed: int,
+        context: PrivilegedContext | None = None,
+        motion_feed: "ShipMotionFeed | None" = None,
+    ) -> None:
         """Clear all per-episode state.
 
         Args:
@@ -353,6 +399,10 @@ class Controller(Protocol):
                 record it; a stochastic controller must derive all randomness from it.
             context: The true deck trajectory. Passed by the runner **only** to
                 controllers the registry marks privileged; others must ignore it.
+            motion_feed: The episode's past-only ship-motion feed, already ``reset`` to
+                the episode start. Passed by the runner **only** to controllers the
+                registry marks ``needs_motion_feed``; a controller that needs it raises
+                without it, and one that does not raises if given one.
         """
         ...
 

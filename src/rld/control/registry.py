@@ -1,15 +1,25 @@
-"""Controller registry: name -> (factory, config path, ``privileged``).
+"""Controller registry: name -> (factory, config path, ``privileged``, ``needs_motion_feed``).
 
 The evaluation runner resolves every controller through here, and it is the registry's
-``privileged`` flag -- not the controller's own -- that decides whether the runner hands a
-:class:`~rld.control.base.PrivilegedContext` to ``reset``. Each controller's test asserts
-the two flags agree.
+flags -- not the controller's own -- that decide what the runner hands to ``reset``: a
+:class:`~rld.control.base.PrivilegedContext` only when ``privileged``, and a past-only
+:class:`~rld.deck.forecast.ShipMotionFeed` only when ``needs_motion_feed``. Each
+controller's test asserts that its own flags agree with the registry's.
+
+``gated_forecast`` and ``gated_forecast_tcn`` are one class and law
+(:class:`rld.control.gated_forecast.GatedForecast`) with two forecasters (dmf's
+``residual_interval`` and ``tcn_quantile``). They need the feed and are **not** privileged:
+the feed never reaches beyond the runner's clock. ``gated_forecast_tcn_seed0`` and
+``gated_forecast_tcn_seed2`` are the same controller with the two ``tcn_quantile`` seeds the
+pre-registered rule did not select (P4-D2): a **secondary** seed-sensitivity arm, never the
+``gated_forecast_tcn`` result.
 
 ``pid_feedforward_lowvz`` is ``pid_feedforward``'s class and law with a second gain set,
 selected from the existing tuning log (P3-D3 amendment); it is not a new control law.
 
-``oracle_gated`` is the only privileged entry. It is an upper bound and must be marked as
-such in every table; it is never a deployable result.
+``oracle_gated`` is the only privileged entry. It is a commit-timing oracle (privileged), not
+a bound on success or on landing quality, and must be marked as such in every table; it is
+never a deployable result.
 """
 
 from collections.abc import Callable
@@ -20,6 +30,12 @@ from rld.control.base import Controller, ControlSpec
 from rld.control.config import CONTROL_CONFIG_DIR
 from rld.control.feedforward import make_pid_feedforward, make_pid_feedforward_lowvz
 from rld.control.gated import make_gated
+from rld.control.gated_forecast import (
+    make_gated_forecast,
+    make_gated_forecast_tcn,
+    make_gated_forecast_tcn_seed0,
+    make_gated_forecast_tcn_seed2,
+)
 from rld.control.oracle import make_oracle_gated
 from rld.control.pid import make_pid_track_descend
 
@@ -40,6 +56,9 @@ class RegistryEntry:
         privileged: True if the controller reads the true future deck trajectory. The runner
             passes a context **only** to these.
         description: One line for tables and ``--help``.
+        needs_motion_feed: True if ``reset`` requires the episode's past-only
+            :class:`~rld.deck.forecast.ShipMotionFeed`. The runner builds and advances one
+            **only** for these; every other controller raises if handed one.
     """
 
     name: str
@@ -47,6 +66,7 @@ class RegistryEntry:
     config_path: Path
     privileged: bool
     description: str
+    needs_motion_feed: bool = False
 
 
 #: Every registered controller, in the order tables print them.
@@ -92,7 +112,52 @@ REGISTRY: dict[str, RegistryEntry] = {
             factory=make_oracle_gated,
             config_path=CONTROL_CONFIG_DIR / "oracle_gated.yaml",
             privileged=True,
-            description="PRIVILEGED upper bound: commit on the true future quiescent window",
+            description=(
+                "commit-timing oracle (privileged): commit on the true future quiescent window"
+            ),
+        ),
+        RegistryEntry(
+            name="gated_forecast",
+            factory=make_gated_forecast,
+            config_path=CONTROL_CONFIG_DIR / "gated_forecast.yaml",
+            privileged=False,
+            needs_motion_feed=True,
+            description=(
+                "hover 0.3 m above the pad, commit when dmf residual_interval's 90 % band at "
+                "the predicted touchdown is quiescent (past-only ship-motion feed)"
+            ),
+        ),
+        RegistryEntry(
+            name="gated_forecast_tcn",
+            factory=make_gated_forecast_tcn,
+            config_path=CONTROL_CONFIG_DIR / "gated_forecast_tcn.yaml",
+            privileged=False,
+            needs_motion_feed=True,
+            description=(
+                "gated_forecast with dmf tcn_quantile's 90 % band (past-only ship-motion feed)"
+            ),
+        ),
+        RegistryEntry(
+            name="gated_forecast_tcn_seed0",
+            factory=make_gated_forecast_tcn_seed0,
+            config_path=CONTROL_CONFIG_DIR / "gated_forecast_tcn_seed0.yaml",
+            privileged=False,
+            needs_motion_feed=True,
+            description=(
+                "secondary: seed sensitivity -- gated_forecast_tcn with tcn_quantile seed 0 "
+                "(not the selected seed 1, P4-D2)"
+            ),
+        ),
+        RegistryEntry(
+            name="gated_forecast_tcn_seed2",
+            factory=make_gated_forecast_tcn_seed2,
+            config_path=CONTROL_CONFIG_DIR / "gated_forecast_tcn_seed2.yaml",
+            privileged=False,
+            needs_motion_feed=True,
+            description=(
+                "secondary: seed sensitivity -- gated_forecast_tcn with tcn_quantile seed 2 "
+                "(not the selected seed 1, P4-D2)"
+            ),
         ),
     )
 }

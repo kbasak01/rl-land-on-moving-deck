@@ -21,7 +21,7 @@ THROUGHPUT_CSV ?= results/env_throughput.csv
 THROUGHPUT_LANDING_CSV ?= results/env_throughput_landing.csv
 
 .PHONY: test lint format throughput throughput-landing env-sanity \
-        deck-stats baselines dmf-forecasters train-bg eval bench report all
+        deck-stats baselines dmf-forecasters forecast-report train-bg eval bench report all
 
 # --- implemented ------------------------------------------------------------------
 
@@ -58,8 +58,26 @@ throughput-landing: ; $(PY) scripts/env_throughput.py --env landing --policies r
 # and success_vs_seastate.md rendered from the CSV. Parallel over chunks of episodes; the CSVs
 # do not depend on WORKERS (volatile facts go to results/e01/run_info.json).
 baselines: ; $(PY) scripts/eval_baselines.py --out-dir results/e01 --workers $(WORKERS)
-# Phase 4 -- deck-bridge-engineer: dmf corpus + dlinear_ols + tcn -> artifacts/dmf/
-dmf-forecasters: ; @echo "not implemented: phase 4"
+# Phase 4 -- deck-bridge-engineer: the dmf corpus, then the four forecasters fitted on the
+# P3-D2 dev pool (729 train / 135 tune realizations), driven as a library by
+# rld.deck.forecast_fit. Everything is written under artifacts/dmf/ (gitignored) plus the
+# committed record results/forecast/fit_manifest.json + fit_keys.json. Nothing runs inside
+# third_party/ (it is read-only). The corpus (2304 realizations, ~1.1 GB, ~20 s at 24
+# workers) is regenerated only if its manifest is absent. The TCN fits take hours on the GPU:
+# launch in the background with output redirected to a log (no tee: /bin/sh has no
+# pipefail, and a tee would turn a failed fit into a green make).
+DMF_ROOT    ?= third_party/deck-motion-forecast
+DMF_CORPUS  ?= artifacts/dmf/corpus
+DMF_MODELS  ?= dlinear_ols residual_interval tcn tcn_quantile
+DMF_SEEDS   ?= 0 1 2
+DMF_DEVICE  ?= cuda
+$(DMF_CORPUS)/manifest.parquet:
+	$(PY) $(DMF_ROOT)/scripts/generate_corpus.py --config $(DMF_ROOT)/configs/sim/corpus.yaml --out $(DMF_CORPUS) --workers $(WORKERS)
+# Phase 4 -- regenerate results/forecast/{parity,cost,coverage,band_feasibility}.csv from the
+# fitted artifacts. Plain `make test` asserts the same checks and writes nothing.
+forecast-report: ; RLD_WRITE_RESULTS=1 $(PYTEST) tests/test_deck_forecast.py -rs
+dmf-forecasters: $(DMF_CORPUS)/manifest.parquet
+	$(PY) scripts/fit_dmf_forecasters.py --corpus $(DMF_CORPUS) --out artifacts/dmf --models $(DMF_MODELS) --seeds $(DMF_SEEDS) --device $(DMF_DEVICE)
 # Phase 5 -- rl-trainer: background training run; status in artifacts/runs/*/status.json
 train-bg:        ; @echo "not implemented: phase 5 (CFG=$(CFG))"
 # Phase 7 -- eval-auditor: full evaluation matrix on the frozen episode lists -> results/

@@ -50,6 +50,7 @@ Config: ``configs/control/gated.yaml``.
 
 from collections import deque
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -59,11 +60,14 @@ from rld.control.feedforward import PidFeedforward
 from rld.control.obs_view import ObsView
 from rld.control.quiescence import ModelQuiescenceLimits, QuiescenceRule, limits_for
 
+if TYPE_CHECKING:
+    from rld.deck.forecast import ShipMotionFeed
+
 __all__ = ["Gated", "GatedBase", "make_gated"]
 
 
 class GatedBase(PidFeedforward):
-    """Hover-and-commit machinery shared by ``gated`` and ``oracle_gated``.
+    """Hover-and-commit machinery shared by ``gated``, ``oracle_gated`` and ``gated_forecast``.
 
     Subclasses implement :meth:`_rule_fires` and may override :meth:`_observe_deck`.
 
@@ -91,15 +95,22 @@ class GatedBase(PidFeedforward):
         self._committed = False
         self._commit_time_s: float | None = None
 
-    def reset(self, seed: int, context: PrivilegedContext | None = None) -> None:
+    def reset(
+        self,
+        seed: int,
+        context: PrivilegedContext | None = None,
+        motion_feed: "ShipMotionFeed | None" = None,
+    ) -> None:
         """Clear every per-episode state, including the commit latch.
 
         Args:
             seed: Episode seed; recorded only.
             context: Ignored here; the oracle overrides this to require it.
+            motion_feed: Forwarded, so the base raises unless a subclass consumed it
+                (``gated_forecast`` does, and passes ``None`` here).
         """
         del context
-        super().reset(seed, None)
+        super().reset(seed, None, motion_feed)
         self._committed = False
         self._commit_time_s = None
 
@@ -120,6 +131,26 @@ class GatedBase(PidFeedforward):
             v: The observation, world frame.
         """
         del v
+
+    def predicted_touchdown_s(self, v: ObsView, t_s: float) -> float:
+        """Return the touchdown time a commit now would produce.
+
+        The one touchdown-time law of the future-reading gated controllers
+        (``oracle_gated`` and ``gated_forecast``): ``t + max(height, 0) / descent_rate``.
+        It assumes the committed descent closes on the pad at exactly ``descent_rate``,
+        which is what the ``k_ff * v_pad`` feedforward is for, and ignores
+        ``DSLPIDControl``'s tracking lag and the hover-to-descent transient (both make the
+        real touchdown slightly later).
+
+        Args:
+            v: The observation, world frame; ``height_m`` is the clearance along the deck
+                normal, metres model scale.
+            t_s: Episode time, seconds model scale.
+
+        Returns:
+            The predicted touchdown, seconds model scale since the episode start.
+        """
+        return t_s + max(v.height_m, 0.0) / self.pid.descent_rate_m_s
 
     def _rule_fires(self, v: ObsView, t_s: float) -> bool:
         """Return whether the quiescence rule permits a commit now.
@@ -178,15 +209,24 @@ class Gated(GatedBase):
         super().__init__(cfg, spec)
         self._history: deque[tuple[float, float, float]] = deque(maxlen=self.rule.n_samples)
 
-    def reset(self, seed: int, context: PrivilegedContext | None = None) -> None:
+    def reset(
+        self,
+        seed: int,
+        context: PrivilegedContext | None = None,
+        motion_feed: "ShipMotionFeed | None" = None,
+    ) -> None:
         """Clear every per-episode state, including the deck history.
 
         Args:
             seed: Episode seed; recorded only.
             context: Ignored; this controller is not privileged.
+            motion_feed: Must be ``None``; ``gated`` reads the observation only.
+
+        Raises:
+            ValueError: If a feed is passed (a runner wiring bug).
         """
         del context
-        super().reset(seed, None)
+        super().reset(seed, None, motion_feed)
         self._history.clear()
 
     @property

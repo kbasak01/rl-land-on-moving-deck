@@ -31,13 +31,17 @@ final values are ``docs/protocol.md`` P3-D3.
 """
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 from dmf.typedefs import FloatArray
 
-from rld.control.base import ControlSpec, PrivilegedContext, StepClock
+from rld.control.base import ControlSpec, PrivilegedContext, StepClock, reject_motion_feed
 from rld.control.config import PidConfig, load_pid
 from rld.control.obs_view import ObsLayout, ObsView, obs_layout, setpoint_to_action, view
+
+if TYPE_CHECKING:
+    from rld.deck.forecast import ShipMotionFeed
 
 __all__ = ["PidTrackDescend", "TrackDescendBase", "make_pid_track_descend"]
 
@@ -51,12 +55,16 @@ class TrackDescendBase:
     Attributes:
         name: Registry name.
         privileged: Whether the controller reads privileged information.
+        needs_motion_feed: Whether ``reset`` requires a
+            :class:`~rld.deck.forecast.ShipMotionFeed`; False here and in every classical
+            baseline, which raise if handed one.
         pid: The tracker and descent gains.
         spec: The environment facts the controller may know.
     """
 
     name: str = "track_descend_base"
     privileged: bool = False
+    needs_motion_feed: bool = False
 
     def __init__(self, pid: PidConfig, spec: ControlSpec) -> None:
         """Build the controller. No state survives :meth:`reset` except the configs.
@@ -76,14 +84,25 @@ class TrackDescendBase:
 
     # ------------------------------------------------------------------ contract
 
-    def reset(self, seed: int, context: PrivilegedContext | None = None) -> None:
+    def reset(
+        self,
+        seed: int,
+        context: PrivilegedContext | None = None,
+        motion_feed: "ShipMotionFeed | None" = None,
+    ) -> None:
         """Clear every per-episode state.
 
         Args:
             seed: Episode seed; recorded only, the controller is deterministic.
             context: Ignored by non-privileged controllers.
+            motion_feed: Must be ``None``: this controller does not consume the
+                ship-motion feed. A subclass that does consumes it and passes ``None`` up.
+
+        Raises:
+            ValueError: If a feed is passed (a runner wiring bug).
         """
         del context
+        reject_motion_feed(self.name, motion_feed)
         self._seed = int(seed)
         self._clock.reset()
         self._integral_m = np.zeros(2, dtype=np.float64)

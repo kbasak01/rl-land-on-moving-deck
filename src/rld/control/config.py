@@ -4,7 +4,8 @@ One frozen dataclass per controller family, loaded through :func:`rld.config.loa
 following :mod:`rld.envs.config`. The tuned gains of ``pid_feedforward`` are **referenced**,
 not copied, by ``gated`` and ``oracle_gated`` (their YAMLs carry
 ``gains_from: pid_feedforward.yaml``), so re-tuning the base cannot leave the gated
-controllers flying stale gains.
+controllers flying stale gains. ``gated_forecast`` and ``gated_forecast_tcn`` carry the same
+keys plus the forecaster they consult (:class:`GatedForecastConfig`).
 
 Units and scales
 ----------------
@@ -14,19 +15,22 @@ time seconds model scale. A gain's unit is in its name: ``_per_s`` is (m/s)/m,
 named by set and converted by :mod:`rld.control.quiescence`.
 """
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
-from rld.config import CONFIG_DIR, load_yaml, require
+from rld.config import CONFIG_DIR, REPO_ROOT, load_yaml, require
 from rld.control.quiescence import THRESHOLD_SETS
 
 __all__ = [
     "CONTROL_CONFIG_DIR",
     "FeedforwardConfig",
     "GatedConfig",
+    "GatedForecastConfig",
     "PidConfig",
     "load_feedforward",
     "load_gated",
+    "load_gated_forecast",
     "load_pid",
 ]
 
@@ -153,6 +157,55 @@ class GatedConfig:
             )
 
 
+@dataclass(frozen=True)
+class GatedForecastConfig(GatedConfig):
+    """``gated_forecast`` / ``gated_forecast_tcn``: :class:`GatedConfig` plus the forecaster.
+
+    Every inherited key has ``gated``'s meaning and, in the committed YAMLs, ``gated``'s
+    value. A subclass rather than a wrapper, so the controller's ``gated`` attribute -- the
+    config :mod:`rld.eval.controller_config` hashes -- carries the forecaster too.
+
+    Attributes:
+        forecaster_dir: The fitted dmf model directory written by
+            :mod:`rld.deck.forecast_fit` (``artifacts/dmf/<model>/``), absolute. The YAML
+            gives it relative to the repository root.
+        interval: The band's quantile levels, dimensionless, ``(lo, hi)`` with
+            ``0 < lo < hi < 1``; checked against the forecaster's ``interval_levels`` when
+            the controller loads it, so the YAML cannot silently describe a different band
+            from the one the rule is fed.
+    """
+
+    forecaster_dir: Path
+    interval: tuple[float, float]
+
+    def __post_init__(self) -> None:
+        """Validate ranges.
+
+        Raises:
+            ValueError: As :class:`GatedConfig`, or if ``interval`` is not two levels with
+                ``0 < lo < hi < 1``.
+        """
+        super().__post_init__()
+        if len(self.interval) != 2 or not 0.0 < self.interval[0] < self.interval[1] < 1.0:
+            raise ValueError(f"interval must be (lo, hi) with 0 < lo < hi < 1, got {self.interval}")
+
+    def interval_matches(self, levels: tuple[float, float] | None) -> bool:
+        """Return whether a forecaster's band levels are this config's ``interval``.
+
+        Args:
+            levels: The forecaster's ``interval_levels`` (None for a point model).
+
+        Returns:
+            True when both levels agree to ``1e-12``.
+        """
+        if levels is None or len(levels) != 2:
+            return False
+        return all(
+            math.isclose(float(a), float(b), rel_tol=0.0, abs_tol=1e-12)
+            for a, b in zip(levels, self.interval, strict=True)
+        )
+
+
 def _pid_from(raw: dict[str, object], path: Path) -> PidConfig:
     """Build a :class:`PidConfig` from a parsed YAML mapping.
 
@@ -234,4 +287,43 @@ def load_gated(path: Path) -> GatedConfig:
         hover_tolerance_m=float(require(raw, "hover_tolerance_m", path)),
         thresholds=str(require(raw, "thresholds", path)),
         fallback_commit_s=None if fallback is None else float(fallback),
+    )
+
+
+def load_gated_forecast(path: Path) -> GatedForecastConfig:
+    """Load ``configs/control/gated_forecast.yaml`` or ``gated_forecast_tcn.yaml``.
+
+    ``gains_from`` is resolved relative to the YAML's own directory (as :func:`load_gated`);
+    ``forecaster_dir`` relative to the repository root.
+
+    Args:
+        path: The YAML file.
+
+    Returns:
+        The parsed :class:`GatedForecastConfig`. The forecaster directory is **not** opened
+        here; the controller loads it on first use.
+
+    Raises:
+        FileNotFoundError: If ``path`` or the referenced gains file does not exist.
+        ValueError: If a key is missing or a value is out of range.
+    """
+    base = load_gated(path)
+    raw = load_yaml(path)
+    forecaster_dir = Path(str(require(raw, "forecaster_dir", path)))
+    if not forecaster_dir.is_absolute():
+        forecaster_dir = REPO_ROOT / forecaster_dir
+    interval_raw = require(raw, "interval", path)
+    if not isinstance(interval_raw, list | tuple) or len(interval_raw) != 2:
+        raise ValueError(f"{path}: interval must be a two-element list, got {interval_raw!r}")
+    return GatedForecastConfig(
+        gains=base.gains,
+        gains_from=base.gains_from,
+        hover_height_m=base.hover_height_m,
+        hover_kp_per_s=base.hover_kp_per_s,
+        hover_speed_max_m_s=base.hover_speed_max_m_s,
+        hover_tolerance_m=base.hover_tolerance_m,
+        thresholds=base.thresholds,
+        fallback_commit_s=base.fallback_commit_s,
+        forecaster_dir=forecaster_dir.resolve(),
+        interval=(float(interval_raw[0]), float(interval_raw[1])),
     )

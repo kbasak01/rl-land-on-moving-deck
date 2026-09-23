@@ -2,8 +2,9 @@
 
 **PRIVILEGED** (``privileged=True`` in the registry). It reads the episode's true future
 deck-point trajectory through :class:`~rld.control.base.PrivilegedContext`, which no
-deployed vehicle has. It is an **upper bound on commit timing** under this hover-and-commit
-law and ``gated``'s own rule, and must never be reported as a deployable result. ``reset``
+deployed vehicle has. It is a **commit-timing oracle (privileged)** under this hover-and-commit
+law and ``gated``'s own rule -- not a bound on success or on landing quality -- and must never
+be reported as a deployable result. ``reset``
 raises without a context, so it cannot silently run as something else.
 
 Everything except the rule is ``gated``'s: ``pid_feedforward``'s tuned gains, hover at
@@ -16,7 +17,9 @@ At episode time ``t`` the controller predicts its own touchdown time as
 
     t_td = t + max(height, 0) / descent_rate
 
-seconds model scale -- ``height`` is the observation's clearance along the deck normal. The
+seconds model scale -- ``height`` is the observation's clearance along the deck normal
+(:meth:`~rld.control.gated.GatedBase.predicted_touchdown_s`, shared with ``gated_forecast``
+so the two future-reading controllers cannot disagree on where the window starts). The
 prediction assumes the committed descent closes on the pad at exactly ``descent_rate``,
 which is what the ``k_ff * v_pad`` feedforward is for; it ignores ``DSLPIDControl``'s
 tracking lag and the transient from hover to descent speed, both of which make the real
@@ -41,13 +44,17 @@ Config: ``configs/control/oracle_gated.yaml``.
 """
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from rld.control.base import ControlSpec, PrivilegedContext
+from rld.control.base import ControlSpec, PrivilegedContext, reject_motion_feed
 from rld.control.config import GatedConfig, load_gated
 from rld.control.gated import GatedBase
 from rld.control.obs_view import ObsView, deck_angles_deg
+
+if TYPE_CHECKING:
+    from rld.deck.forecast import ShipMotionFeed
 
 __all__ = ["OracleGated", "make_oracle_gated"]
 
@@ -92,18 +99,25 @@ class OracleGated(GatedBase):
         """Physics samples between window samples, dimensionless (8: 1/30 s at 240 Hz)."""
         return self._stride
 
-    def reset(self, seed: int, context: PrivilegedContext | None = None) -> None:
+    def reset(
+        self,
+        seed: int,
+        context: PrivilegedContext | None = None,
+        motion_feed: "ShipMotionFeed | None" = None,
+    ) -> None:
         """Clear per-episode state and take this episode's true trajectory.
 
         Args:
             seed: Episode seed; recorded only.
             context: The episode's true deck trajectory, from
                 :meth:`PrivilegedContext.from_env` after ``env.reset``. Required.
+            motion_feed: Must be ``None``; the oracle reads the true future, not the feed.
 
         Raises:
-            ValueError: If ``context`` is ``None``. The oracle refuses to run blind rather
-                than degrade silently into a different controller.
+            ValueError: If ``context`` is ``None`` (the oracle refuses to run blind rather
+                than degrade silently into a different controller), or a feed is passed.
         """
+        reject_motion_feed(self.name, motion_feed)
         if context is None:
             raise ValueError(
                 "oracle_gated is privileged and needs a PrivilegedContext at every reset; "
@@ -111,19 +125,6 @@ class OracleGated(GatedBase):
             )
         self._context = context
         super().reset(seed, None)
-
-    def predicted_touchdown_s(self, v: ObsView, t_s: float) -> float:
-        """Return the touchdown time a commit now would produce.
-
-        Args:
-            v: The observation, world frame.
-            t_s: Episode time, seconds model scale.
-
-        Returns:
-            ``t + max(height, 0) / descent_rate``, seconds model scale since the episode
-            start.
-        """
-        return t_s + max(v.height_m, 0.0) / self.pid.descent_rate_m_s
 
     def _rule_fires(self, v: ObsView, t_s: float) -> bool:
         """Return the shared rule's verdict on the true window at the predicted touchdown.
