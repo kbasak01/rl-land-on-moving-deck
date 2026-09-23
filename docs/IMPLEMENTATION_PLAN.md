@@ -387,6 +387,43 @@ table for all four controllers committed (`results/e01/`); protocol P3-D1 commit
 
 ### Phase 4 — Forecaster integration (1.5 days + ~1 h compute) · owner: `deck-bridge-engineer`
 
+**Before you start (added after Gate 3, 2026-09-22).** Read `docs/protocol.md` P3-D1 (FROZEN
+revision 1), P3-D2 and P3-D4. Four things Phase 3 fixed that change this phase:
+
+(a) **Task 1's "fit on the `id` regime" is superseded by P3-D2, and following it would leak.**
+- *The leak.* dmf's `id` train partition (seeds 0–26, all four sea states, all four headings)
+  contains SS6 and 90° realizations. Those are `unseen_seastate`-test and `unseen_heading`-test
+  realizations, i.e. frozen evaluation episodes.
+- *The fix.* Fit `dlinear_ols` and `tcn` **only** on `rld.deck.splits.dev_pool(sim_cfg)[0]`
+  (729 realizations: frigate, SS3–SS5, 45/135/180°, seeds 0–26). Use `dev_pool()[1]` for any
+  forecaster model selection.
+- *What to record.* The pool restriction and the resulting training-set size, as P4-D*.
+- *The test.* Assert that the fitted models' training keys are disjoint from every
+  `results/episodes/` list.
+
+(b) **`gated_forecast` is scored on the committed Phase 3 lists, beside `gated` and
+`oracle_gated`.**
+- *The lists.* `results/episodes/`, commit `0780aaa`, MANIFEST SHA-256 `e6f30e55…`. Do not
+  regenerate them.
+- *The rule.* It must use the shared `QuiescenceRule` (`src/rld/control/quiescence.py`), so its
+  only difference from `gated` and `oracle_gated` is which deck samples it sees. That is predicted
+  samples instead of the past (`gated`) or the true future (`oracle_gated`).
+- *The benchmark.* The Phase 3 numbers are the bar. At SS6, `gated` times out on 35–55 % of
+  episodes. `oracle_gated` is **not** a bound on success, and only 63–85 % of its SS5/SS6
+  touchdowns fall in a truly quiescent window. So "forecast-gated approaches the oracle" is not
+  the same claim as "lands well".
+- *Metrics.* Report `td_in_quiescent_window` beside success.
+
+(c) **First `controls-engineer` task: fix the stale "upper bound" labels** carried by P3-D4. They
+are in `configs/control/oracle_gated.yaml`, the `registry.py` docstring and the
+`PrivilegedContext` docstring. Replace them with "commit-timing oracle (privileged)". Because the
+YAML's bytes are hashed into `results/e01/summary.csv`, re-render e01 in the same commit, or record
+the new hash beside the old one.
+
+(d) **Froude time is unchanged and still the trap.** The forecaster's 200-sample, 10 Hz lookback
+is **full-scale** (20 s full = 4.0 s model). The episode start window `(4.0, 107.5)` s model
+already reserves exactly that lookback (P2-D7).
+
 1. Regenerate the dmf corpus (`make -C third_party/deck-motion-forecast data`, ~15 min) and fit
    `dlinear_ols` (closed-form; best cross-generator transfer in Project 4) and `tcn` (best `id`
    skill; worst transfer) on the `id` regime. Checkpoints go to `artifacts/dmf/`.

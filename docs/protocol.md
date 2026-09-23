@@ -1217,9 +1217,104 @@ worded. **Zero tuning budget was added: no new trial and no new episode.** The g
 trial 10 and asserts that the YAML equals that log row. The slow descent takes a mean of about
 7.7 s to touch down against the 12 s budget, compared with about 4.5 s for `pid_feedforward`.
 
+### P3-D4 — P3-D1 errata and Gate 3 re-review fold-in (2026-09-22)
+
+*Why this is a separate entry.* The frozen P3-D1 block keeps its SHA-256
+`21465588610e65f1d1253bd26e5ce5db1da938889c6042338e1de8d4d99f5ed2`. Every item below either
+narrows a claim, corrects a statement of fact, or specifies a detail that was left open. None of
+them changes a threshold, a prediction, an episode list or the success criteria. Where an item
+disagrees with the P3-D1 text, this entry wins. It is dated before any Phase 5 run.
+
+**MAJOR-1 of the second review: H1's title claimed too much.**
+- *Narrowed title.* H1 is retitled **"residual RL lands softer than the lowest-closing-speed gain
+  set in the P3-D3 log (constant-descent law), without losing success"**. The P3-D1 title
+  "improves on what gain-tuning alone can do" is withdrawn.
+- *What the reference is.* `pid_feedforward_lowvz` received **zero** tuning budget aimed at closing
+  speed. It is the softest point of a search scored on success. All 20 trials use a
+  constant-descent law. The search range goes down to 0.08 m/s, but only trial 10 (0.111 m/s)
+  approaches it, and a constant-descent PID much slower than that would time out: `lowvz`
+  already touches down as late as 10.65 s against the 12 s budget.
+- *What H1a will and will not show.* A supported H1a shows "softer than the softest
+  constant-descent PID in the success-tuned log". It does **not** show "softer than any PID":
+  - a PID tuned for closing speed, or one with a two-stage (flare) descent, has not been ruled
+    out;
+  - the README says so wherever H1 appears.
+- *Open option.* A pre-registered closing-speed PID search would close this gap. It remains
+  available to the user before Phase 5 and is not taken here.
+
+**Minor corrections to P3-D1:**
+1. **§7 quiescence range.** The oracle's SS5/SS6 `td_in_quiescent_window` range is **63–85 %**
+   (0.634–0.847), not 63–79 %.
+2. **§2 overlap numbers were mislabelled.**
+   - 96 / 37 / 50 are the realization overlaps of the **committed lists**.
+   - The dmf **test partitions** themselves share 96 (`id` ∩ `unseen_heading`), 96
+     (`id` ∩ `unseen_seastate`) and 120 (`unseen_heading` ∩ `unseen_seastate`).
+3. **§2 wording.** The lists were committed before any controller was evaluated on them,
+   **except the 32 static-pad controller-episodes of §9.1**.
+4. **Timing.**
+   - H1a and H1b were committed at `9343cb8`, **before** the revision-1 e01 run. They were written
+     after the first e01 run.
+   - The `lowvz` selection rule was fixed before any frozen-list number was seen for any candidate
+     **other than trial 4** (`pid_feedforward`), which had already been evaluated in the first
+     run.
+5. **H1a outcomes made exclusive, H1 has no combined verdict.**
+   - *Supported:* r ≥ 15 %, the CI of r excludes 0, and non-inferiority holds.
+   - *Inconclusive:* 0 < r < 15 %, the CI excludes 0, and non-inferiority holds.
+   - *Not supported:* every other case, including non-inferiority failing, the CI including 0, or
+     r < 0.
+   - H1a and H1b are scored and reported separately. No combined "H1" verdict is given.
+6. **§4 pooling across seeds.** Within a bootstrap replicate, p95 is taken over the pooled
+   resampled (seed, episode) touchdowns of each method. The point estimate is the same statistic
+   on the unresampled pool of all seeds × episodes.
+7. **H1b is scored outside the training distribution.** `id` SS6 is 0 % in-distribution, since
+   SS6 is never trained on, so H1b is a sea-state-extrapolation result as well as an improvement
+   claim.
+8. **Sensitivity check.** Excluding non-touchdown episodes from p95 lets a policy lower its p95 by
+   timing out on its worst deck windows. The −2-point non-inferiority margin caps this. Phase 7
+   additionally reports, **as a sensitivity analysis, not a scored test**, the relative-p95 with
+   timeouts ranked as the worst closing speed.
+9. **Multiplicity.** No multiplicity correction is applied across H1a, H1b, H2, H3 and H4. Each is
+   a separately pre-registered prediction, and the README states that no correction was made.
+
+**P3-D3 tune-pool table, re-run with the corrected oracle and the `lowvz` row.** Source:
+`results/e01/tune_pool_final.csv` at `d35f224`, tune pool only, seed 20260923, n = 60 per SS.
+Success fractions:
+
+| controller | SS3 | SS4 | SS5 | mean |
+|---|---|---|---|---|
+| pid_track_descend | 1.000 | 0.983 | 0.917 | 0.967 |
+| pid_feedforward | 1.000 | 1.000 | 1.000 | 1.000 |
+| pid_feedforward_lowvz | 0.983 | 1.000 | 0.983 | 0.989 |
+| gated | 1.000 | 0.983 | 0.933 | 0.972 |
+| oracle_gated (privileged) | 1.000 | 0.983 | 0.967 | 0.983 |
+
+- This supersedes the oracle rows and the "oracle times out more than gated" claim in P3-D3
+  item 4.
+- `configs/control/pid_feedforward_lowvz.yaml` SHA-256:
+  `373c2307857988a88f90cd39959e873b808034cddf7fc70fe7c14f323da34f4c`.
+
+**Carried to Phase 4, not fixed in Phase 3.**
+- *Stale "upper bound" labels.* They remain in `configs/control/oracle_gated.yaml` (line 1),
+  and in the `src/rld/control/registry.py` and `PrivilegedContext` docstrings. They contradict
+  P3-D1 §7.
+  - *Why not now.* The YAML's bytes are hashed into the committed `results/e01/summary.csv`, so
+    editing it now would leave that hash stale.
+  - *Fix.* Relabel them "commit-timing oracle (privileged)" as the first `controls-engineer` task
+    of Phase 4, together with `gated_forecast`.
+  - *Guard.* The word "upper bound" must not appear in any results table or in the README for
+    this controller.
+- *`lowvz` bounces.* They happen at low closing speed (0.064–0.116 m/s at `id` SS5), which makes
+  them lift-offs, not impacts. Before Phase 5, check that they are not a contact-solver artifact
+  a residual policy could learn to exploit.
+- *Unrecorded worker-count check.* The "byte-identical at 24 and 7 workers" check is not recorded
+  in any committed artifact. The 7-worker outputs were compared in the session scratchpad
+  (SHA-256 of `episodes.csv` `c5852090…`, identical to the committed file). Phase 7's
+  `make eval` records the second worker count in `run_info.json`.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|
 | 0 | 2026-09-21 | PASSED | `make test lint` green (6 tests, 53 s); pybullet 3.2.7 built from sdist and opens a DIRECT client on 3.12.3; `results/env_throughput.csv` written (8 rows, 1/8/16 SubprocVecEnv workers x rpm/vel); both submodule SHAs recorded in P0-D1. |
 | 1 | 2026-09-21 | PASSED | `make test lint` green (66 tests, 62 s; ruff + ruff-format + mypy --strict clean). `results/deck_stats.csv` 192 rows = 96 cells x {aft, cg}, full grid (2 vessels x SS3-SS6 x 4 headings x 3 speeds), all 2304 realizations, with `z_std_model_m`, `vz_std_model_m_s`, `vz_p99_model_m_s`, `az_p99_model_m_s2` populated and no NaN; plus `deck_stats_seeds.csv` (4608 rows) and `deck_feasibility.csv` (2 rows). lambda = 1/25 and r_pad = -0.4*L confirmed in P1-D1. Feasibility rule PASS: frigate SS6 180 deg 12 kn aft vz p99 = 0.577165 m/s vs the 2.08333 m/s gate threshold, 3.61x inside; the rejected `SPEED_LIMIT` reading is recorded as FAIL beside it. Sign convention and ZYX rotation order corrected and pinned by three hand-computed cases (P1-D2); one project-wide lambda (P1-D3). |
 | 2 | 2026-09-22 | PASSED | `make test lint` green (118 passed, 1 skipped, 107 s; ruff + ruff-format + mypy --strict clean). The 1 skip is by design: `tests/test_platform.py` gates only the configured driver and *measures* the other, and `test_constraint_driver_fails_the_tracking_gate` asserts the rejected one fails. Platform tracking, `kinematic` driver, 10 s model at frigate SS6 180 deg 12 kn aft: body-origin 0.000 mm and plate-corner 2.2e-16 m against the 1 mm gate, orientation 3.0e-8 rad, `getBaseVelocity` linear and angular ratio 0.0 % against the 2 % gate; `constraint` fails every one of those by an order of magnitude and cannot be tuned into passing (24-point sweep, four identical digits) -- P2-D1. `gymnasium.utils.env_checker.check_env` passes; reset determinism bit-identical as the env's 1st and 3rd reset; drop on a static pad registers exactly one touchdown; scripted 0.3 m/s descent on a static pad 100/100 `success`. `results/e00_env_sanity.csv` (4 rows) + `results/e00_env_sanity_episodes.csv` (800 rows) written from the `id` split's val partition, draw seed 20260922: hover 1.000 `timeout` at SS3 and SS5, random 1.000 `crash` at both, no successes under either -- outcome fractions sum to 1.000000 per row. **PyBullet-vs-analytic touchdown disagreement 0/800 = 0.0000** against the < 1 % gate, plus 0/100 on scripted static descents and 0/30 on a moving SS5 deck. `results/env_throughput_landing.csv` (8 rows) records the deck-in-the-loop throughput P3-D1 must size from (P2-D8); `results/env_throughput.csv` untouched. Two flags carried forward, both recorded rather than fixed: one of 800 sanity episodes tunnelled (7.86 mm penetration vs the 5 mm threshold) and it was the only random episode that ever reached contact, so the random arm exercises the touchdown path barely at all -- the scripted tests carry that load; and the plan's "dropped from rest" is not expressible in a velocity-setpoint action space, so the drop test uses the maximum commanded descent (P2-D9). |
+| 3 | 2026-09-22 | PASSED (2nd attempt) | First attempt FAILED on the `results-skeptic` review (BLOCKING B1: the restated H1 was beatable by a slower PID; MAJOR M1-M3), before any RL run; remediated with user decisions (P3-D1 revision 1 §9, P3-D3 amendments). Second attempt: `make test lint` green (233 passed, 1 skipped by design, 162 s; ruff + ruff-format + mypy --strict clean). `pid_feedforward` 200/200 on the static pad and 200/200 at `id` SS3 (Wilson [98.1, 100.0] each) against the >= 95 % gate, from `results/e01/episodes.csv` at `d35f224`. Success-vs-sea-state table `results/e01/success_vs_seastate.md` committed: 5 controllers x 14 cells x N = 200, re-renders byte-identically from `summary.csv`; no crash or off_pad anywhere; detector disagreement 5/14000; tunnelling 14 (all `pid_track_descend`, max 6.5 mm). Frozen lists `results/episodes/` committed at `0780aaa`, MANIFEST SHA-256 `e6f30e55e478d39061b94e38de33959ca99b16e8cac38a3bd99b34f6543ad4a2`, `--check` 10/10 OK. P3-D1 FROZEN revision 1, block SHA-256 **`21465588610e65f1d1253bd26e5ce5db1da938889c6042338e1de8d4d99f5ed2`** (from `### P3-D1 — FROZEN` to the line before `### P3-D2`, UTF-8). Second `results-skeptic` review: no BLOCKING; MAJOR-1 (H1 scope) and MINOR 1-9 folded in by P3-D4 errata without touching the frozen block; three items carried to Phase 4 (P3-D4). |
