@@ -1,0 +1,16 @@
+{
+  "omp_num_threads": "1",
+  "cpu_count": "36",
+  "host": "DATTA-BASAK",
+  "timestamp_utc": "2026-09-22T23:19:48+00:00",
+  "workers": 24,
+  "chunk": 25,
+  "wall_s": 329.1,
+  "episodes": 11200,
+  "controllers": [
+    "pid_track_descend",
+    "pid_feedforward",
+    "gated",
+    "oracle_gated"
+  ]
+}

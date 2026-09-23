@@ -53,8 +53,11 @@ env-sanity: ; $(PY) scripts/env_sanity.py --out results/e00_env_sanity.csv --epi
 # loop. P0-D2's HoverAviary number is the ceiling; this is the estimate P3-D1 sizes the
 # training budget from.
 throughput-landing: ; $(PY) scripts/env_throughput.py --env landing --policies random hold --out $(THROUGHPUT_LANDING_CSV) --steps $(STEPS)
-# Phase 3 -- controls-engineer + eval-auditor: four classical controllers -> results/e01/
-baselines:       ; @echo "not implemented: phase 3"
+# Phase 3 -- eval-auditor: the four classical controllers on the frozen episode lists
+# (results/episodes/, checked against MANIFEST.csv first) -> results/e01/{episodes,summary}.csv
+# and success_vs_seastate.md rendered from the CSV. Parallel over chunks of episodes; the CSVs
+# do not depend on WORKERS (volatile facts go to results/e01/run_info.json).
+baselines: ; $(PY) scripts/eval_baselines.py --out-dir results/e01 --workers $(WORKERS)
 # Phase 4 -- deck-bridge-engineer: dmf corpus + dlinear_ols + tcn -> artifacts/dmf/
 dmf-forecasters: ; @echo "not implemented: phase 4"
 # Phase 5 -- rl-trainer: background training run; status in artifacts/runs/*/status.json

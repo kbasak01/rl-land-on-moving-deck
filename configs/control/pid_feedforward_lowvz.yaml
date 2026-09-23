@@ -1,0 +1,33 @@
+# pid_feedforward_lowvz -- the H1 closing-speed reference (src/rld/control/feedforward.py,
+# the SAME PidFeedforward class and law as pid_feedforward; only the gains differ). NOT
+# privileged: the pad deck-point velocity it feeds forward is velocity + rel_velocity from the
+# observation, i.e. what an ideal (noise-free, zero-latency) ship motion reference unit plus
+# state estimate would provide, not future information.
+#
+# Units: metres, metres per second and seconds are MODEL scale (lambda = 1/25). Gain units
+# are in the key names: _per_s = (m/s)/m, _per_s2 = (m/s)/(m s); k_ff is dimensionless.
+#
+# SELECTION RULE (user decision 2026-09-22; docs/protocol.md P3-D3 amendment), applied by
+# rld.control.tuning.select_lowvz to the EXISTING log
+# results/e01/tuning_pid_feedforward.csv (the 20 pid_feedforward trials of P3-D3):
+#   1. keep trials whose tune-pool success (mean_success, mean over SS3-SS5) is
+#      >= best - 0.02 (best = 1.000, so >= 0.98: 11 trials);
+#   2. take the lowest pooled p95 touchdown closing speed (pooled_td_closing_p95_m_s);
+#   3. break any remaining tie by the lowest trial index.
+# It selects TRIAL 10: tune success 178/180 = 0.989 (SS3 59/60, SS4 60/60, SS5 59/60; both
+# losses are bounces), pooled p95 closing speed 0.153 m/s. Runners-up: trial 5
+# (0.983, 0.173 m/s), trial 15 (0.994, 0.179 m/s). The rule was worded after the tuning log
+# existed but before any frozen-list number for any candidate was seen. ZERO tuning budget
+# was added: no new trial, no new episode.
+#
+# The five [tuned] values are trial 10's at full precision;
+# tests/test_control_pid_feedforward_lowvz.py asserts equality with the log's row. The three
+# fixed keys are pid_feedforward.yaml's, as they were for every trial in the log.
+kp_xy_per_s: 1.4012840571813285        # [tuned] (m/s)/m
+ki_xy_per_s2: 0.8979697581380606       # [tuned] (m/s)/(m s)
+integral_limit_m_s: 0.1                # m/s, per-axis clamp on the integral term's contribution
+lateral_speed_max_m_s: 0.5             # m/s, horizontal speed cap on the tracker
+commit_radius_m: 0.0711192973703146    # [tuned] m
+release_factor: 2.0                    # dimensionless; descent released beyond 2 x commit radius
+descent_rate_m_s: 0.11144125740975142  # [tuned] m/s, positive downward, relative to the pad
+k_ff: 0.9547040911391378               # [tuned] dimensionless feedforward gain on v_pad (x, y, z)

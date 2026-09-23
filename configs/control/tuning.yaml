@@ -1,0 +1,47 @@
+# Baseline-controller tuning (docs/protocol.md P3-D3; src/rld/control/tuning.py).
+#
+# Pool: the P3-D2 TUNE pool ONLY -- rld.deck.splits.dev_pool(sim_cfg)[1] = frigate,
+# SS3-SS5, headings 180/135/45 deg (never 90), speeds 0/6/12 kn, seed ordinals 27-31.
+# Disjoint from every regime's test partition and from the train pool. Nothing here reads
+# results/episodes/ or any test partition.
+#
+# Units: metres, metres per second and seconds are MODEL scale (lambda = 1/25). Gain units
+# are in the key names: _per_s = (m/s)/m, _per_s2 = (m/s)/(m s); k_ff is dimensionless.
+
+# Committed episode-draw seed. Differs from the P2-D4 sanity draw seed (20260922) and from
+# the Phase 3 evaluation generator seed. Every trial of every controller flies the IDENTICAL
+# draw, so trials -- and the two controllers -- are paired comparisons.
+tuning_seed: 20260923
+
+sea_states: [SS3, SS4, SS5]
+episodes_per_sea_state: 60      # 180 episodes per trial
+pad: aft                        # the primary arm
+
+# Budget per controller, identical for both. Trial 0 is `initial` (the hand-set pre-tuning
+# gains); trials 1..n-1 are the first n-1 points of a scrambled Sobol sequence over the
+# ranges below, seeded with `sobol_seed`.
+trials: 20
+sobol_seed: 20260923
+
+# Objective: mean success over the sea states (equal weight; 60 episodes each), ties broken
+# by the lower pooled p95 touchdown closing speed along the deck normal, then by the lower
+# trial index.
+
+# Search space, linear ranges [low, high]. ONE Sobol sequence of dimension 5 is drawn and
+# shared: pid_track_descend reads the first four coordinates and ignores the fifth, so both
+# controllers are evaluated at identical (kp, ki, radius, descent) points and
+# pid_feedforward additionally varies k_ff. Neither controller gets a wider search.
+search_space:
+  kp_xy_per_s: [0.5, 3.0]
+  ki_xy_per_s2: [0.0, 1.0]
+  commit_radius_m: [0.02, 0.10]
+  descent_rate_m_s: [0.08, 0.60]
+  k_ff: [0.5, 1.2]                # pid_feedforward only
+
+# Trial 0: the hand-set gains the controllers were written with, before any tuning.
+initial:
+  kp_xy_per_s: 1.5
+  ki_xy_per_s2: 0.2
+  commit_radius_m: 0.05
+  descent_rate_m_s: 0.3
+  k_ff: 1.0                       # pid_feedforward only

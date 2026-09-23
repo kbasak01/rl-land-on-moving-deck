@@ -1,0 +1,29 @@
+# pid_feedforward -- the residual-RL base (src/rld/control/feedforward.py). NOT privileged:
+# the pad deck-point velocity it feeds forward is velocity + rel_velocity from the
+# observation, i.e. what an ideal (noise-free, zero-latency) ship motion reference unit plus
+# state estimate would provide, not future information.
+#
+# pid_track_descend's law plus k_ff * v_pad on all three axes.
+#
+# Units: metres, metres per second and seconds are MODEL scale (lambda = 1/25). Gain units
+# are in the key names: _per_s = (m/s)/m, _per_s2 = (m/s)/(m s); k_ff is dimensionless.
+#
+# Tuned on the P3-D2 tune pool only (frigate, SS3-SS5, heading != 90 deg, seed ordinals
+# 27-31). Procedure, ranges, trial log and final values: docs/protocol.md P3-D3 and
+# results/e01/tuning_pid_feedforward.csv. Keys marked [tuned] were searched.
+#
+# gated.yaml and oracle_gated.yaml load their gains FROM THIS FILE (gains_from), so a
+# re-tune propagates to them.
+
+# Tuned values: trial 4 of 20 (results/e01/tuning_pid_feedforward.csv, selected=True).
+# Four trials (0, 2, 4, 17) reached 1.000 tune-pool success; trial 4 won the pre-registered
+# tie-break (lowest pooled p95 touchdown closing speed, 0.245 m/s). Full precision on
+# purpose: tests/test_control_pid_feedforward.py asserts equality with the log.
+kp_xy_per_s: 1.9560189517214894       # [tuned] (m/s)/m
+ki_xy_per_s2: 0.9541415357962251      # [tuned] (m/s)/(m s)
+integral_limit_m_s: 0.1               # m/s, per-axis clamp on the integral term's contribution
+lateral_speed_max_m_s: 0.5            # m/s, horizontal speed cap on the tracker
+commit_radius_m: 0.0344609023630619   # [tuned] m
+release_factor: 2.0                   # dimensionless; descent released beyond 2 x commit radius
+descent_rate_m_s: 0.20716235280036926 # [tuned] m/s, positive downward, relative to the pad
+k_ff: 1.081741817947477               # [tuned] dimensionless feedforward gain on v_pad (x, y, z)
