@@ -1667,6 +1667,308 @@ the three PID baselines on the **same** frozen episodes, with the pad at the CG.
 because aft-pad v_z carries dmf's roll/pitch–heave phase defect (CLAUDE.md). It is a control, not
 a new evaluation list.
 
+## Phase 5
+
+### P5-D1 — lowvz bounces: not a contact-solver artifact; ~80 % are rim-first rocking that the 50 ms contact-loss grace scores as `bounce` (2026-09-23)
+
+*Question (P3-D4 carry-over, Phase 5 "Before you start" item a).* Are
+`pid_feedforward_lowvz`'s low-closing-speed bounces a contact-solver artifact that a pure or
+residual policy could exploit, or be unfairly penalised by? This is a diagnosis. **No environment
+code, config or success criterion was changed.**
+
+*What was flown.* The **P3-D2 tune pool only**; nothing from `results/episodes/`. Each arm flew:
+- the committed P3-D3 tune draw: 180 episodes, SS3–SS5;
+- plus 1 000 SS5 and 400 SS4 tune-pool episodes from a separate diagnostic seed (20260925);
+- 1 580 episodes in total, logged at every physics substep.
+
+The committed-physics arm reproduces `results/e01/tune_pool_final.csv` exactly on the tune draw.
+
+The diagnostic-only physics arms are 480, 960 and 1920 Hz, `contactERP` = 0 (no
+penetration-recovery push-off), and a 0.5 s contact-loss grace that measures contact gaps without
+ending the episode. Scripts: `scripts/p5_bounce_check.py`, `scripts/p5_bounce_check_report.py`
+and `scripts/p5_contact_probes.py`. Results and a short note: `results/p5_bounce_check/`.
+
+*n examined.* 242 bounces were logged substep by substep:
+- `lowvz`: 64 at 240 Hz, 86 at 480 Hz, 66 with `contactERP` = 0;
+- `pid_feedforward`, same arms: 10, 10 and 6.
+
+*Findings (lowvz, committed 240 Hz physics, 64/1 580 bounces).*
+1. **Not a solver artifact.**
+   - The solver leaves the contact point at a relative normal velocity of −0.3 mm/s (median),
+     4.2 mm/s (p95) and 10.1 mm/s (max) at the end of the last contact substep. Zero restitution
+     works as intended.
+   - Bullet's multibody contact *does* have a Baumgarte push-off, ≈ `contactERP`·overlap/dt
+     (18 mm/s per mm of overlap at 240 Hz; `contact_probes.csv`). Setting `contactERP` = 0
+     removes it (median per-episode max 18.6 → 0.4 mm/s) and **does not change the result**:
+     64 → 66 bounces, 60 of 64 unchanged pairwise, and 58 → 59 dwell gaps over 50 ms.
+   - Penetration is ≤ 1.3 mm. No episode was flagged for tunnelling.
+2. **Mechanism A, rim rocking: 51/64 (80 %).** 48 happen at impact and 3 later.
+   - The drone touches down on its rim at a median relative tilt of 6.9° (IQR 5.6–7.8°), with one
+     contact point.
+   - The rim impulse and the attitude loop rotate it flat at about 1.6 rad/s, faster than the CoM
+     falls. The rim lifts by at most a median 2.0 mm (max 3.9 mm).
+   - The **CoM keeps closing on the deck through every one of these gaps**.
+   - Contact is lost 8 ms after touchdown and the gap outlasts `contact_loss_grace_s` = 0.05 s, so
+     the episode is scored `release` → `bounce`. P3-D4's description ("lift-offs, not impacts") is
+     therefore wrong for these: they are post-impact rocking, not lift-offs.
+3. **Mechanism B, unloaded rim lift-off: 13/64 (20 %).** These happen 4–500 ms after touchdown.
+   - The deck accelerates down its normal at a median −2.1 m/s² (−1.7 to −3.7).
+   - The drone holds 76 % of hover thrust. The contact carries only 8.7 mN (median; 1–22 mN) out of
+     a 265 mN weight, and a small rotation lifts the rim.
+   - This is physical. A drone at near-hover thrust on a deck dropping at ~0.2 g is nearly
+     weightless on it.
+4. **Down-force decides it, not the solver.** In controller-free rim-first drops (`contact_probes.csv`):
+   - At thrust = weight, the contact gap is 229–325 ms at every rate from 240 to 1920 Hz, and also
+     with `contactERP` = 0.
+   - At 96 % of weight the gaps disappear. At 98 % one of 20 runs leaves a single 4 ms gap.
+   - `lowvz` holds 96 % of weight in the rocking gaps: after contact its setpoint is still the deck
+     feedforward minus 0.111 m/s, which barely unloads the rotors.
+5. **The bounce rate follows the rocking time**, τ = 0.06 m · sin(rel. tilt) / closing speed.
+   - Tune pool: 9/1 299 for τ ≤ 50 ms, then 7/136 (50–70 ms), 25/91 (70–100 ms) and 23/54 (> 100 ms).
+   - The committed e01 frozen-list rows, read and not flown, show the same pattern: 11/2 267, then
+     14/242, 43/138 and 42/152.
+   - This is why `lowvz` bounces more than `pid_feedforward` (64 vs 10 here, 111 vs 52 in e01):
+     halving the closing speed doubles τ.
+6. **Substep sensitivity, recorded and not fixed.** Dwell gaps over 50 ms number
+   58 / 78 / 112 / 116 at 240 / 480 / 960 / 1920 Hz, converging by about 960 Hz.
+   - The committed 240 Hz physics *under*-counts rocking gaps by about 2× relative to converged
+     physics. It does not create them: the mechanism and the CoM-closing signature are the same at
+     every rate.
+   - Individual episodes are not stable to the substep. Base → 480 Hz: 20 of 64 bounces stay
+     bounces, and 66 successes become bounces.
+   - Per-episode bounce labels are therefore sensitive to integration detail. Aggregate rates are
+     conservative at 240 Hz.
+7. **Detectors.** Every `release` is declared by the contact-manifold detector (normal force
+   > 1e-4 N, 50 ms grace).
+   - The analytic clearance agrees in 64/64: the lowest point was more than the 1 mm margin clear
+     of the plate during the gap. So this is not a false loss from the force filter.
+   - First-touchdown detector disagreement is 3/1 580.
+
+*RL relevance.*
+- **No solver exploit found.** The only energy-injecting term is Baumgarte push-off. It only ever
+  adds separating velocity, which causes bounces rather than preventing them. It needs penetration
+  that only harder impacts produce, and removing it changes nothing measurable.
+- **What policies will be rewarded for.** `bounce` (−10 against +50) penalises **slow, tilted**
+  touchdowns under a rule, not a physical lift-off. A policy can avoid it three ways:
+  - (a) touch down flatter relative to the deck;
+  - (b) touch down faster;
+  - (c) hold a few percent of net down-force after contact, by commanding a strong descent once
+    `in_contact` is set. This is the "throttle cut on touchdown" that `lowvz` lacks by design.
+
+  (a) and (c) are legitimate landing behaviour, and (c) is learnable from the observation. They
+  are not exploits.
+- **Two consequences for H1a.** Both are recorded here before any Phase 5/6 run and neither
+  changes P3-D1:
+  - Part of any success gain over `lowvz` (4–5 % bounce at SS5 on this pool) can come from
+    post-contact thrust behaviour rather than from the approach. H1a's non-inferiority margin is
+    therefore easier to meet than "equal approach quality" would suggest.
+  - (b) pushes against softer landings: a 15 % lower closing speed raises τ by ~18 % for the same
+    tilt. This biases H1a *against* support. The Phase 7 README reports bounce rates beside
+    closing speed for every method.
+- **Nothing is changed.** Success criteria, grace, physics rate and `lowvz` all stay as frozen. If
+  the user wants it, the options are:
+  - a dated deviation of `contact_loss_grace_s`. A 0.1 s grace would reclassify 51 of the 58
+    base-physics > 50 ms gaps;
+  - a pre-Phase-5 change to 960 Hz physics;
+  - a touchdown throttle-cut variant of `lowvz` as a separate baseline.
+
+  None is adopted here.
+
+*Decision (user, 2026-09-23, before any Phase 5 training run).*
+- **Criteria stay frozen.** `contact_loss_grace_s` stays at 0.05 s and physics stays at 240 Hz.
+  The rim-rocking mechanism, the physics-rate instability of individual `bounce` labels, and the
+  two H1a consequences above are carried as recorded findings.
+- **A throttle-cut baseline is added:** `pid_feedforward_lowvz_cut`, which is `lowvz` plus a
+  post-contact down-force rule. Its rule is fixed in P5-D2 before any episode of it is flown. It
+  gets no tuning budget, and it runs on the frozen lists before any RL run. It is printed beside
+  `pid_feedforward_lowvz` in every table. It does **not** replace `lowvz` as the H1a reference
+  (P3-D1 §8 is unchanged); it bounds how much of a success gain can come from post-contact thrust
+  alone.
+
+### P5-D2 — pid_feedforward_lowvz_cut: rule fixed before any episode (2026-09-23)
+
+*What this entry fixes.* This entry fixes the post-contact rule of the throttle-cut baseline
+that P5-D1's decision added. It was written at 19:30 local on 2026-09-23, on top of `b3fd2b5`,
+**before any episode of this controller was flown** on any list, pool or static pad. The only
+inputs were:
+- physical reasoning about `DSLPIDControl`, which is the shared action space's tracker;
+- the P5-D1 numbers already committed in `results/p5_bounce_check/`.
+
+The rule has **no tuning budget**. No parameter was swept and no variant was flown or selected
+by success. The rule below is the only one that was written.
+
+*Config.* `configs/control/pid_feedforward_lowvz_cut.yaml`, SHA-256
+`e5f19903a89165ecdc50218f2d626b7b41b03b566895f7be520f5d9a59e499bb`.
+- *Pre-flight correction.* The first draft of this entry recorded `8cbf2e61…`. A YAML comment
+  and the "why 1.5 m/s" paragraph below then claimed that any cut speed above 0.7 m/s gives the
+  same idle state. The static check of the tracker's arithmetic, described below, showed that
+  claim was false. Both texts were corrected **before any episode was flown**. The two keys and
+  their values did not change.
+- It holds two keys: `gains_from: pid_feedforward_lowvz.yaml` and `cut_speed_m_s: 1.5`.
+- The gains are **loaded by reference**, not copied, so they are lowvz's trial-10 gains and
+  cannot drift from them.
+- `pid_feedforward_lowvz.yaml` is untouched (SHA-256 still `373c2307…`, as in P3-D4).
+- Registered as `pid_feedforward_lowvz_cut` with `privileged=False` and `needs_motion_feed=False`.
+- Code: `src/rld/control/lowvz_cut.py`.
+
+**The rule.** All quantities are model scale.
+1. **Touchdown inference.** The observation's `in_contact` flag, read through `ObsView` (> 0.5).
+   This is the environment's contact-manifold detector: drone–deck normal force > 1e-4 N, taken
+   at the **last physics substep** of the control step. There is no other cue and no other
+   threshold.
+   - *Rejected: a height cue.* A rocking gap's clearance (median 2.0 mm, max 3.9 mm; P5-D1)
+     looks the same as the last pre-contact sample. At lowvz's 0.111 m/s descent that sample
+     is 0–3.7 mm above the deck. A height threshold would therefore fire *before* contact in
+     most episodes, which changes the approach and is not a post-contact rule.
+   - *Rejected: a body-rate or tilt-rate signature.* It would need a threshold that could only
+     be set by flying.
+2. **Latch.** The latch sets on the first observation with `in_contact` = 1 and holds until
+   `reset`. It is **never released**, for two reasons:
+   - any contact gap longer than `contact_loss_grace_s` = 0.05 s ends the episode;
+   - the shorter gaps are exactly the rim-rocking gaps in which down-force is needed.
+3. **Before the latch.** The controller returns `pid_feedforward_lowvz`'s setpoint, **bit for
+   bit**. The same code path computes it, and lowvz's clock, integrator and lateral gate advance
+   as they do in lowvz. It continues to do so after the latch.
+4. **After the latch.** The setpoint is `s_lowvz(o) − cut_speed_m_s · n̂(o)`, followed by the shared
+   norm cap. n̂ is the observed unit deck normal in the world frame, and `cut_speed_m_s` = 1.5 m/s
+   = `v_max_m_s`, the largest descent the shared action space can command.
+
+*Why this command, from the tracker's arithmetic.*
+- **How `DSLPIDControl` computes thrust.** The environment calls it with `target_pos` =
+  `cur_pos`. Its thrust vector is therefore `t = m g ẑ + D ∘ (v_sp − v)`, with D = (0.2, 0.2,
+  0.5) N/(m/s) and m g = 0.2646 N. The collective is `max(0, t · b_z)`. Each motor's PWM is the
+  collective plus a mixer term of at most 6 400 PWM (torques are clipped at ±3 200 PWM), and is
+  then clipped to `MIN_PWM` = 20 000.
+- **The idle state.** When `t · b_z` ≤ **0.0754 N**, every motor sits at `MIN_PWM`. Thrust is
+  then **0.1126 N = 42.6 % of weight** and the attitude torque is **zero**. That is "motors to
+  idle", the lowest thrust the tracker can produce.
+  - For a level drone this needs a velocity error of v_z ≤ −0.378 m/s.
+  - The collective reaches the `MIN_PWM` floor at −0.304 m/s.
+  - The target attitude flips at −0.529 m/s. This is harmless once every motor is at idle,
+    because no torque is applied.
+- **Why 1.5 m/s, and where it reaches idle.** 1.5 m/s is `v_max_m_s`, the full-scale descent of
+  the action space. It was **not compared against other values by flying**. A static grid
+  check, which evaluates the tracker's arithmetic after the norm cap and flies no episode,
+  covers these post-contact states:
+  - the setpoint is lowvz's, with the lateral PI command anywhere up to its 0.5 m/s cap and the
+    gate open or closed;
+  - |v_pad,z| ≤ 0.7 m/s (the grid's worst aft-pad `vz_p99` is 0.700 m/s) and |v_pad,x|,
+    |v_pad,y| ≤ 0.3 m/s;
+  - drone-vs-pad velocity ≤ 0.1 m/s along each axis. P5-D1's in-gap CoM closing speed is about
+    0.08–0.10 m/s;
+  - deck tilt ≤ 15°, and the drone's body axis within 15° of the deck normal.
+
+  Results:
+  - Over that grid, `t · b_z` ≤ **0.040 N**, so every motor is at idle.
+  - At 1.0 m/s it is ≤ 0.065 N, so every motor is still at idle.
+  - At 0.7 m/s it reaches 0.088 N. The collective is at the floor, but not every motor is at
+    idle.
+  - With a drone-vs-pad velocity up to 0.2 m/s at 1.5 m/s, it reaches 0.090 N, again with the
+    collective at the floor but not every motor at idle.
+  - The idle state is **not** unconditional. The norm cap shortens the vertical component when
+    the pad falls fast and the lateral command is large. In unphysical corners (drone tilted 30°
+    from the deck, falling 0.3 m/s faster than a pad at −0.7 m/s) one motor sits slightly above
+    idle.
+
+  `tests/test_control_pid_feedforward_lowvz_cut.py` checks the envelope through
+  `DSLPIDControl.computeControl` itself: all four motors are at `MIN_PWM`. It also checks that
+  post-latch RPMs in the environment are idle.
+- **Why idle and not a partial cut.** A partial cut such as 80–90 % of weight would need a
+  magnitude that depends on the drone's velocity, and that magnitude could only be chosen by
+  flying. Idle is the saturating end of the tracker. It is also what "throttle cut on touchdown"
+  means physically.
+- **What idle buys.** At idle the drone's free acceleration along its body axis is −5.63 m/s².
+  - The largest aft-pad deck acceleration p99 over the whole grid is 3.06 m/s²
+    (`results/deck_stats.csv`), so a latched drone stays loaded against every cell's p99 deck
+    acceleration.
+  - P5-D1's unloaded lift-offs (mechanism B, deck at −2.1 m/s² median and −3.7 m/s² at most)
+    are therefore within its authority.
+  - With zero torque, the attitude loop stops fighting a tilted deck. A rim-first drone is laid
+    flat by gravity about the loaded rim.
+- **Why along the deck normal (the user's wording).** Because D is anisotropic, a setpoint along
+  −n̂ tilts the tracker's *target* attitude slightly away from n̂. At idle no torque is applied,
+  so this has no effect.
+
+*Pre-registered expectations (written before any flight).*
+1. **Pre-contact identity.** On any list, every first-contact quantity is identical per episode
+   to `pid_feedforward_lowvz`:
+   - touchdown time, closing speed, relative tilt, lateral offset, and both detectors' records;
+   - every outcome decided at or before first contact: `crash` before contact, `off_pad`,
+     `hard_landing` and `timeout`.
+
+   Only `bounce`, `success` and post-contact `crash` can differ. Any other difference is a bug.
+2. **Reach is limited by what the observation shows.** The flag reports only the last substep
+   of each 1/30 s control step. In P5-D1's 48 at-impact rocking bounces, the gap opens 4.2 ms
+   (6 cases) or 8.3 ms (42 cases) after touchdown, and release is scored 50 ms later. The flag
+   therefore reads 1 at a control boundary before the gap only when touchdown falls in the last
+   1–2 substeps of a step, which is about 1/8 or 2/8 of cases.
+   - **Expected reach:** of lowvz's 64 committed-physics tune-pool bounces, about **25 (≈ 40 %)**
+     are within the rule's reach:
+     - 11.25 expected of the 48 at-impact bounces;
+     - 1.75 of the 4 bounces whose gap opens 12.5–20.8 ms after touchdown;
+     - all 12 whose gap opens ≥ 125 ms after touchdown.
+   - The other ≈ 60 % open and are scored before the flag can read 1, and **no post-contact rule
+     on this observation can reach them**.
+   - *Prediction:* `lowvz_cut`'s bounce count is **about 0.6×** lowvz's, and not below about
+     0.5×, on the same episodes.
+3. **What this means for RL.** An MLP policy sees the same flag. Its purely post-contact gain is
+   therefore bounded the same way. A policy that removes the remaining rocking bounces must do
+   so **before** contact, by touching down flatter or faster, or by cutting thrust in
+   anticipation. That is approach behaviour, which is what H1a scores.
+4. **Side effects, expected and not failures:**
+   - control effort and action jerk rise, because the action jumps at the latch;
+   - post-contact lateral hold is by friction only, about 0.25 × 0.152 N ≈ 38 mN, compared with
+     about 2–10 mN under lowvz's near-hover thrust;
+   - no new `crash` is expected.
+
+*What may happen next, and what may not.*
+- **Allowed:**
+  - one sanity check on the **P3-D3 tune pool only**: the committed 180-episode tune draw from
+    `dev_pool(cfg)[1]`, seed 20260923, flown by both `lowvz` and `lowvz_cut`;
+  - a per-episode check of pre-contact identity and of the latch.
+- **Not allowed:**
+  - changing the rule because of the check's numbers;
+  - running any episode from `results/episodes/`. Those are the `eval-auditor`'s, after commit.
+- **Bugs.** If an outright bug appears, such as a latch that never fires, the fix and its reason
+  are recorded below this line, and nothing is tuned.
+
+*Provenance.* `resolved_gains_sha256` (`rld.eval.controller_config`) for
+`pid_feedforward_lowvz_cut` is `123b890f…`. It carries lowvz's gains, `gains_from` and
+`cut_speed_m_s`. lowvz's own resolved hash is unchanged at `19b1f9c8…`, the value in
+`results/e01/summary.csv`.
+
+*Tune-pool sanity check (run 19:39–19:40 local, after the entry above was written; not an
+evaluation).*
+- **What was flown.** The committed P3-D3 tune draw: `dev_pool(cfg)[1]`, `tuning_seed`
+  20260923, 60 episodes each at SS3–SS5, 180 in total. Both controllers flew every episode in
+  the same environment.
+  - The script is in the session scratchpad and is not committed.
+  - No other episode was flown, and nothing came from `results/episodes/`.
+- **lowvz** reproduces `results/e01/tune_pool_final.csv`: 59/60, 60/60 and 59/60. Its two
+  losses are `bounce`, at SS3 #10 and SS5 #35.
+- **`lowvz_cut`** also scores 59/60, 60/60 and 59/60, and **no episode changes outcome**. The
+  same two episodes bounce.
+  - The latch **never fired** in either of them. Both are P5-D1 at-impact rocking bounces
+    whose gap opens 8.3 ms after touchdown (`bounce_triggers.csv`).
+  - In both, the flag never read 1 at a control boundary before release was scored. This is
+    the out-of-reach case of expectation 2, not a bug.
+  - With n = 2 bounces this check says nothing about the ≈ 0.6× prediction. The frozen lists
+    will test it.
+- **Pre-contact identity.** Actions before the latch are bit-identical to lowvz's in
+  **180/180** episodes. All 13 first-contact columns of `EpisodeRecord.as_row` are identical in
+  **180/180**: touchdown times from both detectors, closing speed, relative and absolute tilt,
+  lateral offset, deck tilt and contact count.
+- **Latch timing.** The latch fired in 178/180 episodes: every success.
+  - Median delay after touchdown: 20.8 ms.
+  - 124 latched at the first control boundary after touchdown.
+  - 54 latched at the second or third boundary (up to 95.8 ms). In these, a contact gap
+    shorter than the grace hid the flag at the first boundary.
+- **Idle.** All four motors were at idle RPM (9 440.3) in **2 610/2 610** post-latch control
+  steps.
+- **Side effects** (median per-episode ratio to lowvz): control effort **+55 %** and action jerk
+  **+41 %**.
+- **Rule unchanged.** No part of the rule was changed after the check.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|

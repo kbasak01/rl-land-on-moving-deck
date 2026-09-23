@@ -168,6 +168,7 @@ def test_registry_marks_exactly_the_oracle_privileged():
         "pid_track_descend",
         "pid_feedforward",
         "pid_feedforward_lowvz",
+        "pid_feedforward_lowvz_cut",
         "gated",
         "oracle_gated",
         "gated_forecast",

@@ -5,7 +5,9 @@ following :mod:`rld.envs.config`. The tuned gains of ``pid_feedforward`` are **r
 not copied, by ``gated`` and ``oracle_gated`` (their YAMLs carry
 ``gains_from: pid_feedforward.yaml``), so re-tuning the base cannot leave the gated
 controllers flying stale gains. ``gated_forecast`` and ``gated_forecast_tcn`` carry the same
-keys plus the forecaster they consult (:class:`GatedForecastConfig`).
+keys plus the forecaster they consult (:class:`GatedForecastConfig`). ``pid_feedforward_lowvz_cut``
+loads ``pid_feedforward_lowvz.yaml``'s gains the same way and adds its post-contact cut
+(:class:`LowvzCutConfig`).
 
 Units and scales
 ----------------
@@ -27,10 +29,12 @@ __all__ = [
     "FeedforwardConfig",
     "GatedConfig",
     "GatedForecastConfig",
+    "LowvzCutConfig",
     "PidConfig",
     "load_feedforward",
     "load_gated",
     "load_gated_forecast",
+    "load_lowvz_cut",
     "load_pid",
 ]
 
@@ -102,6 +106,36 @@ class FeedforwardConfig:
         """
         if self.k_ff < 0.0:
             raise ValueError(f"k_ff must be >= 0, got {self.k_ff}")
+
+
+@dataclass(frozen=True)
+class LowvzCutConfig(FeedforwardConfig):
+    """``pid_feedforward_lowvz_cut``: lowvz's gains (by reference) plus the post-contact cut.
+
+    A subclass of :class:`FeedforwardConfig` rather than a wrapper, so the controller's ``ff``
+    attribute -- the config :mod:`rld.eval.controller_config` hashes -- carries the cut and
+    the ``gains_from`` provenance too (the pattern of :class:`GatedForecastConfig`).
+
+    Attributes:
+        gains_from: The YAML the gains came from (``pid_feedforward_lowvz.yaml``), absolute.
+        cut_speed_m_s: Descent commanded along the observed deck normal, on top of lowvz's
+            setpoint, once contact has been observed; metres per second model scale,
+            positive. The rule is ``docs/protocol.md`` P5-D2.
+    """
+
+    gains_from: Path
+    cut_speed_m_s: float
+
+    def __post_init__(self) -> None:
+        """Validate ranges.
+
+        Raises:
+            ValueError: As :class:`FeedforwardConfig`, or if ``cut_speed_m_s`` is not
+                positive.
+        """
+        super().__post_init__()
+        if not self.cut_speed_m_s > 0.0:
+            raise ValueError(f"cut_speed_m_s must be positive, got {self.cut_speed_m_s}")
 
 
 @dataclass(frozen=True)
@@ -206,6 +240,20 @@ class GatedForecastConfig(GatedConfig):
         )
 
 
+#: The YAML keys of :class:`PidConfig`.
+_PID_KEYS: frozenset[str] = frozenset(
+    (
+        "kp_xy_per_s",
+        "ki_xy_per_s2",
+        "integral_limit_m_s",
+        "lateral_speed_max_m_s",
+        "commit_radius_m",
+        "release_factor",
+        "descent_rate_m_s",
+    )
+)
+
+
 def _pid_from(raw: dict[str, object], path: Path) -> PidConfig:
     """Build a :class:`PidConfig` from a parsed YAML mapping.
 
@@ -258,6 +306,37 @@ def load_feedforward(path: Path) -> FeedforwardConfig:
     """
     raw = load_yaml(path)
     return FeedforwardConfig(pid=_pid_from(raw, path), k_ff=float(require(raw, "k_ff", path)))
+
+
+def load_lowvz_cut(path: Path) -> LowvzCutConfig:
+    """Load ``configs/control/pid_feedforward_lowvz_cut.yaml``.
+
+    ``gains_from`` is resolved relative to the YAML's own directory (as :func:`load_gated`),
+    and every gain comes from that file; none is read from this one.
+
+    Args:
+        path: The YAML file.
+
+    Returns:
+        The parsed :class:`LowvzCutConfig`, with the referenced gains inlined.
+
+    Raises:
+        FileNotFoundError: If ``path`` or the referenced gains file does not exist.
+        ValueError: If a key is missing, a value is out of range, or the file also carries a
+            gain key (a copied gain could drift from the referenced one).
+    """
+    raw = load_yaml(path)
+    copied = sorted(set(raw) & (_PID_KEYS | {"k_ff"}))
+    if copied:
+        raise ValueError(f"{path}: gains must come from gains_from, not be copied: {copied}")
+    gains_from = (path.parent / str(require(raw, "gains_from", path))).resolve()
+    gains = load_feedforward(gains_from)
+    return LowvzCutConfig(
+        pid=gains.pid,
+        k_ff=gains.k_ff,
+        gains_from=gains_from,
+        cut_speed_m_s=float(require(raw, "cut_speed_m_s", path)),
+    )
 
 
 def load_gated(path: Path) -> GatedConfig:

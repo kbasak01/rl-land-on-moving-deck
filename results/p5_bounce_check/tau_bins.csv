@@ -1,0 +1,15 @@
+controller,tau_bin_s,n_touchdown,n_bounce
+pid_feedforward,"(0.0, 0.02]",1120,1
+pid_feedforward,"(0.02, 0.03]",261,1
+pid_feedforward,"(0.03, 0.04]",104,1
+pid_feedforward,"(0.04, 0.05]",46,2
+pid_feedforward,"(0.05, 0.07]",36,3
+pid_feedforward,"(0.07, 0.1]",10,2
+pid_feedforward,"(0.1, 10.0]",3,0
+pid_feedforward_lowvz,"(0.0, 0.02]",582,6
+pid_feedforward_lowvz,"(0.02, 0.03]",360,0
+pid_feedforward_lowvz,"(0.03, 0.04]",215,1
+pid_feedforward_lowvz,"(0.04, 0.05]",142,2
+pid_feedforward_lowvz,"(0.05, 0.07]",136,7
+pid_feedforward_lowvz,"(0.07, 0.1]",91,25
+pid_feedforward_lowvz,"(0.1, 10.0]",54,23
