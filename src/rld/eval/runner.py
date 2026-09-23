@@ -34,8 +34,15 @@ Per-episode rows
 :data:`EPISODE_COLUMNS`: the list's columns, then the method (``method``, ``privileged``,
 ``run_seed``), then ``EpisodeRecord.as_row()`` verbatim, then the extras the metrics need --
 ``detectors_disagree``, ``closing_speed_world_z_m_s``, ``time_to_touchdown_s`` (contact
-detector), ``effort_mean_sq`` and ``action_jerk_mean``. Missing values (no touchdown) are
-NaN, never 0.
+detector), ``effort_mean_sq``, ``action_jerk_mean`` and ``td_in_quiescent_window``. Missing
+values (no touchdown) are NaN, never 0 and never False.
+
+``td_in_quiescent_window`` is evaluation ground truth (:mod:`rld.eval.truth`): whether the
+**true** deck satisfied the permissive quiescence predicate
+(:class:`rld.control.quiescence.QuiescenceRule`) over the 12 control-rate samples starting
+at the contact touchdown. The true trajectory is rebuilt with
+:meth:`~rld.control.base.PrivilegedContext.from_env` **after** the episode has ended, for
+every method alike; it is never passed to a non-privileged policy.
 
 Units: times seconds model scale, lengths metres model scale, speeds metres per second model
 scale, angles degrees; actions and the two action statistics are in normalised action units
@@ -60,6 +67,7 @@ from rld.control.registry import entry, make_controller
 from rld.envs.landing_env import ACTION_DIM, DeckLandingAviary
 from rld.eval.envs import EvalConfigs, make_env, motion_for, pad_offset_for
 from rld.eval.episodes import ListedEpisode
+from rld.eval.truth import td_in_quiescent_window, touchdown_rule
 
 __all__ = [
     "DEFAULT_CHUNK",
@@ -138,6 +146,7 @@ _EXTRA_COLUMNS: tuple[str, ...] = (
     "time_to_touchdown_s",
     "effort_mean_sq",
     "action_jerk_mean",
+    "td_in_quiescent_window",
 )
 
 #: Committed column order of every per-episode table.
@@ -353,6 +362,7 @@ def _episode_row(
     spec: PolicySpec,
     env: DeckLandingAviary,
     actions: Sequence[FloatArray],
+    td_quiescent: bool | float,
 ) -> dict[str, Any]:
     """Flatten one finished episode into its committed row.
 
@@ -362,6 +372,8 @@ def _episode_row(
         env: The environment, immediately after the episode ended.
         actions: The actions sent to ``env.step``, clipped to ``[-1, 1]^3`` as the
             environment clips them, normalised units.
+        td_quiescent: ``td_in_quiescent_window`` from :mod:`rld.eval.truth`: a bool, or
+            NaN when there was no contact touchdown.
 
     Returns:
         A dict with keys :data:`EPISODE_COLUMNS`, in order.
@@ -398,6 +410,7 @@ def _episode_row(
         time_to_touchdown_s=float("nan") if contact is None else float(contact.t_episode_s),
         effort_mean_sq=effort,
         action_jerk_mean=jerk,
+        td_in_quiescent_window=td_quiescent,
     )
     if tuple(out) != EPISODE_COLUMNS:
         raise RuntimeError(f"row columns {list(out)} != {list(EPISODE_COLUMNS)}")
@@ -440,6 +453,8 @@ def run_chunk(
     policy = spec.build(cfgs)
     _check_privilege(spec, policy)
     max_steps = int(round(cfgs.landing.total_len_s * cfgs.landing.ctrl_freq_hz)) + 1
+    rule = touchdown_rule(cfgs)
+    stride = int(cfgs.landing.pyb_steps_per_ctrl)
     rows: list[dict[str, Any]] = []
     try:
         for listed in episodes:
@@ -469,7 +484,15 @@ def run_chunk(
                 obs, _, terminated, truncated, _ = env.step(action)
                 if terminated or truncated:
                     break
-            rows.append(_episode_row(listed, spec, env, actions))
+            # Evaluation ground truth, built after the episode for every method alike.
+            contact = env.record.contact_record
+            truth = td_in_quiescent_window(
+                PrivilegedContext.from_env(env),
+                rule,
+                None if contact is None else float(contact.t_episode_s),
+                stride,
+            )
+            rows.append(_episode_row(listed, spec, env, actions, truth))
     finally:
         env.close()
     return rows

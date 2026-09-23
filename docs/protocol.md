@@ -687,15 +687,13 @@ provenance block; the sweep takes 27 s on 24 workers and its output does not dep
 
 ### P3-D1 — FROZEN EVALUATION PROTOCOL (2026-09-22)
 
-**Status: revision 1 (2026-09-22), awaiting re-freeze at Gate 3.**
-- The user approved the first draft and it was marked frozen.
-- The first Gate 3 run then **failed** on the `results-skeptic` review: one BLOCKING finding (H1)
-  and three MAJOR findings.
-- No RL run has started. The block was revised with the user's decisions, as logged in §9.
-- On re-freeze, nothing below changes after the first Phase 5 training run without a dated
-  deviation entry.
-- The SHA-256 of this block (from this heading to the line before P3-D2, UTF-8) is recorded in
-  the Gate 3 row.
+**Status: FROZEN 2026-09-22, revision 1, approved by the user.**
+- The user approved the first draft; the first Gate 3 run then **failed** on the `results-skeptic`
+  review, before any RL run.
+- This revision, with the user's decisions logged in §9, was approved by the user on 2026-09-22.
+- Nothing below changes after the first Phase 5 training run without a dated deviation entry.
+- The SHA-256 of this block (from this heading to the line before P3-D2, UTF-8) is recorded in the
+  Gate 3 row.
 
 **1. Success criteria.** `configs/env/success.yaml`, SHA-256
 `c7fbdcc4df48bd4a2cfe21811613e5e50e3e4868822fe6dddd13745d96692118`. The file (comments included)
@@ -832,15 +830,46 @@ before any method's evaluation results are read.
 - **Curriculum:** SS3 → SS4 → SS5. A stage is promoted when rolling tune-pool success is
   **≥ 0.80 over ≥ 100 episodes** at the current sea state. SS6 is never trained on.
 
-**7. Baselines on the frozen lists (committed as `results/e01/`, read before the hypotheses below
-were written).**
-- `pid_feedforward` succeeds on 200/200 static, 200/200 at `id` SS3, 200/200 at SS4, 198/200 at
-  SS5 (99.0 % [96.4, 99.7]) and 181/200 at SS6 (90.5 %). Its p95 closing speed at `id` SS5 is
-  0.262 m/s.
-- `pid_track_descend` scores 85.0 % at `id` SS5.
-- `gated` and `oracle_gated` sit **below** `pid_feedforward` from SS5 up, and all of their losses
-  are timeouts. `oracle_gated` is an upper bound on **commit timing under the quiescence rule**,
-  not on success. It is labelled that way in every table.
+**7. Baselines on the frozen lists (`results/e01/`, revision-1 run, read before the hypotheses
+below were written).**
+- *Run.* 5 controllers × 2 800 episodes. The run is byte-identical at 24 and 7 workers. The three
+  controllers whose code did not change reproduce the first run bit for bit.
+- *No catastrophic failures.* No controller crashes or goes off the pad in any cell.
+- *Detectors and tunnelling.* Detector disagreement is 5 / 14 000. Tunnelling is 14, all
+  `pid_track_descend`, with a maximum penetration of 6.5 mm.
+- **`pid_feedforward`.**
+  - Success: 200/200 static, then 200/200, 200/200, 198/200 (99.0 % [96.4, 99.7]) and 181/200
+    (90.5 %) at `id` SS3–SS6.
+  - p95 closing speed at `id` SS5: 0.262 m/s.
+  - Its losses are only `hard_landing` and `bounce`.
+- **`pid_feedforward_lowvz`** (the H1a reference).
+  - Success: 200, 196, 191 (95.5 % [91.7, 97.6]) and 170 (85.0 %) of 200 at `id` SS3–SS6.
+  - p95 closing speed at `id` SS5: **0.188 m/s**. It is below `pid_feedforward`'s p95 in every
+    cell.
+  - It never times out; median time to touchdown is 7.6–8.0 s. Its losses are bounces and hard
+    landings.
+  - H1a's non-inferiority bound is therefore taken against 95.5 %.
+- **`pid_track_descend`:** 85.0 % at `id` SS5.
+- **`gated`.** It loses mostly to `timeout`, plus 14 bounces:
+  - 4 at `id` SS6;
+  - 2 at `unseen_seastate` SS6;
+  - 1 at `unseen_heading` SS5;
+  - 7 at `unseen_heading` SS6.
+
+  It is below `pid_feedforward` from SS5 up in every regime.
+- **`oracle_gated`** (privileged; `gated`'s own rule applied to the true future deck motion).
+  - It loses only to `timeout`, apart from 1 bounce at `id` SS5.
+  - Its success is within ±5 points of `gated`'s in every cell (unpaired reading). It is not
+    above `gated` everywhere: 178 vs 179 at `id` SS5, and 178 vs 180 at `unseen_vessel` SS6.
+  - It ties `pid_feedforward` at `unseen_heading` SS5 (199/200).
+  - It is a **commit-timing oracle, not a bound on success or on landing quality**. Even so, only
+    63–79 % of its SS5/SS6 touchdowns fall inside a truly quiescent window
+    (`td_in_quiescent_window`). The cause is not verified; the likely one is that its touchdown
+    prediction ignores tracking lag.
+  - It is labelled that way in every table.
+- **Quiescence at touchdown.** At SS6, only 17–26 % of `gated`'s touchdowns fall in a truly
+  quiescent window, against 5–21 % for the ungated controllers. A quiet past 0.4 s is a weak
+  predictor of a quiet next 0.4 s at this sea state.
 
 **Consequence for the plan's H1.** Plan H1 predicts a residual gain of ≥ 10 points over
 `pid_feedforward` at `id` SS5. The baseline sits at 99.0 %, so that gain is **arithmetically
@@ -869,8 +898,8 @@ supported or inconclusive, with the number.
     - *Budget and reporting.* No tuning budget was added. It is printed beside every learned
       method.
   - **H1a (closing speed, scored).** `residual_ppo` lowers p95 closing speed relative to
-    `pid_feedforward_lowvz` by **≥ 15 %**, as the relative-p95 point estimate from §4, with its
-    95 % CI excluding 0.
+    `pid_feedforward_lowvz` by **≥ 15 %** (0.188 → ≤ 0.160 m/s at `id` SS5), as the relative-p95
+    point estimate from §4, with its 95 % CI excluding 0.
   - **Non-inferiority.** The lower bound of the 95 % CI of success(`residual_ppo`) −
     success(`pid_feedforward_lowvz`) must be **≥ −2 points** (paired bootstrap).
   - *Scoring for H1a:*

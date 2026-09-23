@@ -12,6 +12,8 @@ from typing import Any
 
 import pytest
 
+from rld.control.registry import REGISTRY
+from rld.eval.controller_config import resolved_config_sha256
 from rld.eval.metrics import CELL_METRIC_COLUMNS
 from rld.eval.report import (
     METHOD_LABELS,
@@ -50,6 +52,7 @@ def _episode(method: str, privileged: bool, regime: str, ss: str, outcome: str) 
         "tunnelled": False,
         "max_penetration_m": -0.001,
         "in_training_distribution": ss != "SS6",
+        "td_in_quiescent_window": (ss == "SS3") if landed else NAN,
     }
 
 
@@ -88,13 +91,28 @@ def test_csv_round_trip_and_render_are_deterministic(tmp_path: Path) -> None:
     assert text == render_success_vs_seastate(read_rows(tmp_path / "b.csv"), "t")
     assert "75.0 [" in text and "(3/4)" in text
     assert METHOD_LABELS["oracle_gated"] in text
-    assert "not on success" in text
+    assert "the gated rule applied to the true future deck motion" in text
+    assert "commit-timing oracle" in text
+    # The quiet-touchdown fraction is in the breakdown: 1.000 at SS3, 0.000 at SS6.
+    assert "quiet td" in text
+    breakdown = [line for line in text.splitlines() if line.startswith("| pid_feedforward | SS")]
+    assert [line.split(" | ")[-2] for line in breakdown] == ["1.000", "0.000"]
     # Missing cells are printed as missing, never as zero.
     assert "| missing |" in text
     assert "Simulation only" in text
 
 
 @pytest.mark.skipif(not (E01 / "summary.csv").exists(), reason="results/e01 not generated")
+def test_labels_mark_privilege_and_the_h1a_reference() -> None:
+    assert METHOD_LABELS["oracle_gated"] == (
+        "oracle_gated (privileged — the gated rule applied to the true future deck motion "
+        "(commit-timing oracle))"
+    )
+    assert METHOD_LABELS["pid_feedforward_lowvz"] == (
+        "pid_feedforward_lowvz (H1a closing-speed reference (P3-D1 §8))"
+    )
+
+
 def test_committed_e01_is_consistent() -> None:
     episodes = read_rows(E01 / "episodes.csv")
     assert tuple(episodes[0]) == EPISODE_COLUMNS
@@ -115,6 +133,10 @@ def test_committed_e01_is_consistent() -> None:
         for r in summary
     ]
     assert all(abs(f - 1.0) < 1e-12 for f in fractions)
+    # The committed numbers were flown with the configs that resolve today.
+    for row in summary:
+        if row["method"] in REGISTRY:
+            assert row["resolved_gains_sha256"] == resolved_config_sha256(row["method"])
     rendered = render_success_vs_seastate(
         summary, "e01 — classical baselines: success versus sea state (frozen episode lists)"
     )

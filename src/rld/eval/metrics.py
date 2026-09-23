@@ -22,6 +22,12 @@ What is reported, and why every piece is there
 * **Analytic-versus-contact touchdown disagreement** ``n`` and rate (Gate 2 required < 1 %;
   Phase 3 is the first volume test) and **tunnelling** ``n``.
 * **termination_reason counts**, so the ``crash`` bar decomposes.
+* **Touchdown in a truly quiescent window** (Gate 3 remediation, results-skeptic M1): of the
+  episodes where the contact detector fired, how many touched down at an instant from which
+  the **true** deck satisfied the permissive quiescence predicate for the next 12
+  control-rate samples (per-episode ``td_in_quiescent_window``, :mod:`rld.eval.truth`). The
+  denominator is ``n_touchdowns``; an episode without a touchdown carries NaN and is not
+  counted as either.
 
 Percentiles are NumPy's default (linear interpolation) over finite samples; a cell with no
 touchdown reports NaN, never 0. Units: speeds metres per second model scale, lengths metres
@@ -43,6 +49,7 @@ __all__ = [
     "CellMetrics",
     "as_bool",
     "as_float",
+    "as_optional_bool",
     "cell_metrics",
     "nan_percentile",
 ]
@@ -85,6 +92,11 @@ class CellMetrics:
         tunnelling_n: Episodes whose penetration exceeded the tunnelling threshold.
         max_penetration_m: Deepest penetration in the cell (most negative separation),
             metres model scale.
+        n_td_in_quiescent_window: Touched-down episodes whose true deck satisfied the
+            permissive quiescence predicate over the 12 control-rate samples starting at the
+            contact touchdown.
+        frac_td_in_quiescent_window: ``n_td_in_quiescent_window / n_touchdowns``,
+            dimensionless; NaN when nothing touched down.
         frac_in_training_distribution: Fraction of the cell's episodes whose grid cell is a
             dev-pool cell (P3-D2).
         n_reason_ground_contact: ``termination_reason == "ground_contact"`` count.
@@ -124,6 +136,8 @@ class CellMetrics:
     disagreement_rate: float
     tunnelling_n: int
     max_penetration_m: float
+    n_td_in_quiescent_window: int
+    frac_td_in_quiescent_window: float
     frac_in_training_distribution: float
     n_reason_ground_contact: int
     n_reason_off_plate_strike: int
@@ -177,6 +191,25 @@ def as_bool(value: Any) -> bool:
             return False
         raise ValueError(f"not a boolean: {value!r}")
     return bool(value)
+
+
+def as_optional_bool(value: Any) -> bool | None:
+    """Return a row value as a bool, or ``None`` for a missing (NaN) value.
+
+    Args:
+        value: A bool, ``None``, a float NaN, or a CSV spelling accepted by :func:`as_bool`
+            or ``"nan"``/``""``.
+
+    Returns:
+        The bool, or ``None`` when the value is missing.
+    """
+    if value is None:
+        return None
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    if isinstance(value, str) and value.strip().lower() in ("nan", ""):
+        return None
+    return as_bool(value)
 
 
 def nan_percentile(values: Sequence[float], q: float) -> float:
@@ -244,6 +277,15 @@ def cell_metrics(rows: Sequence[Mapping[str, Any]]) -> CellMetrics:
     tilt = [as_float(r["rel_tilt_deg"]) for r in landed]
     t_td = [as_float(r["td_t_episode_s"]) for r in landed]
     disagreements = sum(as_bool(row["detectors_disagree"]) for row in rows)
+    n_quiet = 0
+    for row in rows:
+        verdict = as_optional_bool(row["td_in_quiescent_window"])
+        if as_bool(row["touchdown_contact"]) != (verdict is not None):
+            raise AssertionError(
+                "td_in_quiescent_window must be a verdict exactly when the contact detector "
+                f"fired: touchdown_contact={row['touchdown_contact']!r}, verdict={verdict!r}"
+            )
+        n_quiet += bool(verdict)
     k = counts["success"]
     lo, hi = wilson_interval(k, n)
     return CellMetrics(
@@ -274,6 +316,8 @@ def cell_metrics(rows: Sequence[Mapping[str, Any]]) -> CellMetrics:
         disagreement_rate=disagreements / n,
         tunnelling_n=sum(as_bool(row["tunnelled"]) for row in rows),
         max_penetration_m=min(as_float(row["max_penetration_m"]) for row in rows),
+        n_td_in_quiescent_window=n_quiet,
+        frac_td_in_quiescent_window=n_quiet / len(landed) if landed else float("nan"),
         frac_in_training_distribution=(
             sum(as_bool(row["in_training_distribution"]) for row in rows) / n
         ),

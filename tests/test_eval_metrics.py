@@ -34,6 +34,7 @@ def _row(outcome: str, reason: str, **touchdown: float) -> dict[str, Any]:
         "tunnelled": False,
         "max_penetration_m": -0.001,
         "in_training_distribution": True,
+        "td_in_quiescent_window": True if landed else NAN,
     }
 
 
@@ -60,6 +61,8 @@ def _cell() -> list[dict[str, Any]]:
     rows[-2]["tunnelled"] = True
     rows[-2]["max_penetration_m"] = -0.0079
     rows[0]["in_training_distribution"] = False
+    rows[1]["td_in_quiescent_window"] = False
+    rows[6]["td_in_quiescent_window"] = False
     return rows
 
 
@@ -100,6 +103,25 @@ def test_audit_counts() -> None:
     assert reason_total == m.n_episodes
 
 
+def test_quiescent_touchdown_fraction_is_over_touched_down_episodes() -> None:
+    m = cell_metrics(_cell())
+    # 8 touchdowns, 2 of them outside a quiescent window; crash and timeout carry NaN and are
+    # in neither the numerator nor the denominator.
+    assert m.n_td_in_quiescent_window == 6
+    assert m.frac_td_in_quiescent_window == 6 / 8
+
+
+def test_quiescent_verdict_must_match_touchdown() -> None:
+    rows = _cell()
+    rows[7]["td_in_quiescent_window"] = False  # crash, no touchdown, yet a verdict
+    with pytest.raises(AssertionError, match="td_in_quiescent_window"):
+        cell_metrics(rows)
+    rows = _cell()
+    rows[0]["td_in_quiescent_window"] = NAN  # touchdown, yet no verdict
+    with pytest.raises(AssertionError, match="td_in_quiescent_window"):
+        cell_metrics(rows)
+
+
 def test_reason_columns_cover_every_frozen_reason() -> None:
     names = {f.name for f in fields(CellMetrics) if f.name.startswith("n_reason_")}
     assert names == {f"n_reason_{r}" for r in TERMINATION_REASONS}
@@ -111,6 +133,7 @@ def test_no_touchdown_is_nan_not_zero() -> None:
     assert math.isnan(m.rel_vz_normal_p95_m_s) and math.isnan(m.lateral_p50_m)
     assert math.isnan(m.time_to_touchdown_mean_s)
     assert m.frac_timeout == 1.0 and m.success_wilson_lo == 0.0
+    assert m.n_td_in_quiescent_window == 0 and math.isnan(m.frac_td_in_quiescent_window)
 
 
 def test_csv_strings_reduce_like_in_memory_values() -> None:

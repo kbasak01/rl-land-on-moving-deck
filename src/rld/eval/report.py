@@ -49,12 +49,13 @@ __all__ = [
 #: Grouping columns of a summary row, in committed order.
 SUMMARY_KEY_COLUMNS: tuple[str, ...] = ("method", "privileged", "run_seed", "regime", "ss")
 
-#: How a method is named in rendered tables. A privileged method's label says what it bounds.
+#: How a method is named in rendered tables. A privileged method's label says what it is.
 METHOD_LABELS: dict[str, str] = {
     "oracle_gated": (
-        "oracle_gated (privileged — upper bound on commit timing under the quiescence rule, "
-        "not on success)"
+        "oracle_gated (privileged — the gated rule applied to the true future deck motion "
+        "(commit-timing oracle))"
     ),
+    "pid_feedforward_lowvz": "pid_feedforward_lowvz (H1a closing-speed reference (P3-D1 §8))",
 }
 
 #: Caveats every rendered results file carries (``landing-protocol`` skill).
@@ -250,6 +251,13 @@ def render_success_vs_seastate(summary: Sequence[Mapping[str, str]], title: str)
         "Wilson 95 % CI in brackets, then k/N. Success is never pooled across sea states.",
         "- `in-dist` is the fraction of the cell's episodes whose grid cell is in the "
         "development pool (P3-D2); `id` SS6 and every 90 deg episode are outside it.",
+        "- `quiet td` is, of the touched-down episodes, the fraction whose TRUE deck satisfied "
+        "the permissive quiescence predicate (`rld.control.quiescence.QuiescenceRule`: 12 "
+        "samples 1/30 s apart, |roll| <= 3.0 deg, |pitch| <= 2.0 deg, |pad v_z| <= 0.16 m/s "
+        "model) starting at the contact touchdown; evaluation ground truth, never a "
+        "controller input. `–` when nothing touched down.",
+        "- `oracle_gated` is privileged: it reads the true future deck motion. It bounds commit "
+        "timing under the gated rule, not success, and is never a deployable result.",
         "- Rendered from `summary.csv` by `rld.eval.report`; do not edit by hand.",
         "",
     ]
@@ -282,6 +290,7 @@ def render_success_vs_seastate(summary: Sequence[Mapping[str, str]], title: str)
             "t_td p50 (s)",
             "disagree",
             "tunnel",
+            "quiet td",
             "in-dist",
         ]
         lines += ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
@@ -307,6 +316,7 @@ def render_success_vs_seastate(summary: Sequence[Mapping[str, str]], title: str)
                         _num(as_float(rec["time_to_touchdown_p50_s"]), 2),
                         f"{rec['disagreement_n']}/{rec['n_episodes']}",
                         rec["tunnelling_n"],
+                        _num(as_float(rec["frac_td_in_quiescent_window"]), 3),
                         _num(as_float(rec["frac_in_training_distribution"]), 3),
                     ]
                     lines.append("| " + " | ".join(str(v) for v in values) + " |")

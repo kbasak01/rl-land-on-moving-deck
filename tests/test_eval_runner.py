@@ -94,6 +94,16 @@ def test_rows_do_not_depend_on_workers_or_chunk(
     assert [tuple(row) for row in one] == [EPISODE_COLUMNS] * len(tiny_list)
     assert [row["index"] for row in one] == [row.index for row in tiny_list]
     assert all(row["privileged"] is (name == "oracle_gated") for row in one)
+    # Ground truth: a verdict exactly when the contact detector fired, NaN otherwise; the
+    # static deck is always quiescent.
+    for row in one:
+        verdict = row["td_in_quiescent_window"]
+        if row["touchdown_contact"]:
+            assert isinstance(verdict, bool)
+            if row["vessel"] == STATIC_LABEL:
+                assert verdict is True
+        else:
+            assert isinstance(verdict, float) and np.isnan(verdict)
     metrics = cell_metrics(one)
     fractions = (
         metrics.frac_crash,
@@ -184,3 +194,4 @@ def test_phase5_callable_hook(tiny_list: list[ListedEpisode], cfgs: EvalConfigs)
     assert all(row["run_seed"] == 3 and row["method"] == "hover" for row in rows)
     assert all(row["effort_mean_sq"] == 0.0 and row["action_jerk_mean"] == 0.0 for row in rows)
     assert all(np.isnan(row["rel_vz_normal_m_s"]) and row["n_contacts"] == 0 for row in rows)
+    assert all(np.isnan(row["td_in_quiescent_window"]) for row in rows)
