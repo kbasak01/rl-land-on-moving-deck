@@ -1519,6 +1519,105 @@ What this means:
   - it is not wired into `rld.envs.observation`;
   - it is not a Gate 4 criterion.
 
+### P4-D4 — Forecast-gated results on the frozen lists (2026-09-23)
+
+**Sources.**
+- `results/e02/` holds 7 controllers × {aft, cg} on all five frozen lists: 38 400 episodes, run at
+  `9e8061f`, 1 714 s at 24 workers. Its summary was re-derived at `12fd9f5` from the unchanged
+  `episodes.csv`, adding per-listed-episode quiet columns.
+- `results/e02_tcn_seeds/` holds the secondary seed arms, 10 400 new episodes at `12fd9f5` (clean
+  tree), plus e02's rows carried.
+- All numbers are simulation only, on a Froude-scaled Crazyflie model and dmf's synthetic JONSWAP
+  deck motion. Nothing here concerns real flight or real deck data.
+
+**Reproduction.**
+- The e02 aft rows of the five Phase 3 controllers are byte-identical to `results/e01/episodes.csv`
+  (14 000 of 14 000; `run_info.json["reference_check"]`).
+- The episode-list MANIFEST is 10/10 OK.
+- The P3-D1 block SHA-256 verifies before each run.
+
+**Scoring of P4-D4a.**
+1. **Expectation 1 held.** `gated_forecast` (`residual_interval`) at the aft pad: 2 600 of 2 600
+   moving-deck episodes time out, with zero touchdowns in all 13 regime × SS cells.
+2. **Expectation 2.** Recorded as "timeouts rise with sea state"; scored as non-decreasing. At the
+   CG the same controller commits, and its success falls with sea state:
+   - `id`: SS3 0.995, SS4 0.955, SS5 0.79, SS6 0.315;
+   - `unseen_heading`: flat at SS3 and SS4 (1.000, 1.000).
+3. **Expectation 3** made no prediction. `gated_forecast_tcn` commits at the aft pad (`id` success
+   1.00 / 0.95 / 0.60 / 0.165, SS3 → SS6).
+
+**Findings.** They are descriptive: per-cell Wilson 95 % CIs, compared over 26 moving-deck cells,
+with no multiplicity correction and no pre-registered hypothesis. "Separated" means the two
+intervals do not overlap.
+
+**Outcome classes.** Every forecast-gated failure is a `timeout`:
+- no crash, off-pad or hard landing anywhere;
+- at most 0.005 bounce in any cell.
+
+This follows from `fallback_commit_s: null` (P3-D3) and the P3-D1 episode budget: a commit window
+that never arrives is reported as a timeout, not rescued.
+
+**Success: forecast gating lowers it.** Counts are cells with separated CIs:
+
+| arm | worse than `gated` | better than `gated` | worse than `pid_feedforward` |
+|---|---|---|---|
+| `gated_forecast` | 19 of 26 | 0 | 20 of 26 |
+| `gated_forecast_tcn` | 9 of 26 | 0 | 12 of 26 |
+
+- For `gated_forecast_tcn`, the loss grows with sea state. For example, `id` SS6 aft success is
+  0.165 against 0.63 for `gated`.
+- `pid_feedforward`, ungated, has the highest success in every cell.
+
+**Quiet landings: count them per listed episode, not per touchdown.**
+- Per touchdown, `gated_forecast_tcn` looks close to `oracle_gated` (e.g. `id` SS6 aft 0.64 against
+  0.68). But it touches down on only 33 of 200 episodes, against 129.
+- Per **listed** episode (`quiet_landings_per_listed`), the separated-CI cells against `gated` are:
+
+  | arm | more than `gated` | fewer than `gated` |
+  |---|---|---|
+  | `gated_forecast_tcn` | 5 of 26 (aft `id` SS4, aft `unseen_heading` SS5, CG `id` SS4, CG `id` SS5, CG `unseen_heading` SS5) | 1 (aft `unseen_vessel` SS6) |
+  | `gated_forecast` | 2 | 13 |
+
+- Against `oracle_gated`, both arms have fewer quiet landings in 12–17 cells and more in none.
+- **Supported:** at SS4–SS5 the TCN arm converts some of `gated`'s non-quiet landings into quiet
+  ones, and pays in timeouts.
+- **Not supported:**
+  - that forecast gating improves commit timing overall;
+  - that it approaches the commit-timing oracle;
+  - that it helps at SS6.
+
+**Seed sensitivity** (secondary, `results/e02_tcn_seeds/`).
+- Across `tcn_quantile` seeds 0, 1 (selected) and 2, the largest per-cell spread is 0.075 in
+  success (aft `unseen_heading` SS6: 0.22 / 0.295 / 0.235) and 0.07 in quiet landings per listed
+  episode (aft `unseen_heading` SS5).
+- Every seed is worse than `gated` on success in 8–9 cells and better in none.
+- Every seed has more quiet landings per listed episode than `gated` in 3–6 cells and fewer in 1.
+- So the TCN-arm findings do not depend on which seed was selected.
+
+**The aft vs CG control.**
+- At the CG the DLinear band passes and the arm commits. At the aft pad it never does.
+- The aft band's excess width comes from the lever-arm term (P4-D3, `band_feasibility.csv`).
+- Aft-pad v_z is where dmf's roll/pitch–heave phase defect enters. So the aft-pad null for the
+  fixed-width forecaster is reported together with this caveat, as the CG arm requires.
+
+**Distribution caveats.**
+- The forecasters were fitted on frigate SS3–SS5 at 45/135/180°.
+- The SS6, 90° and s175 cells are therefore outside the forecasters' training range, as they are for
+  every learned method (P3-D2).
+- The s175 aft pad uses the frigate-calibrated γ (P4-D3).
+
+**Cost.** Per 30 Hz control step, CPU ORT with 1 thread, p50 / p99 (`results/forecast/cost.csv`):
+
+| model | p50 | p99 |
+|---|---|---|
+| `dlinear_ols` | 0.94 ms | 1.20 ms |
+| `residual_interval` | 1.15 ms | 1.49 ms |
+| `tcn` | 1.60 ms | 2.02 ms |
+| `tcn_quantile` | 1.88 ms | 3.08 ms |
+
+That is against a 33.3 ms control period. The `cost.csv` regenerated at `12fd9f5` supersedes the
+earlier P4-D3 figures. A feed `reset` (200 dmf evaluations) costs about 52 ms, once per episode.
+
 ### P4-D5 — `oracle_gated` relabel and its config hash (2026-09-23)
 
 Plan note (c) and P3-D4 asked for this relabel. The stale "upper bound" labels were replaced by
