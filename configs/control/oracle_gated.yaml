@@ -1,0 +1,23 @@
+# oracle_gated -- PRIVILEGED UPPER BOUND, never a deployable result
+# (src/rld/control/oracle.py). Same hover-and-commit as gated, and EXACTLY gated's
+# predicate (rld.control.quiescence.QuiescenceRule: 12 samples, 1/30 s apart, same
+# thresholds, same pad v_z), applied to the TRUE FUTURE deck states at t_td + j/30 s,
+# j = 0..11, with the predicted touchdown t_td = now + height / descent_rate. Requires a
+# PrivilegedContext at every reset. (Before the 2026-09-22 Gate 3 remediation it tested all
+# 96 physics samples at 240 Hz; docs/protocol.md P3-D3.)
+#
+# Gains are pid_feedforward's tuned gains, loaded by reference. Hover keys hand-set, not
+# tuned; thresholds are dmf's, Froude-converted (see gated.yaml).
+#
+# Units: metres, metres per second and seconds are MODEL scale.
+
+gains_from: pid_feedforward.yaml
+
+hover_height_m: 0.3
+hover_kp_per_s: 2.0
+hover_speed_max_m_s: 0.4
+hover_tolerance_m: 0.05
+
+thresholds: permissive
+
+fallback_commit_s: null

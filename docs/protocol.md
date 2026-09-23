@@ -685,20 +685,631 @@ provenance block; the sweep takes 27 s on 24 workers and its output does not dep
 
 ## Phase 3
 
-### P3-D1 — FROZEN EVALUATION PROTOCOL (YYYY-MM-DD)
-**Nothing below changes after the first Phase 5 training run without a dated deviation entry.**
-- Success criteria: (copy of `configs/env/success.yaml`, with its SHA-256)
-- Episode lists: N = 200 per (regime, SS); generator seed ____; SHA-256 of each file ____
-- Metrics: (list)
-- Statistics: rliable IQM + optimality gap, stratified bootstrap, reps ____; paired bootstrap for H1–H4
-- Training budget: PPO ____ env steps; SAC ____; seeds 0–4; tuning ≤ 20 trials/method on `id` validation
-- Residual α = ____; curriculum promotion threshold ____
-- Hypotheses with predicted direction and magnitude:
-  - H1 ____
-  - H2 ____
-  - H3 ____
-  - H4 ____
-  - H5 ____
+### P3-D1 — FROZEN EVALUATION PROTOCOL (2026-09-22)
+
+**Status: FROZEN 2026-09-22, revision 1, approved by the user.**
+- The user approved the first draft; the first Gate 3 run then **failed** on the `results-skeptic`
+  review, before any RL run.
+- This revision, with the user's decisions logged in §9, was approved by the user on 2026-09-22.
+- Nothing below changes after the first Phase 5 training run without a dated deviation entry.
+- The SHA-256 of this block (from this heading to the line before P3-D2, UTF-8) is recorded in the
+  Gate 3 row.
+
+**1. Success criteria.** `configs/env/success.yaml`, SHA-256
+`c7fbdcc4df48bd4a2cfe21811613e5e50e3e4868822fe6dddd13745d96692118`. The file (comments included)
+is the authority; its keys, verbatim:
+
+```
+rel_vertical_velocity_max_m_s: 0.5          contact_dwell_min_s: 0.5
+vz_component: deck_normal                   contact_loss_grace_s: 0.05
+lateral_offset_max_m: 0.10                  crash_tilt_deg: 60.0
+relative_tilt_max_deg: 15.0                 crash_tilt_component: absolute
+hard_landing_includes_relative_tilt: true   tunnelling_penetration_m: 0.005
+contact_normal_force_min_n: 1.0e-4          analytic_contact_margin_m: 0.001
+detector_disagreement_window_s: 0.0333333333333333
+```
+
+The six outcome classes are matched in order `crash → off_pad → hard_landing → bounce → success →
+timeout`. `timeout` is the only truncation. The P2-D5 resolutions stand.
+
+**2. Episode lists.** These lists are committed in `0780aaa5dc4dd7e1c20fdeed48d405a1e45a4f80` on
+their own commit, before any controller was evaluated on them.
+- Generator seed **20260924**.
+- Draw rule `balanced_round_robin`: per cell, the regime's dmf test realizations are shuffled and
+  episodes are dealt round-robin, so the per-realization spread is ≤ 1. SS6 in `unseen_seastate`
+  has 480 realizations, so 200 of them get one episode each.
+- Aft pad.
+- N = 200 per cell, 13 cells, plus a 200-episode static-pad list.
+- The pad-at-CG and sinusoid arms (Phase 7) fly the **same** lists.
+- Content SHA-256 is over a canonical CSV serialisation. `results/episodes/MANIFEST.csv` is the
+  authority, with SHA-256
+  `e6f30e55e478d39061b94e38de33959ca99b16e8cac38a3bd99b34f6543ad4a2`.
+  `scripts/make_episodes.py --check` re-verifies both hashes of every list.
+
+| file | cells | rows | file SHA-256 | content SHA-256 |
+|---|---|---|---|---|
+| id.parquet | SS3–SS6 | 800 | `919be99d…c1926dc64d` | `ea38d8a5…a8dde5769017` |
+| unseen_seastate.parquet | SS6 | 200 | `b8cf656e…fd36524f` | `9fdd5ae9…b91d90a` |
+| unseen_heading.parquet | SS3–SS6 | 800 | `1eba3df5…cbde0ee` | `2259c0c6…bb325499` |
+| unseen_vessel.parquet | SS3–SS6 | 800 | `3b9293fe…20b87d26` | `3f84623d…a4cb0` |
+| static.parquet | static | 200 | `90741add…0ca1c` | `7818bda5…be732` |
+
+The pools are defined in P3-D2. Train is 729 realizations and tune is 135, both from `dev_pool()`,
+and neither shares a realization with any list. `id` SS6 and every 90° episode are flagged
+`in_training_distribution = false`, which is 0.4375 of `id`; 0.5625 is flagged true.
+
+The regimes are **not independent samples**. Their test partitions share realizations:
+- `id` ∩ `unseen_heading`: 96;
+- `id` ∩ `unseen_seastate`: 37;
+- `unseen_heading` ∩ `unseen_seastate`: 50.
+
+This is not leakage, since every one of them is a test realization. But a regime-vs-regime
+difference is not a comparison of independent draws, and it is never reported as one.
+
+**3. Metrics, per (method, seed, regime, SS) cell.** Every cell reports:
+- success rate with a Wilson 95 % CI and N;
+- all six outcome-class fractions, which sum to 1;
+- `termination_reason` counts;
+- touchdown closing speed along the deck normal, p50 and p95, which is the criterion-1 quantity;
+  the world-z reading is reported beside it;
+- lateral offset p50 and p95;
+- relative tilt p95;
+- time to touchdown p50;
+- control effort (mean ‖a‖², normalised units) and action jerk (mean ‖aₜ − aₜ₋₁‖);
+- analytic-vs-contact detector disagreement, n and rate;
+- tunnelling n;
+- the `in_training_distribution` fraction.
+
+**Primary metric:** success rate. **Primary secondary metric:** p95 closing speed.
+
+**4. Statistics.**
+- **Per cell and per seed:** a Wilson 95 % CI.
+- **Across the 5 training seeds:** rliable IQM and optimality gap (from `rliable.metrics`), with a
+  stratified-bootstrap 95 % CI. It uses **2 000** replicates, bootstrap seed **20260926**, and
+  resamples runs within each task, never tasks.
+- **Method contrasts (H1–H4):** a paired bootstrap on per-episode differences over the identical
+  episode lists. It resamples seeds, then episodes, with **10 000** replicates and seed 20260926.
+- **Closing-speed contrasts (H1 and H3)** use a paired **relative-p95** statistic:
+  - *Pairing.* Each bootstrap replicate resamples seeds (per method), then resamples one set of
+    episode indices shared by both methods.
+  - *p95.* Within the replicate, each method's p95 closing speed is taken over **that method's
+    touched-down episodes only**. An episode with no touchdown (`timeout`, or a `crash` before
+    contact) has no closing speed; it is excluded from that method's p95, never imputed. Its
+    cost is captured by the success criterion that each hypothesis also scores.
+  - *Statistic.* r = 1 − p95(method) / p95(reference).
+  - *Judged on.* The magnitude threshold ("≥ 15 %", "≥ 10 %") is judged on the **point
+    estimate**. "Separates" requires the 95 % CI of r to exclude 0.
+  - *Implementation.* Phase 7 implements this in `rld.eval.stats` with a unit test on a synthetic
+    case with a known r. Today's `paired_bootstrap` (difference of means) is not this statistic.
+- A difference "separates" only when the 95 % CI of the difference excludes 0. Overlapping CIs are
+  never reported as a result.
+- Success is never pooled across sea states in a headline. Classical baselines are deterministic
+  and have one "seed".
+- **Deviation from plan §5 (tooling, not substance):** `rliable.library` cannot be imported in the
+  pinned environment (`arch` 7.2.0 fails at import against pandas 3.0.5). The stratified bootstrap
+  is therefore implemented in `rld.eval.stats` and unit-tested. rliable's own implementation also
+  draws from NumPy's global random state, so its intervals would not be reproducible.
+
+**5. Training budget.** Sized from `results/env_throughput_landing.csv` (P2-D8). At 16 workers the
+env runs at 514 steps/s under a policy that resets constantly (the `random` row) and 4 610 steps/s
+under one that flies full episodes (the `hold` row). Both figures exclude the PPO update.
+
+| method family | env steps / run | seeds | runs | total steps |
+|---|---|---|---|---|
+| PPO: `ppo`, `residual_ppo`, `ppo_forecast`, `residual_ppo_forecast`, `ppo_sinusoid` | **10 M** | 0–4 | 25 | 250 M |
+| SAC: `sac` | **2 M** | 0–4 | 5 | 10 M |
+
+Wall clock for the PPO family is 250 M steps at 4 610 steps/s = **15 h** best case, or at
+514 steps/s = **135 h** worst case, as one stream. Two concurrent 16-worker runs on 36 cores
+bring that to about **7.5–68 h**. Two facts support budgeting on the optimistic side:
+- the residual methods start from `pid_feedforward`, which lands in about 4.5 s (≈ 135 steps);
+- a crashing pure-PPO policy lives near the `random` row only early in training.
+
+The ~135 h worst case is stated, not hidden. **Pre-registered budget rule:** the first PPO seed's
+wall clock is reported. If the projected total exceeds 5 days, the budget may be cut **once**, by a
+dated deviation that applies the same factor to every PPO-family method. The cut must be made
+before any method's evaluation results are read.
+
+**Hyperparameter tuning:**
+- **PPO and SAC:** ≤ **20 trials** each, on the P3-D2 **tune pool only**. Each trial trains at
+  **2 M** steps (PPO) or **0.5 M** steps (SAC) on one seed, and is scored by tune-pool success on
+  SS3–SS5 with ties broken by p95 closing speed.
+- **`residual_ppo`, `ppo_forecast`, `residual_ppo_forecast` and `ppo_sinusoid`** inherit PPO's
+  tuned hyperparameters and get no search of their own. Any bias from this runs *against* the
+  residual and forecast methods, since the settings were tuned for pure PPO.
+- **The classical baselines** spent their 20 trials each in P3-D3. `pid_feedforward_lowvz` spent
+  none: it is selected from the same log by a rule (§8, H1).
+- **SAC's budget is not equal to PPO's** (2 M vs 10 M env steps), as plan §5 intends for an
+  off-policy method. Every PPO-vs-SAC statement carries that confound, stated beside it.
+
+**6. Seeds, α, curriculum.**
+- **Seeds:** training seeds 0–4 for every learned method, and none is ever dropped.
+- **Residual α:** **α = 0.3** in normalised action units (0.45 m/s at `v_max` = 1.5 m/s). The
+  composed action is `clip(a_pid_ff + α·π(o))` through the env's norm cap, and the policy's last
+  layer is zero-initialised.
+- **Curriculum:** SS3 → SS4 → SS5. A stage is promoted when rolling tune-pool success is
+  **≥ 0.80 over ≥ 100 episodes** at the current sea state. SS6 is never trained on.
+
+**7. Baselines on the frozen lists (`results/e01/`, revision-1 run, read before the hypotheses
+below were written).**
+- *Run.* 5 controllers × 2 800 episodes. The run is byte-identical at 24 and 7 workers. The three
+  controllers whose code did not change reproduce the first run bit for bit.
+- *No catastrophic failures.* No controller crashes or goes off the pad in any cell.
+- *Detectors and tunnelling.* Detector disagreement is 5 / 14 000. Tunnelling is 14, all
+  `pid_track_descend`, with a maximum penetration of 6.5 mm.
+- **`pid_feedforward`.**
+  - Success: 200/200 static, then 200/200, 200/200, 198/200 (99.0 % [96.4, 99.7]) and 181/200
+    (90.5 %) at `id` SS3–SS6.
+  - p95 closing speed at `id` SS5: 0.262 m/s.
+  - Its losses are only `hard_landing` and `bounce`.
+- **`pid_feedforward_lowvz`** (the H1a reference).
+  - Success: 200, 196, 191 (95.5 % [91.7, 97.6]) and 170 (85.0 %) of 200 at `id` SS3–SS6.
+  - p95 closing speed at `id` SS5: **0.188 m/s**. It is below `pid_feedforward`'s p95 in every
+    cell.
+  - It never times out; median time to touchdown is 7.6–8.0 s. Its losses are bounces and hard
+    landings.
+  - H1a's non-inferiority bound is therefore taken against 95.5 %.
+- **`pid_track_descend`:** 85.0 % at `id` SS5.
+- **`gated`.** It loses mostly to `timeout`, plus 14 bounces:
+  - 4 at `id` SS6;
+  - 2 at `unseen_seastate` SS6;
+  - 1 at `unseen_heading` SS5;
+  - 7 at `unseen_heading` SS6.
+
+  It is below `pid_feedforward` from SS5 up in every regime.
+- **`oracle_gated`** (privileged; `gated`'s own rule applied to the true future deck motion).
+  - It loses only to `timeout`, apart from 1 bounce at `id` SS5.
+  - Its success is within ±5 points of `gated`'s in every cell (unpaired reading). It is not
+    above `gated` everywhere: 178 vs 179 at `id` SS5, and 178 vs 180 at `unseen_vessel` SS6.
+  - It ties `pid_feedforward` at `unseen_heading` SS5 (199/200).
+  - It is a **commit-timing oracle, not a bound on success or on landing quality**. Even so, only
+    63–79 % of its SS5/SS6 touchdowns fall inside a truly quiescent window
+    (`td_in_quiescent_window`). The cause is not verified; the likely one is that its touchdown
+    prediction ignores tracking lag.
+  - It is labelled that way in every table.
+- **Quiescence at touchdown.** At SS6, only 17–26 % of `gated`'s touchdowns fall in a truly
+  quiescent window, against 5–21 % for the ungated controllers. A quiet past 0.4 s is a weak
+  predictor of a quiet next 0.4 s at this sea state.
+
+**Consequence for the plan's H1.** Plan H1 predicts a residual gain of ≥ 10 points over
+`pid_feedforward` at `id` SS5. The baseline sits at 99.0 %, so that gain is **arithmetically
+impossible**. The hypotheses below are restated against the measured ceiling. The change is made
+here, before any RL run, and this paragraph records why.
+
+**8. Hypotheses (direction, magnitude, test).** Each is scored in Phase 7 as supported, not
+supported or inconclusive, with the number.
+
+- **H1 (residual RL improves on what gain-tuning alone can do).** Cell: `id` SS5.
+  - *Why a second reference.* A PID that simply descends more slowly already lands softer:
+    tuning trials 10, 5 and 15 of `pid_feedforward` cut pooled tune-pool p95 by 27–38 % at
+    98–99 % success. So a closing-speed gain over the success-tuned `pid_feedforward` would not
+    show that RL adds anything.
+  - *The reference.* H1 is therefore scored against **`pid_feedforward_lowvz`**.
+    - *Selection rule.* It is chosen from the existing 20-trial P3-D3 log: among trials whose tune
+      success is ≥ best − 0.02, take the lowest pooled p95 closing speed, with the lowest trial
+      index breaking ties.
+    - *What it selects.* **Trial 10**: 178/180 tune success, pooled p95 0.153 m/s, descent
+      0.111 m/s.
+    - *When the rule was fixed.* It was worded after the tuning log existed, but before any
+      frozen-list number for any candidate was seen.
+    - *A wrong prediction, corrected.* The revision-1 text predicted "trial 15", a prediction
+      carried over from the skeptic's review. The user kept the **rule** (2026-09-22) rather than
+      re-tuning the cutoff to reach the predicted trial.
+    - *Budget and reporting.* No tuning budget was added. It is printed beside every learned
+      method.
+  - **H1a (closing speed, scored).** `residual_ppo` lowers p95 closing speed relative to
+    `pid_feedforward_lowvz` by **≥ 15 %** (0.188 → ≤ 0.160 m/s at `id` SS5), as the relative-p95
+    point estimate from §4, with its 95 % CI excluding 0.
+  - **Non-inferiority.** The lower bound of the 95 % CI of success(`residual_ppo`) −
+    success(`pid_feedforward_lowvz`) must be **≥ −2 points** (paired bootstrap).
+  - *Scoring for H1a:*
+    - **Supported:** point estimate ≥ 15 %, the r CI excludes 0, **and** non-inferiority holds.
+    - **Not supported:** non-inferiority fails, **or** the r CI includes 0, **or** r < 0 (residual
+      lands harder).
+    - **Inconclusive:** r separates from 0 but its point estimate is below 15 %, with
+      non-inferiority holding.
+  - **H1b (success where the baseline has room, scored).** On `id` SS6, `residual_ppo` exceeds
+    **`pid_feedforward`** in success by **≥ 5 points** (paired bootstrap).
+    - **Supported:** point estimate ≥ 5 points and the CI excludes 0.
+    - **Not supported:** the CI includes 0 or the difference is negative.
+    - **Inconclusive:** a positive, separating difference below 5 points.
+    - The success-tuned `pid_feedforward` is the right reference here, because it is the stronger
+      of the two on success.
+- **H2 (residual degrades less under sea-state shift).** For a method, "drop" = IQM success at
+  `id` SS5 − IQM success at `unseen_seastate` SS6. Prediction: drop(`ppo`) − drop(`residual_ppo`)
+  ≥ **10 points**. Test: bootstrap of the difference of drops. It resamples seeds, and resamples
+  episodes independently within each cell, because the two cells are different episodes.
+- **H3 (forecasts help, then help less).** On `id` SS5 and SS6, `ppo_forecast` lowers p95 closing
+  speed relative to `ppo` by **≥ 10 %**, using the relative-p95 statistic of §4 with the same
+  point-estimate / CI rule as H1a.
+  - Under `unseen_vessel` (same SS), that relative gain is **≤ half** of its `id` value.
+  - The same two tests are reported for `residual_ppo_forecast` vs `residual_ppo` as a secondary.
+- **H4 (motion realism, the novelty test).** Cell: `id` SS5. Define:
+  - drop_sin = success(`ppo_sinusoid` on sinusoid) − success(`ppo_sinusoid` on JONSWAP);
+  - drop_jon = success(`ppo` on JONSWAP) − success(`ppo` on sinusoid).
+
+  Prediction: drop_sin − drop_jon ≥ **10 points**, using the same episode lists for both test
+  motions. **If the CI includes 0, the novelty claim is withdrawn in the README (D0.4).**
+- **H5 (deployment).** At batch 1, the exported policy MLP's p50 latency on ORT CPU (1 thread) is
+  lower than on every parity-passing GPU provider, by a factor of **≥ 2×**. Test: Project 4's
+  harness, 200 warmup + 2 000 timed runs. Scored on p50, with p99 reported.
+
+**9. Deviations and incidents before freeze.**
+1. **A smoke check ran before the lists were committed (corrected in revision 1).**
+   - *Timeline, from file mtimes and process start times, all local time on 2026-09-22.* The
+     controller gain YAMLs were last written at **17:03:29**, and nothing under `src/rld/control/`
+     or `configs/control/` changed after that until the Gate 3 remediation. The superseded
+     uniform-draw lists were written at **16:58:28**. The eval-auditor's runner smoke check started
+     at about **17:10**. The balanced lists overwrote the superseded ones at **17:24:00** and were
+     committed as `0780aaa` at **19:11**. `results/e01/` was written at **19:19:48**.
+   - *What was flown.* 4 controllers × static indices 0–7 and `id` SS3 indices 0–7 (64
+     controller-episodes). The output went to the agent's terminal only. Nothing was written to
+     `results/`, and nothing was tuned from it.
+   - *Which lists.* The smoke check read the lists at about 17:10, so it read the **superseded**
+     ones. Their `id` SS3 episodes differ from the committed ones in their realization
+     assignment. **The static list was not changed by the redraw**: its file hash `90741add…` is
+     identical in both. So **32 of those controller-episodes were committed static episodes**,
+     flown before the commit. The earlier text of this item said "about 1 h" after the gains and
+     "no committed episode was flown". Both were wrong.
+   - *Consequence: none.* The gains were fixed 7 minutes before the smoke check, and the static
+     pad has no deck motion.
+2. **A hung smoke-check process.** A second smoke-check invocation, started at about 17:10, hung.
+   Its parent process kept respawning worker processes for about 2.4 h, with its output going to
+   a closed pipe. The main thread terminated that process tree only at about 19:35. It had read
+   the superseded lists at start-up. No output of it was ever read or written.
+3. **The plan's H1 is restated** (item 7 above).
+4. **Revision 1 (2026-09-22), after the first Gate 3 run failed on the `results-skeptic` review.**
+   The user chose each fix.
+   - **B1 (H1 beatable by a slower PID).** H1 is split into H1a, scored against the rule-selected
+     `pid_feedforward_lowvz`, and H1b, success at `id` SS6. The scoring is made explicit.
+   - **M1 (`oracle_gated` stricter than `gated`).** The oracle now applies `gated`'s own 30 Hz,
+     12-sample predicate to the true future window, and has been re-evaluated.
+   - **M2.** This section was rewritten with exact times.
+   - **M3.** The relative-p95 statistic, NaN handling and the judging rule are specified in §4.
+   - **Minor corrections:** the `in_training_distribution` fraction; the "all timeouts" sentence
+     in §7; the MANIFEST SHA-256; the SAC budget confound; the regime overlap.
+
+### P3-D2 — One training pool for all four regimes: the intersection of dmf's train partitions (2026-09-22)
+
+*Decision (user, 2026-09-22).* Every learned method and every tuned baseline draws its
+realizations from **one** development pool, `rld.deck.splits.dev_pool(sim_cfg) -> (train, tune)`:
+
+| pool | realizations | vessel | sea states | headings | speeds | seed ordinals |
+|---|---|---|---|---|---|---|
+| train | 729 | frigate | SS3, SS4, SS5 | 45°, 135°, 180° | 0, 6, 12 kn | 0–26 |
+| tune | 135 | frigate | SS3, SS4, SS5 | 45°, 135°, 180° | 0, 6, 12 kn | 27–31 |
+
+`train` is the intersection of the four regimes' `train_keys`; `tune` is the intersection of
+their `train_keys ∪ val_keys`, minus every regime's `test_keys`, minus `train`. Both are
+*derived* from `build_all_splits`, not hard-coded, and `tests/test_deck_splits.py` asserts the
+sizes, the seed ranges, and disjointness from every regime's test set. `tune` is used for PID gain
+tuning, RL hyperparameter trials and curriculum validation. Evaluation episodes come from each
+regime's dmf **test** partition, unchanged.
+
+*Reason.* dmf builds the four regimes as four separate splits, and they overlap one another. With
+40 frigate seed ordinals, `id` holds out 32–39 for test and 27–31 for val, while
+`unseen_seastate`, `unseen_heading` and `unseen_vessel` train on 0–33 and validate on 34–39. So:
+
+- the three shift regimes' train sets contain `id`-test realizations (seeds 32–33); and
+- `id`-val contains SS6 and 90° realizations that are `unseen_seastate`-test and
+  `unseen_heading`-test.
+
+One policy trained on `id`-train and scored on all four regimes would therefore evaluate on
+realizations it was trained or tuned on. That breaks CLAUDE.md non-negotiable 2. Training one
+policy per regime would fix this too, but at 4× the RL compute; the intersection gives the same
+guarantee with one policy per method × seed.
+
+*Consequence, stated so it is not rediscovered as an anomaly.* The `id` list keeps dmf's
+definition (seeds 32–39, all four sea states, all four headings). Its SS6 cells and its 90° cells
+are therefore **outside the training distribution** of every learned method. Every episode row
+carries an `in_training_distribution` flag, so `id` is reportable both as dmf defines it and
+restricted to trained-on cells.
+
+*Correction to P2-D4, carried rather than edited.* P2-D4 says the e00 sanity episodes (`id`-val,
+all headings) are "neither trained on nor part of the Phase 3 frozen evaluation lists". Under
+dmf's regimes, the 90° realizations among those draws are `unseen_heading`-test realizations. No
+harm follows, because `hover` and `random` are null policies that nothing was fitted to. But the
+sentence is not true as written, and from Phase 3 on the null-policy sweep's pool is not the
+tuning pool.
+
+### P3-D3 — Baseline controller tuning (2026-09-22)
+
+*Decision.* `pid_track_descend` and `pid_feedforward` are tuned **with the same budget, the
+same search space on their shared parameters and the same episodes**, on the P3-D2 **tune pool
+only**, so the naive baseline is not strawmanned against the residual-RL base. `gated` and
+`oracle_gated` are **not** tuned. They inherit `pid_feedforward`'s gains by reference
+(`gains_from: pid_feedforward.yaml`, never copied), and their thresholds are dmf's. The
+procedure is `rld.control.tuning` + `scripts/tune_controller.py`, driven by
+`configs/control/tuning.yaml`.
+
+*Procedure.*
+
+- **Pool.** `dev_pool(sim_cfg)[1]`: frigate, SS3–SS5, headings 45/135/180° (never 90°),
+  0/6/12 kn, seed ordinals 27–31 (135 realizations). The aft pad. No episode is drawn from
+  `results/episodes/` or from any regime's test partition.
+- **Draw.** 60 episodes per sea state × SS3–SS5 = **180 episodes per trial**. The committed
+  tuning seed is **20260923** (P2-D4's sanity draw is 20260922). It is mixed with a SHA-256
+  label per sea state, so the draw is independent of the controller and the trial. Every
+  trial of both controllers flies the **identical** 180 episodes (paired).
+- **Budget.** **20 trials per controller, 20 spent by each** (3 600 episodes each). Trial 0
+  is the hand-set point the controllers were written with. Trials 1–19 are the first 19 points
+  of **one** scrambled Sobol sequence of dimension 5 (`scipy.stats.qmc.Sobol`, seed 20260923,
+  `random_base2(5)` truncated). `pid_track_descend` reads coordinates 1–4 and ignores the
+  fifth, so both controllers were evaluated at the **same** (kp, ki, radius, descent) points;
+  `pid_feedforward` additionally varies `k_ff`.
+- **Ranges** (linear; model scale): `kp_xy_per_s` [0.5, 3.0] (m/s)/m; `ki_xy_per_s2` [0, 1]
+  (m/s)/(m·s); `commit_radius_m` [0.02, 0.10] m; `descent_rate_m_s` [0.08, 0.60] m/s;
+  `k_ff` [0.5, 1.2] (feedforward only). Fixed, not searched: `integral_limit_m_s` 0.1,
+  `lateral_speed_max_m_s` 0.5, `release_factor` 2.0.
+- **Objective.** Mean success over SS3–SS5 (equal weight). Ties are broken by the lower
+  **pooled p95 touchdown closing speed along the deck normal**, then by the lower trial index.
+- **Reproducibility.** The measured columns of `results/e01/tuning_pid_feedforward.csv` are
+  identical when re-run at 7 workers instead of 30. The `--final` run
+  (`results/e01/tune_pool_final.csv`) reproduces both selected trials' numbers exactly.
+
+*Final gains* (committed at full precision; `tests/test_control_pid_*.py` asserts the YAML equals
+the log's `selected` row):
+
+| controller | trial | kp_xy (1/s) | ki_xy (1/s²) | commit radius (m) | descent (m/s) | k_ff |
+|---|---|---|---|---|---|---|
+| `pid_track_descend` | 7 | 1.18205 | 0.11468 | 0.02868 | 0.25068 | — |
+| `pid_feedforward` | 4 | 1.95602 | 0.95414 | 0.03446 | 0.20716 | 1.08174 |
+
+*Tune-pool results at the final configs* (`results/e01/tune_pool_final.csv`, the same 180
+episodes, n = 60 per cell; closing speed = p95 touchdown closing speed along the deck normal,
+m/s model; lateral = p95 lateral offset, m model; ttd = mean time to touchdown, s model):
+
+| controller | SS | success | crash | off_pad | hard | bounce | timeout | closing p95 | lateral p95 | ttd |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `pid_track_descend` | SS3 | 1.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.317 | 0.037 | 4.51 |
+| `pid_track_descend` | SS4 | 0.983 | 0.000 | 0.000 | 0.017 | 0.000 | 0.000 | 0.436 | 0.033 | 4.53 |
+| `pid_track_descend` | SS5 | 0.917 | 0.000 | 0.000 | 0.017 | 0.067 | 0.000 | 0.480 | 0.040 | 4.62 |
+| `pid_feedforward` | SS3 | 1.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.220 | 0.031 | 4.45 |
+| `pid_feedforward` | SS4 | 1.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.246 | 0.033 | 4.48 |
+| `pid_feedforward` | SS5 | 1.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.252 | 0.030 | 4.56 |
+| `gated` | SS3 | 1.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.219 | 0.042 | 3.22 |
+| `gated` | SS4 | 0.983 | 0.000 | 0.000 | 0.000 | 0.000 | 0.017 | 0.243 | 0.042 | 3.97 |
+| `gated` | SS5 | 0.933 | 0.000 | 0.000 | 0.000 | 0.000 | 0.067 | 0.240 | 0.038 | 4.79 |
+| `oracle_gated` (privileged) | SS3 | 1.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.216 | 0.042 | 3.37 |
+| `oracle_gated` (privileged) | SS4 | 0.983 | 0.000 | 0.000 | 0.000 | 0.000 | 0.017 | 0.236 | 0.046 | 3.86 |
+| `oracle_gated` (privileged) | SS5 | 0.883 | 0.000 | 0.000 | 0.000 | 0.000 | 0.117 | 0.236 | 0.036 | 4.69 |
+
+Touchdown-detector disagreement is 0 of 720 across these rows. Tunnelling occurred once
+(`pid_track_descend`, SS5). Across all 40 trials (7 200 episodes) there were 2 disagreements,
+both in `pid_feedforward` trials, at most 1 per trial. There were 76 tunnelling flags: 71 in
+`pid_track_descend` trials and 5 in `pid_feedforward` trials. The worst trial is trial 1
+(descent 0.586 m/s), with 25 of 180 for `pid_track_descend` and 3 for `pid_feedforward`.
+Tunnelling tracks the closing speed. It is Phase 3's first volume test of P2-D6's flag and is
+reported, not filtered.
+
+*What these numbers are, and what they are not.*
+
+1. **They are selection-biased.** The winners were chosen on this exact draw, so tune-pool
+   success is an optimistic estimate. The frozen `id` lists (P3-D1) are the measurement.
+   Nothing here is an evaluation result.
+2. **Tuning did not improve `pid_feedforward`'s success. Only the tie-break moved.** Its
+   hand-set trial 0 already scored 1.000, and **4 of 20 trials** (0, 2, 4, 17) tied at 1.000.
+   The selection among them was made by the pre-registered tie-break, p95 closing speed
+   0.245 m/s (trial 4) against 0.297–0.380 for the other three. The tune pool is **saturated**
+   for this controller, so the ≥ 95 % Gate 3 criterion is not in doubt on the tune pool, but
+   the pool cannot rank the top of the search space on success. `pid_track_descend` improved
+   from 0.928 (trial 0) to 0.967 (trial 7), a single winner.
+3. **The two failure modes of the naive controller bracket its descent rate.** Fast descents
+   (≥ 0.46 m/s) lose to `hard_landing`, because the closing speed is `descent + v_pad,z`
+   whenever the pad rises. Slow descents (≤ 0.15 m/s) lose to `bounce` (up to 0.47 at SS5),
+   because without feedforward a landed drone commanded to −0.11 m/s in the world frame cannot
+   follow a deck that falls faster, and it lifts off. `pid_feedforward`'s `k_ff·v_pad` removes
+   both.
+4. **`oracle_gated` is an upper bound on commit timing under this rule, not on success.** With
+   `fallback_commit_s: null`, every failure of both gated controllers is a `timeout`: the deck
+   was not quiescent in time. The oracle waits for a whole true 0.4 s window at its predicted
+   touchdown, sampled at 240 Hz. The current-state rule fires on 12 control samples at 30 Hz.
+   So the oracle can time out *more* often (SS5: 7/60 against 4/60), while landing more gently
+   (pooled closing p95 0.233 against 0.238 m/s). Success does not require quiescence: an
+   ungated feedforward descent lands 60/60 at SS5. Tables must not read `oracle_gated`'s
+   success as a ceiling on the other controllers'.
+5. **Quiescence base rate on the tune pool** (aft pad, model scale, permissive; fraction of
+   start instants whose next 0.4 s is entirely inside all three limits): SS3 0.80 / 0.99 / 0.90,
+   SS4 0.57 / 0.78 / 0.49, SS5 0.19 / 0.39 / 0.21, at 45° / 135° / 180°. The binding limit at SS5
+   is the pad `v_z` in head seas (in limits 54 % of the time at 180°) and roll at 45° (51 %).
+   The gated controllers' timeout fraction is therefore expected to rise sharply at SS6 (not
+   measured here; SS6 is never in the tune pool) and under `strict`.
+
+*The quiescence thresholds and their conversion.* The thresholds are **imported** from
+`dmf.eval.quiescence` (`PERMISSIVE`, the default, and `STRICT`), not copied. They are converted
+by `rld.control.quiescence.froude_limits` through `FroudeScale` at λ = 1/25 from
+`configs/deck/scaling.yaml`:
+
+| set | roll (°) | pitch (°) | rate, full → model (m/s) | sustain, full → model (s) | samples @30 Hz / @240 Hz |
+|---|---|---|---|---|---|
+| permissive | 3.0 | 2.0 | 0.8 → **0.16** | 2.0 → **0.4** | 12 / 96 |
+| strict | 1.5 | 1.0 | 0.4 → **0.08** | 3.0 → **0.6** | 18 / 144 |
+
+Angles are unchanged (λ⁰); the rate and the sustain are × √λ = 0.2. Run lengths use dmf's P6-D2
+convention, `sustain_samples = ceil(sustain·fs)`, reused from dmf.
+`tests/test_control_gated.py` asserts every number above, `source is dmf.PERMISSIVE`, the
+identity at λ = 1, and the √λ law at λ = 1/100.
+
+*Deviation from dmf's rule, recorded.* dmf applies the rate limit to the **CG heave rate**.
+Here it is applied to the **pad deck-point vertical velocity** `v_pad,z`, because the pad is
+what the drone lands on. At the aft pad that differs from the CG by the pitch lever-arm term:
+the aft/CG `v_z` RMS ratio is 0.685–7.378 over the grid (P1-D2). The threshold value is
+dmf's; only the quantity it is applied to changes.
+
+*Controller definitions fixed by this entry* (docstrings in `src/rld/control/`):
+
+- **Model time.** Each controller counts its own `act` calls since `reset`
+  (`t = k / 30 Hz`). It cross-checks that count against the observation's float32
+  `time_fraction` while the latter is below 1, and raises on a mismatch larger than half a
+  step (a skipped reset or a double `act`). `time_fraction` alone saturates during the dwell
+  grace.
+- **Deck-point velocity is `velocity + rel_velocity`**, not `velocity − rel_velocity`: the
+  environment defines `rel_velocity = v_pad − v_drone`. `tests/test_control_base.py` checks the
+  sum against the env's analytic deck state (≤ 2e-6 m/s), and asserts that the difference is
+  wrong.
+- **Deck roll/pitch** are inverted from the observed normal via P1-D2's
+  `n = (−sinθ·cosφ, −sinφ, cosθ·cosφ)`, degrees in dmf's signs; checked against the env ≤ 1e-4°.
+- **`gated`** hovers at 0.3 m clearance (hand-set: `hover_kp_per_s` 2.0,
+  `hover_speed_max_m_s` 0.4, `hover_tolerance_m` 0.05; not tuned). It commits once the lateral
+  gate is open, it is at hover, and the trailing 0.4 s of control samples were all in limits.
+- **`oracle_gated`** predicts touchdown at `t + height/descent_rate` (it assumes the
+  feedforward closes on the pad at exactly the descent rate, and ignores tracking lag). It
+  commits when the true `[t_td, t_td + 0.4 s)` window (96 physics samples) is all in limits.
+  A window running past the trajectory's end does not qualify. `reset` without a
+  `PrivilegedContext` raises. The context is rebuilt from the env's public
+  `motion`/`pad`/`pad_offset_m`/`cfg`/`record.t0_model_s` through `build_trajectory`, and it
+  is bit-identical to the driven trajectory (tested).
+- **`fallback_commit_s: null`** for both gated controllers, so their timeouts are reported
+  rather than rescued.
+
+*Evidence.* `results/e01/tuning_pid_track_descend.csv`, `results/e01/tuning_pid_feedforward.csv`
+(20 rows each, every trial's parameters and per-SS outcome breakdown, `selected` flag,
+provenance block), `results/e01/tune_pool_final.csv` (4 rows). Config SHA-256 at the time of
+writing: `pid_track_descend.yaml` `5d6aef55…`, `pid_feedforward.yaml` `91e7d5ad…`,
+`gated.yaml` `da8eb578…`, `oracle_gated.yaml` `9665bd4c…`, `tuning.yaml` `c7d099d2…`.
+
+*Amendment (2026-09-22, Gate 3 remediation, results-skeptic M1; the text above is left as
+written).* The `oracle_gated` bullet above and item 4 describe the **superseded** oracle rule:
+96 physics samples at 240 Hz over `[t_td, t_td + 0.4 s)`. That rule is strictly harder to satisfy
+than the 12-sample, 30 Hz rule it was meant to bound. From this amendment, `oracle_gated` applies
+**exactly** `gated`'s predicate, `rld.control.quiescence.QuiescenceRule`. The rule is built once in
+`GatedBase` at the control rate and shared, so the two cannot drift apart:
+- the same 12 samples, 1/30 s apart;
+- the same Froude-converted thresholds;
+- the same quantities: roll and pitch from the deck normal through `deck_angles_deg`, and the pad
+  deck-point world `v_z`.
+
+The only difference is the samples. The oracle reads the true future states at `t_td + j/30`,
+`j = 0..11` (every 8th physics sample from the first at or after `t_td`). `gated` reads the
+observed trailing 12. `window_is_quiescent` is removed, and `QuiescenceRule` is now the only
+predicate. `tests/test_control_oracle_gated.py` asserts on 40 identical windows that both
+controllers commit or neither does, that both agree with `QuiescenceRule.verdict`, and that
+physics samples between the control-rate samples are not read. `privileged=True` is unchanged.
+Every `oracle_gated` number produced before this amendment was made under the old rule, and is
+superseded until re-run. That covers the `tune_pool_final.csv` rows and SS5 figures quoted above,
+and `results/e01/` on the frozen lists. No tuning was involved, because the oracle has no tuned
+parameters. At the same time, "MRU-equivalent" was replaced in code, configs and tests by "an
+ideal (noise-free, zero-latency) ship motion reference unit plus state estimate" (skeptic minor
+4). The edits to the config comments move `oracle_gated.yaml` to `e8bc4efd…` and
+`pid_feedforward.yaml` to `beb988ad…`. The gain values are unchanged.
+
+*Amendment (2026-09-22, Gate 3 remediation, results-skeptic B1): `pid_feedforward_lowvz`.* This
+controller is a second gain set for **the same class and law** (`PidFeedforward`), registered
+with `privileged=False` as the closing-speed reference for H1. Its gains come from the
+**existing** 20-trial log `results/e01/tuning_pid_feedforward.csv` by the user's rule:
+1. keep the trials whose tune success (`mean_success`, the mean over SS3–SS5) is ≥ best − 0.02;
+2. of those, take the lowest pooled p95 closing speed (`pooled_td_closing_p95_m_s`);
+3. break any remaining tie by the lowest trial index.
+
+The rule was **worded after the tuning log existed, but before any frozen-list number for any
+candidate was seen**. `rld.control.tuning.select_lowvz` implements it. The best success is 1.000,
+so the cutoff is 0.98 and 11 trials qualify. The rule selects **trial 10**, with success
+178/180 = 0.989 and pooled p95 0.153 m/s:
+- its gains are kp_xy 1.4012840571813285 (1/s), ki_xy 0.8979697581380606 (1/s²), commit radius
+  0.0711192973703146 m, descent 0.11144125740975142 m/s and k_ff 0.9547040911391378, with
+  pid_feedforward's fixed keys;
+- its outcomes are SS3 59/60, SS4 60/60 and SS5 59/60, and both losses are `bounce`;
+- the runners-up are trial 5 (0.983, 0.173 m/s) and trial 15 (0.994, 0.179 m/s).
+
+An earlier prediction that the rule would pick trial 15 was wrong. The user kept the rule as
+worded. **Zero tuning budget was added: no new trial and no new episode.** The gains are in
+`configs/control/pid_feedforward_lowvz.yaml`. `tests/test_control_pid_feedforward_lowvz.py` pins
+trial 10 and asserts that the YAML equals that log row. The slow descent takes a mean of about
+7.7 s to touch down against the 12 s budget, compared with about 4.5 s for `pid_feedforward`.
+
+### P3-D4 — P3-D1 errata and Gate 3 re-review fold-in (2026-09-22)
+
+*Why this is a separate entry.* The frozen P3-D1 block keeps its SHA-256
+`21465588610e65f1d1253bd26e5ce5db1da938889c6042338e1de8d4d99f5ed2`. Every item below either
+narrows a claim, corrects a statement of fact, or specifies a detail that was left open. None of
+them changes a threshold, a prediction, an episode list or the success criteria. Where an item
+disagrees with the P3-D1 text, this entry wins. It is dated before any Phase 5 run.
+
+**MAJOR-1 of the second review: H1's title claimed too much.**
+- *Narrowed title.* H1 is retitled **"residual RL lands softer than the lowest-closing-speed gain
+  set in the P3-D3 log (constant-descent law), without losing success"**. The P3-D1 title
+  "improves on what gain-tuning alone can do" is withdrawn.
+- *What the reference is.* `pid_feedforward_lowvz` received **zero** tuning budget aimed at closing
+  speed. It is the softest point of a search scored on success. All 20 trials use a
+  constant-descent law. The search range goes down to 0.08 m/s, but only trial 10 (0.111 m/s)
+  approaches it, and a constant-descent PID much slower than that would time out: `lowvz`
+  already touches down as late as 10.65 s against the 12 s budget.
+- *What H1a will and will not show.* A supported H1a shows "softer than the softest
+  constant-descent PID in the success-tuned log". It does **not** show "softer than any PID":
+  - a PID tuned for closing speed, or one with a two-stage (flare) descent, has not been ruled
+    out;
+  - the README says so wherever H1 appears.
+- *Open option.* A pre-registered closing-speed PID search would close this gap. It remains
+  available to the user before Phase 5 and is not taken here.
+
+**Minor corrections to P3-D1:**
+1. **§7 quiescence range.** The oracle's SS5/SS6 `td_in_quiescent_window` range is **63–85 %**
+   (0.634–0.847), not 63–79 %.
+2. **§2 overlap numbers were mislabelled.**
+   - 96 / 37 / 50 are the realization overlaps of the **committed lists**.
+   - The dmf **test partitions** themselves share 96 (`id` ∩ `unseen_heading`), 96
+     (`id` ∩ `unseen_seastate`) and 120 (`unseen_heading` ∩ `unseen_seastate`).
+3. **§2 wording.** The lists were committed before any controller was evaluated on them,
+   **except the 32 static-pad controller-episodes of §9.1**.
+4. **Timing.**
+   - H1a and H1b were committed at `9343cb8`, **before** the revision-1 e01 run. They were written
+     after the first e01 run.
+   - The `lowvz` selection rule was fixed before any frozen-list number was seen for any candidate
+     **other than trial 4** (`pid_feedforward`), which had already been evaluated in the first
+     run.
+5. **H1a outcomes made exclusive, H1 has no combined verdict.**
+   - *Supported:* r ≥ 15 %, the CI of r excludes 0, and non-inferiority holds.
+   - *Inconclusive:* 0 < r < 15 %, the CI excludes 0, and non-inferiority holds.
+   - *Not supported:* every other case, including non-inferiority failing, the CI including 0, or
+     r < 0.
+   - H1a and H1b are scored and reported separately. No combined "H1" verdict is given.
+6. **§4 pooling across seeds.** Within a bootstrap replicate, p95 is taken over the pooled
+   resampled (seed, episode) touchdowns of each method. The point estimate is the same statistic
+   on the unresampled pool of all seeds × episodes.
+7. **H1b is scored outside the training distribution.** `id` SS6 is 0 % in-distribution, since
+   SS6 is never trained on, so H1b is a sea-state-extrapolation result as well as an improvement
+   claim.
+8. **Sensitivity check.** Excluding non-touchdown episodes from p95 lets a policy lower its p95 by
+   timing out on its worst deck windows. The −2-point non-inferiority margin caps this. Phase 7
+   additionally reports, **as a sensitivity analysis, not a scored test**, the relative-p95 with
+   timeouts ranked as the worst closing speed.
+9. **Multiplicity.** No multiplicity correction is applied across H1a, H1b, H2, H3 and H4. Each is
+   a separately pre-registered prediction, and the README states that no correction was made.
+
+**P3-D3 tune-pool table, re-run with the corrected oracle and the `lowvz` row.** Source:
+`results/e01/tune_pool_final.csv` at `d35f224`, tune pool only, seed 20260923, n = 60 per SS.
+Success fractions:
+
+| controller | SS3 | SS4 | SS5 | mean |
+|---|---|---|---|---|
+| pid_track_descend | 1.000 | 0.983 | 0.917 | 0.967 |
+| pid_feedforward | 1.000 | 1.000 | 1.000 | 1.000 |
+| pid_feedforward_lowvz | 0.983 | 1.000 | 0.983 | 0.989 |
+| gated | 1.000 | 0.983 | 0.933 | 0.972 |
+| oracle_gated (privileged) | 1.000 | 0.983 | 0.967 | 0.983 |
+
+- This supersedes the oracle rows and the "oracle times out more than gated" claim in P3-D3
+  item 4.
+- `configs/control/pid_feedforward_lowvz.yaml` SHA-256:
+  `373c2307857988a88f90cd39959e873b808034cddf7fc70fe7c14f323da34f4c`.
+
+**Carried to Phase 4, not fixed in Phase 3.**
+- *Stale "upper bound" labels.* They remain in `configs/control/oracle_gated.yaml` (line 1),
+  and in the `src/rld/control/registry.py` and `PrivilegedContext` docstrings. They contradict
+  P3-D1 §7.
+  - *Why not now.* The YAML's bytes are hashed into the committed `results/e01/summary.csv`, so
+    editing it now would leave that hash stale.
+  - *Fix.* Relabel them "commit-timing oracle (privileged)" as the first `controls-engineer` task
+    of Phase 4, together with `gated_forecast`.
+  - *Guard.* The word "upper bound" must not appear in any results table or in the README for
+    this controller.
+- *`lowvz` bounces.* They happen at low closing speed (0.064–0.116 m/s at `id` SS5), which makes
+  them lift-offs, not impacts. Before Phase 5, check that they are not a contact-solver artifact
+  a residual policy could learn to exploit.
+- *Unrecorded worker-count check.* The "byte-identical at 24 and 7 workers" check is not recorded
+  in any committed artifact. The 7-worker outputs were compared in the session scratchpad
+  (SHA-256 of `episodes.csv` `c5852090…`, identical to the committed file). Phase 7's
+  `make eval` records the second worker count in `run_info.json`.
 
 ## Gates
 | gate | date | result | note |
@@ -706,3 +1317,4 @@ provenance block; the sweep takes 27 s on 24 workers and its output does not dep
 | 0 | 2026-09-21 | PASSED | `make test lint` green (6 tests, 53 s); pybullet 3.2.7 built from sdist and opens a DIRECT client on 3.12.3; `results/env_throughput.csv` written (8 rows, 1/8/16 SubprocVecEnv workers x rpm/vel); both submodule SHAs recorded in P0-D1. |
 | 1 | 2026-09-21 | PASSED | `make test lint` green (66 tests, 62 s; ruff + ruff-format + mypy --strict clean). `results/deck_stats.csv` 192 rows = 96 cells x {aft, cg}, full grid (2 vessels x SS3-SS6 x 4 headings x 3 speeds), all 2304 realizations, with `z_std_model_m`, `vz_std_model_m_s`, `vz_p99_model_m_s`, `az_p99_model_m_s2` populated and no NaN; plus `deck_stats_seeds.csv` (4608 rows) and `deck_feasibility.csv` (2 rows). lambda = 1/25 and r_pad = -0.4*L confirmed in P1-D1. Feasibility rule PASS: frigate SS6 180 deg 12 kn aft vz p99 = 0.577165 m/s vs the 2.08333 m/s gate threshold, 3.61x inside; the rejected `SPEED_LIMIT` reading is recorded as FAIL beside it. Sign convention and ZYX rotation order corrected and pinned by three hand-computed cases (P1-D2); one project-wide lambda (P1-D3). |
 | 2 | 2026-09-22 | PASSED | `make test lint` green (118 passed, 1 skipped, 107 s; ruff + ruff-format + mypy --strict clean). The 1 skip is by design: `tests/test_platform.py` gates only the configured driver and *measures* the other, and `test_constraint_driver_fails_the_tracking_gate` asserts the rejected one fails. Platform tracking, `kinematic` driver, 10 s model at frigate SS6 180 deg 12 kn aft: body-origin 0.000 mm and plate-corner 2.2e-16 m against the 1 mm gate, orientation 3.0e-8 rad, `getBaseVelocity` linear and angular ratio 0.0 % against the 2 % gate; `constraint` fails every one of those by an order of magnitude and cannot be tuned into passing (24-point sweep, four identical digits) -- P2-D1. `gymnasium.utils.env_checker.check_env` passes; reset determinism bit-identical as the env's 1st and 3rd reset; drop on a static pad registers exactly one touchdown; scripted 0.3 m/s descent on a static pad 100/100 `success`. `results/e00_env_sanity.csv` (4 rows) + `results/e00_env_sanity_episodes.csv` (800 rows) written from the `id` split's val partition, draw seed 20260922: hover 1.000 `timeout` at SS3 and SS5, random 1.000 `crash` at both, no successes under either -- outcome fractions sum to 1.000000 per row. **PyBullet-vs-analytic touchdown disagreement 0/800 = 0.0000** against the < 1 % gate, plus 0/100 on scripted static descents and 0/30 on a moving SS5 deck. `results/env_throughput_landing.csv` (8 rows) records the deck-in-the-loop throughput P3-D1 must size from (P2-D8); `results/env_throughput.csv` untouched. Two flags carried forward, both recorded rather than fixed: one of 800 sanity episodes tunnelled (7.86 mm penetration vs the 5 mm threshold) and it was the only random episode that ever reached contact, so the random arm exercises the touchdown path barely at all -- the scripted tests carry that load; and the plan's "dropped from rest" is not expressible in a velocity-setpoint action space, so the drop test uses the maximum commanded descent (P2-D9). |
+| 3 | 2026-09-22 | PASSED (2nd attempt) | First attempt FAILED on the `results-skeptic` review (BLOCKING B1: the restated H1 was beatable by a slower PID; MAJOR M1-M3), before any RL run; remediated with user decisions (P3-D1 revision 1 §9, P3-D3 amendments). Second attempt: `make test lint` green (233 passed, 1 skipped by design, 162 s; ruff + ruff-format + mypy --strict clean). `pid_feedforward` 200/200 on the static pad and 200/200 at `id` SS3 (Wilson [98.1, 100.0] each) against the >= 95 % gate, from `results/e01/episodes.csv` at `d35f224`. Success-vs-sea-state table `results/e01/success_vs_seastate.md` committed: 5 controllers x 14 cells x N = 200, re-renders byte-identically from `summary.csv`; no crash or off_pad anywhere; detector disagreement 5/14000; tunnelling 14 (all `pid_track_descend`, max 6.5 mm). Frozen lists `results/episodes/` committed at `0780aaa`, MANIFEST SHA-256 `e6f30e55e478d39061b94e38de33959ca99b16e8cac38a3bd99b34f6543ad4a2`, `--check` 10/10 OK. P3-D1 FROZEN revision 1, block SHA-256 **`21465588610e65f1d1253bd26e5ce5db1da938889c6042338e1de8d4d99f5ed2`** (from `### P3-D1 — FROZEN` to the line before `### P3-D2`, UTF-8). Second `results-skeptic` review: no BLOCKING; MAJOR-1 (H1 scope) and MINOR 1-9 folded in by P3-D4 errata without touching the frozen block; three items carried to Phase 4 (P3-D4). |

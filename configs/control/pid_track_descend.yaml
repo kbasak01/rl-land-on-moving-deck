@@ -1,0 +1,24 @@
+# pid_track_descend -- the naive baseline (src/rld/control/pid.py). NOT privileged.
+#
+# Lateral PI on (p_pad - p_drone)_xy; descend at a constant rate only once the lateral error
+# is inside commit_radius_m, hold height (v_z = 0) otherwise. No deck feedforward.
+#
+# Units: metres, metres per second and seconds are MODEL scale (lambda = 1/25). Gain units
+# are in the key names: _per_s = (m/s)/m, _per_s2 = (m/s)/(m s).
+#
+# Tuned on the P3-D2 tune pool only (frigate, SS3-SS5, heading != 90 deg, seed ordinals
+# 27-31), with the same budget and ranges as pid_feedforward so the naive baseline is not
+# strawmanned. Procedure, ranges, trial log and final values: docs/protocol.md P3-D3 and
+# results/e01/tuning_pid_track_descend.csv. Keys marked [tuned] were searched; the others
+# are fixed by hand and were not.
+
+# Tuned values: trial 7 of 20 (results/e01/tuning_pid_track_descend.csv, selected=True).
+# Full precision on purpose: these are the exact values the selected trial flew, and
+# tests/test_control_pid_track_descend.py asserts equality with the log.
+kp_xy_per_s: 1.1820537569001317        # [tuned] (m/s)/m
+ki_xy_per_s2: 0.1146828904747963       # [tuned] (m/s)/(m s)
+integral_limit_m_s: 0.1                # m/s, per-axis clamp on the integral term's contribution
+lateral_speed_max_m_s: 0.5             # m/s, horizontal speed cap on the tracker
+commit_radius_m: 0.02867745161056519   # [tuned] m; success needs lateral <= 0.10 m at touchdown
+release_factor: 2.0                    # dimensionless; descent released beyond 2 x commit radius
+descent_rate_m_s: 0.2506808291748166   # [tuned] m/s, positive downward
