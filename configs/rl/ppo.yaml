@@ -37,7 +37,7 @@ ppo:
   vf_coef: 0.5
   max_grad_norm: 0.5
   target_kl: null
-  log_std_init: -1.0            # std 0.37 in action units; SB3's 0 flips the drone (P5-D4)
+  log_std_init: -2.3            # std 0.10 in action units; >= 0.2 flips the drone at 30 Hz (P5-D7)
 sac: null
 
 normalize:

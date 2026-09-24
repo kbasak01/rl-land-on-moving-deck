@@ -1,7 +1,7 @@
 # Pre-registered hyperparameter search for pure PPO (docs/protocol.md P3-D1 section 5).
 #
-# Budget: <= 20 trials, one of which is the smoke run charged by P5-D4. The search draws 19:
-# trial 0 = configs/rl/ppo.yaml unchanged; trials 1-18 = the first 18 points of ONE
+# Budget: <= 20 trials, two of which are the smoke runs charged by P5-D4/P5-D7. The search
+# draws 18: trial 0 = configs/rl/ppo.yaml unchanged; trials 1-17 = the first 17 points of ONE
 # scrambled Sobol sequence over the dimensions below, seed `sobol_seed`,
 # each trained for 2 M env steps on the single training seed `trial_seed`, on the P3-D2
 # train pool with the curriculum, exactly like a final run.
@@ -19,10 +19,10 @@
 
 method: ppo
 base_config: configs/rl/ppo.yaml
-# P5-D4: the 200 k PPO smoke run (artifacts/runs/ppo_smoke/0) was seen before the base
-# config's log_std_init was set, so it is charged as one trial: 1 + 19 = 20.
-trials_used_before_search: 1
-trials: 19
+# P5-D4, P5-D7: both 200 k PPO smoke runs (artifacts/runs/ppo_smoke/0 and ppo_smoke_p5d4/0)
+# led to a change of the base config's log_std_init, so each is charged as a trial: 2 + 18 = 20.
+trials_used_before_search: 2
+trials: 18
 sobol_seed: 20260927
 trial_seed: 0
 trial_steps: 2000000
@@ -36,7 +36,7 @@ search_space:
   n_epochs: {targets: [ppo.n_epochs], choices: [5, 10]}
   ent_coef: {targets: [ppo.ent_coef], low: 0.0, high: 0.01}
   net_width: {targets: [policy.width], choices: [128, 256, 512]}
-  log_std_init: {targets: [ppo.log_std_init], low: -2.3, high: -0.7}   # std 0.10-0.50 (P5-D4)
+  log_std_init: {targets: [ppo.log_std_init], low: -3.0, high: -1.6}   # std 0.05-0.20 (P5-D7)
   # reward weights (shared ranges with tune_sac.yaml)
   w_progress: {targets: [reward.w_progress], low: 5.0, high: 20.0}
   w_vz: {targets: [reward.w_vz], low: 0.5, high: 8.0, scale: log}

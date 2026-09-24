@@ -1,12 +1,12 @@
-# PPO smoke run (plan Phase 5 step 2): 200 k env steps, 16 workers, ~10 evaluations.
+# Third PPO smoke run, after P5-D7 (log_std_init -2.3); otherwise identical to ppo_smoke.yaml. PPO smoke run (plan Phase 5 step 2): 200 k env steps, 16 workers, ~10 evaluations.
 # Checks plumbing and throughput, not learning: healthy = no crash or NaN, fps in the
 # P2-D8 band (514-4 610 steps/s at 16 workers, update excluded), every outcome class
 # reachable, stats checkpoint saved and reloadable. Same hyperparameters as ppo.yaml.
 #
 # Units: steps are env control steps (1/30 s model scale each). *_s fields are HOST seconds.
 
-method: ppo_smoke
-run_group: ppo_smoke            # -> artifacts/runs/ppo_smoke/<seed>/
+method: ppo_smoke_p5d7
+run_group: ppo_smoke_p5d7       # -> artifacts/runs/ppo_smoke_p5d7/<seed>/
 algo: ppo
 total_steps: 200000
 n_envs: 16
@@ -33,7 +33,7 @@ ppo:
   vf_coef: 0.5
   max_grad_norm: 0.5
   target_kl: null
-  log_std_init: 0.0             # as flown by artifacts/runs/ppo_smoke/0 (SB3 default; P5-D4)
+  log_std_init: -2.3            # std 0.10 (P5-D7)
 sac: null
 
 normalize:

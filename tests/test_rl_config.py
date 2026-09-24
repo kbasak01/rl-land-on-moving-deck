@@ -77,7 +77,7 @@ def test_search_configs_pin_budgets_and_equal_trials() -> None:
     # P5-D4: PPO's smoke run is charged as one trial, so the TOTAL budgets are equal.
     assert ppo.trials + ppo.trials_used_before_search == MAX_TRIALS == 20
     assert sac.trials + sac.trials_used_before_search == MAX_TRIALS
-    assert ppo.trials_used_before_search == 1 and sac.trials_used_before_search == 0
+    assert ppo.trials_used_before_search == 2 and sac.trials_used_before_search == 0
     assert ppo.trial_steps == 2_000_000 and sac.trial_steps == 500_000
     assert ppo.trial_seed == sac.trial_seed == 0
     # The reward-weight search is the same for both methods.
@@ -142,10 +142,10 @@ def test_search_rejects_more_than_twenty_trials(tmp_path: Path) -> None:
 
 
 def test_search_charges_trials_used_before_search(tmp_path: Path) -> None:
-    # P5-D4: 19 drawn + 1 charged = 20 is allowed; 20 drawn + 1 charged is not.
-    assert load_tune_config(_tune_yaml(tmp_path, trials=19)).trials == 19
+    # P5-D4/P5-D7: 18 drawn + 2 charged = 20 is allowed; 19 drawn + 2 charged is not.
+    assert load_tune_config(_tune_yaml(tmp_path, trials=18)).trials == 18
     with pytest.raises(ValueError, match="exceeds"):
-        load_tune_config(_tune_yaml(tmp_path, trials=20))
+        load_tune_config(_tune_yaml(tmp_path, trials=19))
 
 
 def test_search_rejects_structure_targets(tmp_path: Path) -> None:
@@ -186,21 +186,24 @@ def test_materialize_is_idempotent_and_refuses_changes(tmp_path: Path) -> None:
 
 
 def test_ppo_log_std_init_reaches_the_policy(tmp_path: Path) -> None:
-    # P5-D4: the committed PPO configs start at std 0.37, and the value is really passed to
-    # SB3 rather than silently left at its default of 0 (std 1.0).
+    # P5-D7: the committed PPO configs start at std 0.10, and the value is really passed to
+    # SB3 rather than silently left at its default of 0 (std 1.0). Each smoke config keeps the
+    # value its run was flown with.
     from stable_baselines3.common.vec_env import DummyVecEnv
 
     from _rl_helpers import FakeLanding, tiny_config
     from rld.rl.train import _build_model
 
-    for name in ("ppo.yaml", "ppo_smoke.yaml"):
+    flown = {"ppo.yaml": -2.3, "ppo_smoke.yaml": 0.0, "ppo_smoke_p5d4.yaml": -1.0}
+    flown["ppo_smoke_p5d7.yaml"] = -2.3
+    for name, value in flown.items():
         raw = yaml.safe_load((RL_CONFIG_DIR / name).read_text())
-        assert raw["ppo"]["log_std_init"] == -1.0
+        assert raw["ppo"]["log_std_init"] == value, name
     cfg = tiny_config("ppo")
-    assert cfg.ppo is not None and cfg.ppo.log_std_init == -1.0
+    assert cfg.ppo is not None and cfg.ppo.log_std_init == -2.3
     model = _build_model(cfg, DummyVecEnv([FakeLanding]), 0, tmp_path)
     log_std = model.policy.log_std.detach().numpy()  # type: ignore[union-attr]
-    assert np.allclose(log_std, -1.0)
+    assert np.allclose(log_std, -2.3)
 
 
 def test_prefetch_reset_is_optional_and_round_trips() -> None:

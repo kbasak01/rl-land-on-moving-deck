@@ -2345,6 +2345,57 @@ batch-invariant: batch 1 and batch 16 differ by up to 3.6e-7.
 - They are never compared directly: tune-pool numbers select hyperparameters, and frozen-list
   numbers are the results.
 
+### P5-D7 — Second smoke run still unhealthy; the 30 Hz loop tolerates exploration std ≲ 0.15; PPO base std 0.10 (2026-09-24)
+
+*Run.* `make train-bg CFG=configs/rl/ppo_smoke_p5d4.yaml SEED=0` at commit `e075c51`. It uses
+`log_std_init` −1.0 (std 0.37) and the P5-D5/D6 speed-ups, and is otherwise identical to the first
+smoke run. It finished `done` at 212 992 steps in 309 s, at 1 430 steps/s excluding eval (the first
+run: 467).
+
+*Learning: still not healthy.*
+- 1 928 of 1 952 training episodes (98.8 %) crashed, 1 824 of them by `tilt_gt_crash`. Only 24
+  episodes ended in a touchdown class.
+- Episodes did get longer: 69 control steps on average in the first quarter of training, 172 in
+  the last, with 11.7 % timeouts in that last quarter.
+- Deterministic tune-pool success peaked at 0.044 (140 k) and ended at 0.000.
+
+*Diagnosis.* A scratch probe, not a trial, run on train-pool realizations only (frigate SS3,
+180/135°, 6 kn, seeds 0–7, 48 episodes per cell). It flew zero-mean Gaussian action noise, with
+and without a constant descent command of −0.2 (0.3 m/s).
+
+| noise std | i.i.d., hover | AR(1) ρ = 0.9, hover | i.i.d. + descent |
+|---|---|---|---|
+| 0.05 | 100 % timeout | 100 % timeout | 25 % crash, 60 % off_pad, 15 % success |
+| 0.10 | 100 % timeout | 94 % timeout | 29 % crash, 62 % off_pad, 8 % success |
+| 0.20 | 54 % crash | 31 % crash | 42 % crash |
+| 0.37 | 100 % crash | 98 % crash | 90 % crash |
+
+- A second scratch probe held each command for 1/30 s, but ran `DSLPIDControl` at 240 Hz instead
+  of the frozen 30 Hz.
+  - At std 0.2 (hover) crashes fell from 54 % to 0 %.
+  - At std 0.37 they fell only from 100 % to 85 %.
+  - With the descent command and std 0.05 they went from 25 % to 19 %.
+- **Reading.**
+  - The frozen 30 Hz control loop (the attitude loop runs once per policy step) makes the drone
+    lose attitude under white-noise velocity commands above about std 0.15 (≈ 0.2 m/s).
+  - A std of 0.37 is too large even with a fast inner loop.
+  - The crashes under a plain descent with little noise happen around contact. That is landing
+    difficulty for the policy to learn, not exploration.
+
+*Decision (user, 2026-09-24).*
+- **The environment stays frozen:** 30 Hz control rate, P2-D2 action space.
+- **The PPO base is `log_std_init = −2.3` (std 0.10).** The search range is [−3.0, −1.6]
+  (std 0.05–0.20). This supersedes P5-D4's −1.0 and [−2.3, −0.7].
+- **The second smoke run also led to a change of the base config, so it too is charged as a
+  trial.** PPO: 2 charged + 18 drawn = 20 (`trials_used_before_search: 2`, `trials: 18`). SAC
+  stays at 20 drawn: SB3's `log_std_init` is −3 (std 0.05), and the automatic entropy target
+  −dim(A) = −3 corresponds to a pre-tanh std of about 0.09, inside the tolerated band.
+- **The smoke configs keep the values their runs actually flew with.** `ppo_smoke.yaml` records
+  0.0 and `ppo_smoke_p5d4.yaml` records −1.0. A third smoke run, `ppo_smoke_p5d7.yaml` at −2.3,
+  must show touchdowns in training episodes before tuning launches.
+- **Rejected by the user:** running `DSLPIDControl` at the 240 Hz physics rate. It would need a
+  dated P3-D1 deviation and a re-run of every committed baseline.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|
