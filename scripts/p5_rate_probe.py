@@ -33,7 +33,8 @@ def run(args):
             out.append(env.record.as_row()["outcome"])
     env.close()
     v, c = np.unique(out, return_counts=True)
-    return ctrl_hz, std, descend, dict(zip(v.tolist(), (c / len(out)).round(2).tolist(), strict=True))
+    fracs = (c / len(out)).round(2).tolist()
+    return ctrl_hz, std, descend, dict(zip(v.tolist(), fracs, strict=True))
 
 
 if __name__ == "__main__":
