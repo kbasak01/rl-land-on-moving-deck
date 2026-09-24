@@ -51,10 +51,13 @@ inside and degrees at the boundary. The world frame is P1-D2's: ``x`` = bow, ``y
 ``z`` = up. One model second is five full-scale seconds at ``lam = 1/25``.
 """
 
+import time
+from importlib.resources import files
 from typing import Any
 
 import numpy as np
 import pybullet as pyb
+import pybullet_data  # type: ignore[import-untyped]
 from dmf.typedefs import FloatArray
 from gym_pybullet_drones.control.DSLPIDControl import DSLPIDControl
 from gym_pybullet_drones.envs.BaseAviary import BaseAviary
@@ -72,10 +75,9 @@ from rld.envs.noise import PerceptionNoise
 from rld.envs.observation import OBS_DTYPE, build_observation, observation_space
 from rld.envs.platform import (
     DeckPlatform,
-    DeckTrajectory,
     EpisodeMotionSource,
+    LazyDeckTrajectory,
     PlatformSample,
-    build_trajectory,
 )
 from rld.envs.reward import shaping_reward, terminal_reward
 from rld.envs.touchdown import (
@@ -239,6 +241,7 @@ class DeckLandingAviary(BaseAviary):  # type: ignore[misc]
         reward_cfg: RewardConfig,
         episode_seed: int = 0,
         gui: bool = False,
+        visual_shapes: bool | None = None,
     ) -> None:
         """Build the environment. Every attribute the base class reads is set first.
 
@@ -263,6 +266,10 @@ class DeckLandingAviary(BaseAviary):  # type: ignore[misc]
                 resets give different episodes deterministically.
             gui: Open PyBullet's GUI. DIRECT for training and for every committed number;
                 GUI only for rendering a GIF.
+            visual_shapes: Load the drone's visual mesh. ``None`` (the default) means
+                ``gui``. Skipping it in DIRECT mode saves ~21 ms per reset (P5-D5) and
+                changes no physics: visual shapes are not in the dynamics world. Pass
+                ``True`` to render offscreen from a DIRECT client.
         """
         self.cfg = cfg
         self.success = success
@@ -272,11 +279,12 @@ class DeckLandingAviary(BaseAviary):  # type: ignore[misc]
         self._obs_cfg = obs_cfg
         self._noise_cfg = noise_cfg
         self._reward_cfg = reward_cfg
+        self._visual_shapes = bool(gui) if visual_shapes is None else bool(visual_shapes)
         self._base_seed = int(episode_seed)
         self._episode_index = 0
         self._platform = DeckPlatform(cfg.platform, pad_radius_m)
         self._geometry = DroneCollisionGeometry(height_m=0.0, radius_m=0.0, z_offset_m=0.0)
-        self._trajectory: DeckTrajectory
+        self._trajectory: LazyDeckTrajectory
         self._substep = 0
         self._last_action = np.zeros(ACTION_DIM, dtype=np.float64)
         self._prev_action = np.zeros(ACTION_DIM, dtype=np.float64)
@@ -367,7 +375,10 @@ class DeckLandingAviary(BaseAviary):  # type: ignore[misc]
             self._t0_model_s + np.arange(self.cfg.n_physics_samples) * self.cfg.physics_dt_s,
             dtype=np.float64,
         )
-        self._trajectory = build_trajectory(
+        # Lazy (P5-D5): only the chunk holding sample 0 is synthesised here, when the plate
+        # is spawned; later chunks as the episode reaches them. Every sample is bit-identical
+        # to the eager full-grid `build_trajectory` on this same grid.
+        self._trajectory = LazyDeckTrajectory(
             self.motion, self.pad, self.cfg.platform, grid, self.pad_offset_m
         )
         self._noise = PerceptionNoise(
@@ -392,6 +403,71 @@ class DeckLandingAviary(BaseAviary):  # type: ignore[misc]
         self._prev_distance_m = float(
             np.linalg.norm(self._init_xyzs[0] - self._deck_sample().position_m)
         )
+
+    def _housekeeping(self) -> None:
+        """Rebuild the world after ``resetSimulation``; upstream's, minus the drone's mesh.
+
+        ``BaseAviary._housekeeping`` re-parses the drone URDF on every reset, and ~21 of its
+        ~23 ms are PyBullet loading the **visual** mesh ``cf2.dae``, which a DIRECT client
+        never draws (P5-D5). With visual shapes wanted (GUI, or ``visual_shapes=True``) this
+        is exactly upstream's method. Otherwise it is upstream's method line for line --
+        same calls, same order, same arguments -- except that the drone is loaded with
+        ``URDF_IGNORE_VISUAL_SHAPES`` added to its flags. The collision cylinder, the
+        file inertia, the body and link order and every body id are unchanged, so the
+        dynamics world the solver sees is the same one; ``tests/test_lazy_trajectory.py``
+        compares the two worlds' dynamics and collision data, pins the upstream method's
+        source hash so an upstream change forces a re-review, and the P5-D5 re-runs of
+        e00 and e01 came out byte-identical.
+
+        Restoring a cached world (``saveState``/``restoreState``) or keeping bodies across
+        resets was considered and not taken: either skips ``resetSimulation``, which
+        leaves the broadphase and contact caches with a history a fresh world does not
+        have, so bit-identity could not be argued, only hoped for.
+        """
+        if self._visual_shapes:
+            super()._housekeeping()
+            return
+        # --- upstream BaseAviary._housekeeping, verbatim apart from the drone's flags. ---
+        self.RESET_TIME = time.time()
+        self.step_counter = 0
+        self.first_render_call = True
+        self.X_AX = -1 * np.ones(self.NUM_DRONES)
+        self.Y_AX = -1 * np.ones(self.NUM_DRONES)
+        self.Z_AX = -1 * np.ones(self.NUM_DRONES)
+        self.GUI_INPUT_TEXT = -1 * np.ones(self.NUM_DRONES)
+        self.USE_GUI_RPM = False
+        self.last_input_switch = 0
+        self.last_clipped_action = np.zeros((self.NUM_DRONES, 4))
+        self.gui_input = np.zeros(4)
+        self.pos = np.zeros((self.NUM_DRONES, 3))
+        self.quat = np.zeros((self.NUM_DRONES, 4))
+        self.rpy = np.zeros((self.NUM_DRONES, 3))
+        self.vel = np.zeros((self.NUM_DRONES, 3))
+        self.ang_v = np.zeros((self.NUM_DRONES, 3))
+        if self.PHYSICS == Physics.DYN:
+            self.rpy_rates = np.zeros((self.NUM_DRONES, 3))
+        pyb.setGravity(0, 0, -self.G, physicsClientId=self.CLIENT)
+        pyb.setRealTimeSimulation(0, physicsClientId=self.CLIENT)
+        pyb.setTimeStep(self.PYB_TIMESTEP, physicsClientId=self.CLIENT)
+        pyb.setAdditionalSearchPath(pybullet_data.getDataPath(), physicsClientId=self.CLIENT)
+        self.PLANE_ID = pyb.loadURDF("plane.urdf", physicsClientId=self.CLIENT)
+        self.DRONE_IDS = np.array(
+            [
+                pyb.loadURDF(
+                    str(files("gym_pybullet_drones") / "assets" / self.URDF),
+                    self.INIT_XYZS[i, :],
+                    pyb.getQuaternionFromEuler(self.INIT_RPYS[i, :]),
+                    flags=pyb.URDF_USE_INERTIA_FROM_FILE | pyb.URDF_IGNORE_VISUAL_SHAPES,
+                    physicsClientId=self.CLIENT,
+                )
+                for i in range(self.NUM_DRONES)
+            ]
+        )
+        if self.GUI and self.USER_DEBUG:
+            for i in range(self.NUM_DRONES):
+                self._showDroneLocalAxes(i)
+        if self.OBSTACLES:
+            self._addObstacles()
 
     def _addObstacles(self) -> None:  # noqa: N802
         """Spawn the deck plate.

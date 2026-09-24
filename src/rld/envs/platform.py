@@ -38,7 +38,7 @@ further conversion. The plate's **body origin is on its top surface at the pad c
 it coincides with the bridge's deck point offset by ``deck_origin_m``.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Protocol
 
 import numpy as np
@@ -49,26 +49,36 @@ from dmf.typedefs import FloatArray
 from rld.deck.bridge import (
     DeckMotionSource,
     DeckPointTrajectory,
+    JonswapDeckMotion,
     MotionChannels,
     load_vessel_cached,
 )
 from rld.deck.config import PadConfig
 from rld.deck.kinematics import DeckPointState, deck_point_state
 from rld.deck.scaling import FroudeScale
+from rld.deck.sinusoid import SinusoidDeckMotion
 from rld.envs.config import PlatformConfig
 
 __all__ = [
+    "DECK_CHUNK_SAMPLES",
     "PAD_MARKER_RGBA",
     "PLATE_RGBA",
     "DeckPlatform",
     "EpisodeMotionSource",
     "DeckTrajectory",
+    "LazyDeckTrajectory",
     "PlatformSample",
     "StaticDeckMotion",
     "build_trajectory",
     "pad_offset_model_m",
     "quaternion_angle_rad",
 ]
+
+#: Samples in the first lazily synthesised deck chunk (P5-D5): 240 physics samples = 1.0 s
+#: model = 30 control steps. Later chunks double (240, 240, 480, 960, ...), so a short
+#: training episode pays for one or two small chunks and a full-length one for five. The
+#: value cannot change any deck state, only how much of the grid an episode pays for.
+DECK_CHUNK_SAMPLES: int = 240
 
 #: Plate colour, RGBA in [0, 1]. Visual only; DIRECT mode ignores it.
 PLATE_RGBA: tuple[float, float, float, float] = (0.35, 0.38, 0.42, 1.0)
@@ -176,12 +186,13 @@ class PlatformSample:
 
 @dataclass(frozen=True)
 class DeckTrajectory:
-    """One episode's deck-point trajectory, precomputed on the physics grid.
+    """A deck-point trajectory evaluated on a block of the physics grid.
 
-    Precomputed deliberately. Evaluating the bridge one sample at a time inside each of the
-    1 920 physics substeps per simulated second costs far more than one batched call per
-    reset, and the two are bit-identical because ``synthesize_motion`` is a memoryless sum
-    of harmonics in ``t`` (``tests/test_landing_env.py`` asserts the equality).
+    Batched deliberately: evaluating the bridge one sample at a time inside each of the
+    1 920 physics substeps per simulated second costs far more than one batched call. A
+    one-sample call is **not** bit-identical to a batched one (P2-D8: BLAS picks a different
+    kernel), which is why the environment's lazy evaluation goes through
+    :class:`LazyDeckTrajectory` in multi-sample chunks rather than sample by sample.
 
     Attributes:
         pad: Pad name, ``"aft"`` or ``"cg"``.
@@ -263,6 +274,43 @@ def pad_offset_model_m(
     return (arm_model[0], arm_model[1], arm_model[2])
 
 
+def _anchored(
+    traj: DeckPointTrajectory,
+    cfg: PlatformConfig,
+    pad_offset_m: tuple[float, float, float],
+) -> DeckTrajectory:
+    """Anchor a bridge trajectory at the plate: add the origin, build the quaternions.
+
+    The one place both :func:`build_trajectory` and :class:`LazyDeckTrajectory` turn a
+    :class:`~rld.deck.bridge.DeckPointTrajectory` into plate states, so the two cannot drift
+    apart. Every operation is per sample, which is what makes a chunk's rows equal the
+    full grid's rows bit for bit.
+
+    Args:
+        traj: The bridge's model-scale trajectory.
+        cfg: Plate config; only ``deck_origin_m`` is used.
+        pad_offset_m: The pad's standing lever arm, metres model scale; subtracted.
+
+    Returns:
+        The :class:`DeckTrajectory`, model scale, world frame.
+    """
+    origin = np.asarray(cfg.deck_origin_m, dtype=np.float64) - np.asarray(
+        pad_offset_m, dtype=np.float64
+    )
+    position = np.asarray(traj.state.position_m, dtype=np.float64) + origin
+    quaternion = np.asarray(
+        [pyb.getQuaternionFromEuler(list(euler)) for euler in traj.state.euler_xyz_rad],
+        dtype=np.float64,
+    )
+    return DeckTrajectory(
+        pad=traj.pad,
+        t_model_s=np.asarray(traj.t_model_s, dtype=np.float64),
+        position_m=position,
+        quaternion=quaternion,
+        state=traj.state,
+    )
+
+
 def build_trajectory(
     motion: DeckMotionSource,
     pad: str,
@@ -271,6 +319,11 @@ def build_trajectory(
     pad_offset_m: tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> DeckTrajectory:
     """Evaluate one pad's trajectory on a physics-rate time grid, anchored at the plate.
+
+    This is the **eager, full-grid reference**. The landing environment itself evaluates
+    lazily through :class:`LazyDeckTrajectory` (P5-D5), which is asserted bit-identical to
+    this function; :meth:`rld.control.base.PrivilegedContext.from_env` and the tests still
+    call this one.
 
     Args:
         motion: Any :class:`~rld.deck.bridge.DeckMotionSource` -- JONSWAP, sinusoid or the
@@ -293,21 +346,180 @@ def build_trajectory(
             or the pad is unknown.
     """
     traj: DeckPointTrajectory = motion.deck_point(np.asarray(t_model_s, dtype=np.float64), pad)
-    origin = np.asarray(cfg.deck_origin_m, dtype=np.float64) - np.asarray(
-        pad_offset_m, dtype=np.float64
-    )
-    position = np.asarray(traj.state.position_m, dtype=np.float64) + origin
-    quaternion = np.asarray(
-        [pyb.getQuaternionFromEuler(list(euler)) for euler in traj.state.euler_xyz_rad],
-        dtype=np.float64,
-    )
-    return DeckTrajectory(
-        pad=pad,
-        t_model_s=np.asarray(traj.t_model_s, dtype=np.float64),
-        position_m=position,
-        quaternion=quaternion,
-        state=traj.state,
-    )
+    return _anchored(traj, cfg, pad_offset_m)
+
+
+class LazyDeckTrajectory:
+    """One episode's deck trajectory, synthesised in chunks as the episode reaches them.
+
+    Why (P5-D5): the eager :func:`build_trajectory` evaluates all 3 001 physics samples
+    (12.5 s model) at reset, ~65 ms, while an early-training episode lives ~400 samples.
+    Here the **same** grid is cut into chunks that double in length -- samples
+    ``[0, C)``, ``[C, 2C)``, ``[2C, 4C)``, ``[4C, 8C)``, ... with ``C = chunk_samples``, the
+    last one ending at the grid's end -- and a chunk is synthesised the first time any of
+    its samples is read, then cached for the rest of the episode. Doubling keeps the fixed
+    per-chunk cost (~2.5 ms: dmf's per-call set-up and the padded product of
+    :func:`rld.deck.bridge.harmonic_sum_rows`) to five chunks on a full-length episode
+    while a short episode pays only for what it reaches. Nothing that reads ahead is
+    starved: any ``sample(i)`` is legal at any time and simply evaluates the chunk holding
+    ``i``.
+
+    Why it changes no bit: every sample equals the eager full-grid sample exactly.
+    :meth:`rld.deck.bridge.JonswapDeckMotion.deck_point_rows` guarantees it for JONSWAP,
+    including the BLAS-shape subtlety that a plain slice would get wrong; the sinusoid and
+    the static test double are elementwise in time, so a slice of their grid *is* their
+    rows. Any other :class:`~rld.deck.bridge.DeckMotionSource` has no such guarantee and is
+    evaluated eagerly as one full-grid chunk. ``tests/test_lazy_trajectory.py`` asserts
+    ``np.array_equal`` against :func:`build_trajectory` on every array, over the whole grid,
+    for both vessels, SS3-SS6, both pads, the sinusoid and the static source.
+
+    Attributes:
+        pad: Pad name, ``"aft"`` or ``"cg"``.
+        t_model_s: The whole grid, seconds model scale, shape ``(n,)``. Cheap; always
+            present.
+        chunk_samples: Samples in the first chunk, dimensionless; later chunks double.
+    """
+
+    def __init__(
+        self,
+        motion: DeckMotionSource,
+        pad: str,
+        cfg: PlatformConfig,
+        t_model_s: FloatArray,
+        pad_offset_m: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        chunk_samples: int = DECK_CHUNK_SAMPLES,
+    ) -> None:
+        """Set up the grid. Nothing is synthesised until the first :meth:`sample`.
+
+        Args:
+            motion: The deck-motion source.
+            pad: Pad name from ``configs/deck/pad.yaml``.
+            cfg: Plate config; only ``deck_origin_m`` is used.
+            t_model_s: The episode's whole physics grid, seconds model scale.
+            pad_offset_m: The pad's standing lever arm, metres model scale; subtracted.
+            chunk_samples: Samples in the first chunk, positive; later chunks double.
+
+        Raises:
+            ValueError: If ``chunk_samples`` is not positive or the grid is empty.
+        """
+        if chunk_samples < 1:
+            raise ValueError(f"chunk_samples must be positive, got {chunk_samples}")
+        self.pad = pad
+        self.t_model_s = np.asarray(t_model_s, dtype=np.float64).reshape(-1)
+        if self.t_model_s.size == 0:
+            raise ValueError("empty deck grid")
+        self._motion = motion
+        self._cfg = cfg
+        self._pad_offset_m = pad_offset_m
+        self._lazy = isinstance(motion, JonswapDeckMotion | SinusoidDeckMotion | StaticDeckMotion)
+        self.chunk_samples = int(chunk_samples) if self._lazy else int(self.t_model_s.size)
+        self._chunks: dict[int, DeckTrajectory] = {}
+
+    def __len__(self) -> int:
+        """Return the number of samples on the grid, dimensionless."""
+        return int(self.t_model_s.size)
+
+    @property
+    def lazy(self) -> bool:
+        """Whether the source is evaluated in chunks (False: one eager full-grid chunk)."""
+        return self._lazy
+
+    @property
+    def chunks_evaluated(self) -> int:
+        """Chunks synthesised so far this episode, dimensionless."""
+        return len(self._chunks)
+
+    def _bounds(self, k: int) -> tuple[int, int]:
+        """Return chunk ``k``'s sample range ``[start, stop)``.
+
+        Args:
+            k: Chunk index.
+
+        Returns:
+            ``(start, stop)``: ``(0, C)`` for ``k = 0`` and ``(C * 2**(k-1), C * 2**k)``
+            after it, clipped to the grid.
+        """
+        start = 0 if k == 0 else self.chunk_samples << (k - 1)
+        return start, min(self.chunk_samples << k, len(self))
+
+    def _chunk_index(self, index: int) -> int:
+        """Return the chunk holding one sample index.
+
+        Args:
+            index: Sample index in ``[0, len(self))``.
+
+        Returns:
+            ``0`` below ``C``, else ``floor(log2(index / C)) + 1``, computed exactly in
+            integers.
+        """
+        return (index // self.chunk_samples).bit_length()
+
+    def _chunk(self, k: int) -> DeckTrajectory:
+        """Return chunk ``k``, synthesising it on first use.
+
+        Args:
+            k: Chunk index.
+
+        Returns:
+            The chunk's :class:`DeckTrajectory`, model scale, world frame.
+        """
+        chunk = self._chunks.get(k)
+        if chunk is not None:
+            return chunk
+        start, stop = self._bounds(k)
+        motion = self._motion
+        if isinstance(motion, JonswapDeckMotion):
+            traj = motion.deck_point_rows(self.t_model_s, self.pad, start, stop)
+        else:
+            # Sinusoid and static: elementwise in time, so the slice is the rows. Any other
+            # source arrives here with start = 0, stop = n: the eager full grid.
+            traj = motion.deck_point(self.t_model_s[start:stop], self.pad)
+        chunk = _anchored(traj, self._cfg, self._pad_offset_m)
+        self._chunks[k] = chunk
+        return chunk
+
+    def sample(self, index: int) -> PlatformSample:
+        """Return one physics instant, synthesising its chunk if needed.
+
+        Args:
+            index: Sample index in ``[0, len(self))``.
+
+        Returns:
+            The :class:`PlatformSample`, model scale, world frame -- bit-identical to
+            ``build_trajectory(...).sample(index)`` on the same grid.
+
+        Raises:
+            IndexError: If ``index`` is out of range (never wrapped; see
+                :meth:`DeckTrajectory.sample`).
+        """
+        if not 0 <= index < len(self):
+            raise IndexError(f"deck sample {index} out of range [0, {len(self)})")
+        k = self._chunk_index(index)
+        return self._chunk(k).sample(index - self._bounds(k)[0])
+
+    def full(self) -> DeckTrajectory:
+        """Synthesise every remaining chunk and return the whole grid as one trajectory.
+
+        For tests and offline analysis; the environment never calls it.
+
+        Returns:
+            The :class:`DeckTrajectory` over the whole grid, equal to
+            :func:`build_trajectory` on the same grid in every array.
+        """
+        parts = [self._chunk(k) for k in range(self._chunk_index(len(self) - 1) + 1)]
+        state = DeckPointState(
+            **{
+                f.name: np.concatenate([getattr(p.state, f.name) for p in parts])
+                for f in fields(DeckPointState)
+            }
+        )
+        return DeckTrajectory(
+            pad=self.pad,
+            t_model_s=np.concatenate([p.t_model_s for p in parts]),
+            position_m=np.concatenate([p.position_m for p in parts]),
+            quaternion=np.concatenate([p.quaternion for p in parts]),
+            state=state,
+        )
 
 
 class StaticDeckMotion:

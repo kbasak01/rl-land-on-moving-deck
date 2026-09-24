@@ -428,7 +428,7 @@ def test_plate_is_anchored_at_the_deck_origin_not_at_the_ship_cg(
     assert offset[0] == pytest.approx(-1.984)
     env = landing_env(deck_source(SS5_SPEC))
     env.reset(seed=4)
-    traj = env._trajectory  # noqa: SLF001
+    traj = env._trajectory.full()  # noqa: SLF001  (lazy since P5-D5)
     origin = np.array(env_landing_cfg.platform.deck_origin_m, dtype=np.float64)
     mean = traj.position_m.mean(axis=0)
     assert mean == pytest.approx(origin, abs=0.05)
