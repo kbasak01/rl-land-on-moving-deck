@@ -2189,6 +2189,162 @@ the run was stalled, not compute-bound. This goes to engineering; it is not a pr
 - A second 200 k smoke run with the new setting must show touchdowns in training episodes before
   any tuning trial launches. That second smoke run is a check of the change, not a trial.
 
+### P5-D5 — Reset speed-up, bit-identical (2026-09-23)
+
+*Why.* User-approved (2026-09-23) as engineering before Phase 5 tuning. P5-D4's smoke run was
+stalled, not compute-bound: 467 steps/s excluding evaluation on a host that was ~91 % idle. A
+step costs 1.6 ms but a reset cost ~95 ms. With early-training episodes at ~50–70 control steps,
+SubprocVecEnv lockstep made training reset-bound. P2-D8 set aside the fix, a lazily evaluated
+deck, "unless Phase 5 wants it, with its own numerical-equivalence entry". This is that entry.
+**No evaluation result, config, success criterion or episode changes.**
+
+*Change 1: the deck trajectory is synthesised lazily, in chunks.*
+- `rld.envs.platform.LazyDeckTrajectory` replaces the eager 3 001-sample `build_trajectory`
+  call in `DeckLandingAviary._prepare_episode`.
+- The grid is the same one as before. It is cut into chunks of 240, 240, 480, 960 and 1 081
+  samples. A chunk is synthesised the first time any of its samples is read, then cached.
+- A reset therefore synthesises only the chunk that holds sample 0.
+- Any consumer can still read any sample at any time. `build_trajectory` itself is unchanged;
+  it stays the eager reference, and `PrivilegedContext.from_env` still calls it.
+
+*Why a plain slice would have changed bits, and what was done instead.* A plain slice of the
+grid is **not** bit-identical to the full grid (measured):
+- The two bridge angular accelerations reduce over the 299 wave components with a
+  `(m, 299) @ (299, 2)` product. On the pinned OpenBLAS 0.3.34 (SkylakeX kernel), that product
+  uses the small-matrix kernel while `m·2·299 ≤ 10⁶` (m ≤ 1 672) and the blocked kernel above
+  that, and the two kernels differ by up to 8e-14.
+- Evaluating 240-sample chunks directly changed 13 of 13 aft chunks.
+
+What was done instead:
+- **`rld.deck.bridge.harmonic_sum_rows`** (an additive, narrow bridge edit). It evaluates
+  cos/sin only for the requested rows, then writes them into a reused operand with the **same
+  shape and the same row positions** as the full-grid call. BLAS therefore runs the same
+  kernel on the same shape, and each output row depends only on its own input row.
+- **dmf's seven channels.** `synthesize_motion` is still called unmodified, on the row slice.
+  Its `(m, 299) @ (299, 7)` product was measured row-invariant for every m ≥ 2 and not for
+  m = 1 (a matrix-vector path; this is P2-D8's observation). `JonswapDeckMotion.deck_point_rows`
+  therefore widens a one-row request to two rows.
+- Time mapping, kinematics, Froude scaling and quaternions are per-sample.
+- Sinusoid and static sources are elementwise in time. Any other source is evaluated eagerly as
+  one full-grid chunk.
+- **This equality depends on BLAS.** It is proven for the pinned stack and asserted by tests,
+  not argued for any BLAS. A different OpenBLAS or CPU kernel would fail
+  `tests/test_lazy_trajectory.py` instead of drifting silently.
+
+*Change 2: the drone's visual mesh is not loaded in DIRECT mode.*
+- ~21 of the ~23 ms of URDF loading per reset was PyBullet parsing `cf2.dae`, the drone's
+  visual mesh.
+- `DeckLandingAviary._housekeeping` now mirrors upstream `BaseAviary._housekeeping` line for
+  line. The only difference is that the drone is loaded with
+  `URDF_IGNORE_VISUAL_SHAPES | URDF_USE_INERTIA_FROM_FILE`. PyBullet then shows the collision
+  cylinder as a proxy visual.
+- The mirror applies only when `visual_shapes` is False. That is the default in DIRECT mode;
+  with `gui=True` or `visual_shapes=True` the environment calls upstream's own method.
+- A test pins the SHA-256 of upstream's method source at gym-pybullet-drones `7ebad1e`, so a
+  submodule bump forces a re-review.
+- `saveState`/`restoreState` and keeping bodies across resets were rejected. Both skip
+  `resetSimulation`, so the broadphase and contact caches would carry a history that a fresh
+  world does not have, and bit-identity could not be argued.
+
+*Evidence that no bit changed.*
+
+| check | result |
+|---|---|
+| Lazy vs eager trajectory, `np.array_equal`, every array (t, position, quaternion, and every `DeckPointState` field including accelerations), whole grid | Equal. `tests/test_lazy_trajectory.py`: 6 JONSWAP realizations (both vessels, SS3–SS6, headings 0/45/90/135/180) × aft/CG × t0 ∈ {bottom, top, random} of the start window × 3 chunk layouts (default; first chunk of 1 sample; a one-row tail), plus scrambled-order `sample(i)` reads. Sinusoid and static likewise. Scratch sweeps of 2 × 384 further grids: 0 mismatches. |
+| `harmonic_sum_rows` vs `harmonic_sum` rows | Equal, including one-row ranges, both sides of the 1 672-row kernel switch, and ranges straddling a `TIME_CHUNK` block. |
+| DIRECT world vs upstream world | Every body id, `getBodyInfo`, `getDynamicsInfo` per link, `getCollisionShapeData`, `getJointInfo`, base pose, base velocity and engine parameter is identical. |
+| Episodes, new env vs pre-P5-D5 env (eager deck **and** visual mesh), SS5 moving deck, aft and CG | Observations, rewards, flags, driven deck states and whole episode rows are identical. Covers 3 scripted descents that touch down and 2 Gaussian (std 0.37) policies. |
+| Determinism and `check_env` | Pass: the existing static-deck tests, plus a new moving-deck same-seed test. |
+| `make env-sanity` → scratch dir vs `results/e00_env_sanity*.csv` | 4 + 800 rows. Every column is byte-identical except `steps_per_s`, `wall_s` and `timestamp_utc`, which are per-run by construction. |
+| `make baselines` → scratch dir vs `results/e01/` | `episodes.csv` is **byte-identical** (`cmp`; 14 000/14 000 rows; the runner's own reference check reports `all_identical=True`). `summary.csv`: every metric column is identical. The committed file predates the Phase 4 schema, and `oracle_gated`'s `controller_config_sha256` is the P4-D5 relabel hash. All 70 re-run summary rows are byte-identical to the same rows of the post-relabel `results/e02/summary.csv`. The markdown differs only in its title, which is chosen by output directory name. |
+
+*Speed* (one process, `OMP_NUM_THREADS=1`, 36-core host otherwise idle; frigate SS6 180° 12 kn
+aft, the `rld.bench.throughput` landing factory; Gaussian policy std 0.37, i.e. P5-D4's initial
+exploration; both runs 292 episodes × 68.5 steps, identical as bit-identity requires):
+
+| | before (`HEAD` = `cbdb7cf`) | after |
+|---|---|---|
+| reset, mean / p99 | 95.5 / 104.3 ms | **11.9 / 13.3 ms** |
+| reset, lazy deck only / URDF change only | — | 32.3 / 72.3 ms (mean) |
+| single env, steps/s incl. resets | 330 | **466** |
+| 16-worker SubprocVecEnv, steps/s | 685 | **1 754** (2.6×) |
+| full-length hover episode (360 steps), ms | 665 | 666 |
+
+- The per-step cost rises from 1.61 to 1.95 ms because later chunks are now paid for inside
+  steps.
+- A full-length episode breaks even: five chunk overheads (~20 ms) against the ~21 ms URDF
+  saving. No regime got slower.
+- This resolves P2-D9's open concern that reset cost dominates short episodes, without
+  interpolating the corpus: the deck is still evaluated analytically on the physics grid.
+- Not changed: `PrivilegedContext.from_env` (in `rld.control`) still does one eager full-grid
+  build, which the eval runner pays once per episode for `td_in_quiescent_window`. That is
+  evaluation-side cost, not training.
+- Also not changed: the docstrings of `rld.bench.throughput` and `scripts/env_throughput.py`,
+  which still say "bridge evaluated once per reset".
+
+### P5-D6 — Training-pipeline speed-up: reset prefetch and independent eval workers, bit-identical (2026-09-24)
+
+*What changed (src/rld/rl/ only).*
+- **Reset prefetch.** `prefetch_reset: true` is the default. While the current episode runs, each
+  training worker prepares its next episode on a second env instance in a background thread.
+  - A prefetched episode drawn at an old curriculum stage, or overtaken by an explicit
+    `reset(seed=...)`, is discarded. The sampler's RNG state is then restored to what it was
+    before the draw.
+  - *Tests.* `tests/test_rl_prefetch.py` flies a 1 500-step script on the real env, serial and
+    prefetched. Across the whole run it has about 20 resets, 2 explicit seeds, mid-episode stage
+    changes including SS5 → SS4, and a switch into queue mode. Every observation, reward, flag
+    and info field is equal (`np.array_equal`). The counters show 14 prefetched episodes used and
+    5 discarded.
+  - The same test also passes through 2 `SubprocVecEnv` workers with an `env_method` stage
+    broadcast.
+- **Independent eval workers.** Each eval worker flies its share of the fixed P3-D3 tune draw on
+  its own; the evaluation no longer runs in lockstep.
+  - Worker *i* forwards *n* copies of its observation and takes row *i*. This keeps the float32
+    MLP's batch-shape-dependent arithmetic exactly as it was in the lockstep batch.
+  - *Verified.* On the four smoke-run checkpoints (180 episodes each), 0 of 24 480 fields differ
+    from the lockstep evaluator. That holds with the P5-D5 env changes and without them, and
+    with prefetch on and off.
+  - The lockstep path is kept as `evaluate_lockstep` and tested against.
+- **Forkserver preload** of the heavy imports. Worker PSS falls from 479 to 141 MB, the 16-worker
+  pool from 7.7 to 2.4 GB, and start-up from 4.2 to 3.2 s.
+- **Slot cost.** It is now `ceil(0.4 × busiest pool) + 1`: 8 per PPO run, down from 17, and 5 per
+  SAC run (SAC not measured). The measured time-averaged use of a PPO run is about 6.4 cores. So
+  `MAX_WORKERS = 34` fits four PPO runs, about 26 busy cores. When two runs' eval bursts coincide,
+  those evaluations slow down; nothing else changes.
+- **Bug fixed.** In `eval_episodes.csv`, each episode's own `steps` overwrote the training step.
+  The training step is now `train_steps`.
+  - `ppo_smoke/0/eval_episodes.csv` keeps the old column. Its training step is recoverable
+    through `eval_index` → `evals.csv`.
+  - `eval_env_steps` now counts steps actually flown, excluding idle replays.
+- **Legacy config shim.** `load_policy` fills `ppo.log_std_init = 0.0` into a saved run's config
+  when the key is absent. Those runs trained at SB3's default before P5-D4, and a loaded model's
+  `log_std` comes from `model.zip` in any case.
+  - The shim runs only at load; training configs must state the key.
+  - `ppo_smoke/0` loads again; it was broken by `cbdb7cf`. A test checks that the weights are
+    identical with and without the key.
+
+*Throughput* (36-core host, measured with the host otherwise quiet, 16 workers, train pool SS3,
+std 0.37 random policy):
+
+| setup | steps/s |
+|---|---|
+| before (HEAD `cbdb7cf`) | 662–685 |
+| P5-D5 env changes, prefetch off | 1 768 |
+| P5-D5 env changes, prefetch on | 2 057 |
+
+- With a PPO learner in the loop, P5-D5 plus prefetch runs at 1 861 steps/s rollout-only and 1 597
+  including updates. The smoke run did 467 excluding eval.
+- A 180-episode tune evaluation takes about 5 s, down from 22–33 s.
+
+*A known numerical non-comparability (recorded, not changed).* The float32 MLP is not
+batch-invariant: batch 1 and batch 16 differ by up to 3.6e-7.
+- `LearnedPolicy.act`, the frozen-list evaluation path, runs at batch 1. The in-training tune
+  evaluator uses the batch shape above.
+- So a checkpoint's tune-pool numbers and its `make eval` numbers are not bit-comparable at the
+  last float32 bit.
+- They are never compared directly: tune-pool numbers select hyperparameters, and frozen-list
+  numbers are the results.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|

@@ -8,11 +8,12 @@ one scheduler process for it, in its own session (``start_new_session``: the equ
 
     (worker slots in use across **all** live runs and sweeps) + job cost <= max_workers.
 
-A job's cost is :attr:`rld.rl.config.TrainConfig.workers` (its busiest env pool plus the
-learner process). Slots in use are counted from every ``status.json`` in state ``running``
-whose pid is alive, plus every job another live scheduler has started whose run has not
-written its status yet; the count and the launch happen under one file lock, so two
-schedulers cannot both fill the same free slots.
+A job's cost is :attr:`rld.rl.config.TrainConfig.workers`: the run's measured time-averaged
+core use (:data:`rld.rl.config.ENV_WORKER_CORES` per worker of its busiest env pool, plus
+the learner), not one slot per process. Slots in use are counted from every
+``status.json`` in state ``running`` whose pid is alive, plus every job another live
+scheduler has started whose run has not written its status yet; the count and the launch
+happen under one file lock, so two schedulers cannot both fill the same free slots.
 
 Each job is launched exactly as ``make train-bg`` launches one: a fresh run directory from
 :func:`rld.rl.train.prepare_run_dir` (a finished run of the same group and seed makes the job

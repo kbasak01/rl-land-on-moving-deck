@@ -5,18 +5,23 @@ Tune-pool evaluation
 :class:`TunePoolEvaluator` flies a **fixed** list of tune-pool episodes -- by default the
 P3-D3 draw from ``configs/control/tuning.yaml`` (seed 20260923, 60 per sea state, SS3-SS5,
 aft pad), the same 180 episodes every classical baseline was tuned and re-checked on
-(P3-D4 table) -- with the deterministic policy, in a separate vector env whose workers are
-idle while training runs. Observations are normalised with a **frozen copy** of the
-training ``VecNormalize`` statistics (a pickle round trip, exactly what a saved checkpoint
-holds, with ``training=False`` and ``norm_reward=False``), so evaluation can neither update
-the training statistics nor see a normalised reward. Evaluation steps are not counted
-against the training budget; they are reported separately as ``eval_env_steps``.
+(P3-D4 table) -- with the deterministic policy, on a separate set of worker processes that
+are idle while training runs. Observations are normalised with a **frozen copy** of the
+training ``VecNormalize`` statistics (the state a saved checkpoint holds, with
+``training=False`` and ``norm_reward=False``), so evaluation can neither update the
+training statistics nor see a normalised reward. Each worker flies its share of the draw
+on its own, without lockstep (:mod:`rld.rl.eval_workers`); the episode rows are identical
+to the lockstep evaluator's, which is kept as :meth:`TunePoolEvaluator.evaluate_lockstep`
+for that comparison. Evaluation steps are not counted against the training budget; they
+are reported separately as ``eval_env_steps``.
 
 :class:`PeriodicEvalCallback` runs it every ``eval.interval_steps`` training steps, writes one
 row to ``evals.csv`` (success per sea state and pooled, the six outcome fractions, p95
 closing speed of the touched-down episodes, curriculum state) and every episode to
-``eval_episodes.csv``, feeds the current stage's outcomes to the curriculum and, on a
-promotion, broadcasts the new stage to the training workers through ``env_method``.
+``eval_episodes.csv`` (``eval_index`` and ``train_steps`` -- the training step count of the
+evaluation -- then the episode row, whose own ``steps`` is the episode length), feeds the
+current stage's outcomes to the curriculum and, on a promotion, broadcasts the new stage to
+the training workers through ``env_method``.
 
 Checkpoints
 -----------
@@ -55,6 +60,14 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecEnv,
 from rld.control.tuning import TuningEpisode, summarise_trial
 from rld.envs.touchdown import OUTCOMES
 from rld.rl.curriculum import Curriculum
+from rld.rl.eval_workers import (
+    EvalTask,
+    EvalWorkerFactory,
+    normalizer_from_state,
+    normalizer_state,
+    policy_payload,
+    split_shares,
+)
 from rld.rl.procs import tree_cpu_seconds
 from rld.rl.wrappers import EnvFactory
 
@@ -163,16 +176,7 @@ def frozen_normalizer(normalizer: VecNormalize) -> VecNormalize:
     """
     # The pickle state by hand: VecNormalize.__getstate__ fails on an already detached
     # object (it deletes attributes that only set_venv creates).
-    state = {
-        key: copy.deepcopy(value)
-        for key, value in normalizer.__dict__.items()
-        if key not in ("venv", "class_attributes", "returns")
-    }
-    frozen: VecNormalize = VecNormalize.__new__(VecNormalize)
-    frozen.__setstate__(state)
-    frozen.training = False
-    frozen.norm_reward = False
-    return frozen
+    return normalizer_from_state(normalizer_state(normalizer))
 
 
 def save_checkpoint(
@@ -257,46 +261,96 @@ class TunePoolEvaluator:
         vec_env: Literal["subproc", "dummy"],
         deterministic: bool = True,
     ) -> None:
-        """Hold the factories; the vector env is built at the first evaluation.
+        """Hold the factories; the workers are started at the first evaluation.
 
         Args:
-            factories: One factory per evaluation worker, each built on the tune pool.
+            factories: One factory per evaluation worker, each built on the tune pool; worker
+                ``i`` must have ``rank == i``.
             episodes: The fixed episode list.
-            vec_env: ``"subproc"`` or ``"dummy"``.
+            vec_env: ``"subproc"`` (one process per worker) or ``"dummy"`` (in-process).
             deterministic: Use the mean action.
 
         Raises:
-            ValueError: If there are no episodes or no factories.
+            ValueError: If there are no episodes or no factories, or the ranks are not
+                ``0 .. n-1``.
         """
         if not episodes or not factories:
             raise ValueError("an evaluator needs episodes and at least one worker")
         self.episodes = list(episodes)
         self.sea_states = list(dict.fromkeys(ep.ss for ep in self.episodes))
         self._factories = list(factories)[: len(self.episodes)]
+        if [f.rank for f in self._factories] != list(range(len(self._factories))):
+            raise ValueError("evaluation worker ranks must be 0 .. n-1 in order")
         self._vec_env = vec_env
         self._deterministic = deterministic
         self._venv: VecEnv | None = None
 
+    @property
+    def n_workers(self) -> int:
+        """Return the number of evaluation workers (the lockstep batch width)."""
+        return len(self._factories)
+
     def _ensure(self) -> VecEnv:
-        """Return the evaluation vector env, building it on first use."""
+        """Return the evaluation workers' vector env, building it on first use."""
         if self._venv is None:
-            fns: list[Callable[[], Any]] = list(self._factories)
+            threads = 1 if self._vec_env == "subproc" else None
+            fns: list[Callable[[], Any]] = [EvalWorkerFactory(f, threads) for f in self._factories]
             self._venv = SubprocVecEnv(fns) if self._vec_env == "subproc" else DummyVecEnv(fns)
         return self._venv
+
+    def _ordered(self, found: Mapping[tuple[str, int], dict[str, Any]]) -> list[dict[str, Any]]:
+        """Return the rows in draw order."""
+        return [found[(ep.ss, ep.index)] for ep in self.episodes]
 
     def evaluate(
         self, model: BaseAlgorithm, normalizer: VecNormalize | None
     ) -> tuple[list[dict[str, Any]], int]:
-        """Fly every episode once.
+        """Fly every episode once; each worker flies its share independently.
 
         Args:
             model: The policy.
-            normalizer: The training normaliser; a frozen copy is used, the original is
+            normalizer: The training normaliser; a frozen copy is shipped, the original is
                 never updated.
 
         Returns:
             ``(rows, eval_env_steps)``: one row per episode in draw order, and the number of
-            environment steps the evaluation took (idle replays included).
+            environment steps flown.
+        """
+        venv = self._ensure()
+        n = self.n_workers
+        task = EvalTask(
+            policy=policy_payload(model.policy),
+            normalizer=None if normalizer is None else normalizer_state(normalizer),
+            deterministic=self._deterministic,
+            batch_width=n,
+            shares=split_shares(self.episodes, n),
+        )
+        results: list[tuple[list[dict[str, Any]], int]] = venv.env_method("fly", task)
+        found: dict[tuple[str, int], dict[str, Any]] = {}
+        steps = 0
+        for rows, worker_steps in results:
+            steps += int(worker_steps)
+            for row in rows:
+                found[(str(row["ss"]), int(row["index"]))] = row
+        return self._ordered(found), steps
+
+    def evaluate_lockstep(
+        self, model: BaseAlgorithm, normalizer: VecNormalize | None
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Fly every episode once with all workers in lockstep (the original evaluator).
+
+        Kept as the reference :meth:`evaluate` is proven identical to
+        (``tests/test_rl_eval_workers.py``); training uses :meth:`evaluate`.
+
+        Args:
+            model: The policy.
+            normalizer: The training normaliser; a frozen copy is used.
+
+        Returns:
+            ``(rows, eval_env_steps)``, the step count including idle replays.
+
+        Raises:
+            RuntimeError: If an episode never ends.
         """
         venv = self._ensure()
         frozen = None if normalizer is None else frozen_normalizer(normalizer)
@@ -321,8 +375,7 @@ class TunePoolEvaluator:
                 found[(str(row["ss"]), int(row["index"]))] = row
             if steps > max_steps:
                 raise RuntimeError("evaluation did not finish; an episode never ended")
-        rows = [found[(ep.ss, ep.index)] for ep in self.episodes]
-        return rows, steps
+        return self._ordered(found), steps
 
     def close(self) -> None:
         """Close the evaluation workers."""
@@ -595,7 +648,7 @@ class PeriodicEvalCallback(BaseCallback):
         _append_csv(self.run_dir / "evals.csv", [row])
         _append_csv(
             self.run_dir / "eval_episodes.csv",
-            [{"eval_index": self.n_evals, "steps": int(steps), **r} for r in rows],
+            [{"eval_index": self.n_evals, "train_steps": int(steps), **r} for r in rows],
         )
         tb = self._writer()
         tb.add_scalar("eval/success", summary["success"], steps)

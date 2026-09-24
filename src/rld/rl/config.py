@@ -2,7 +2,10 @@
 
 One YAML file describes one training run up to its seed. Every key is required unless noted
 and every unknown key is an error, so a typo in a search-space target cannot silently train
-the default. The checks that encode protocol decisions live here, at load time:
+the default. The one optional key, ``prefetch_reset``, is an engineering switch that cannot
+change what is trained (see :attr:`TrainConfig.prefetch_reset`); it defaults so that run
+directories written before it existed still load. The checks that encode protocol
+decisions live here, at load time:
 
 * PPO trains on the CPU (CLAUDE.md, "SB3 MLP on GPU is slower than CPU");
 * reward normalisation is PPO-only (plan Phase 5 item 1);
@@ -21,6 +24,7 @@ dimensionless.
 """
 
 import copy
+import math
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, fields, replace
 from pathlib import Path
@@ -33,11 +37,13 @@ from rld.envs.config import RewardConfig
 __all__ = [
     "ALGOS",
     "FORBIDDEN_SEA_STATES",
+    "PREFETCH_RESET_DEFAULT",
     "REWARD_WEIGHT_KEYS",
     "RL_CONFIG_DIR",
     "RUNS_ROOT",
     "STRUCTURE_REWARD_KEYS",
     "TRAINING_SEA_STATES",
+    "ENV_WORKER_CORES",
     "CurriculumConfig",
     "EvalConfig",
     "NormalizeConfig",
@@ -65,6 +71,21 @@ TRAINING_SEA_STATES: tuple[str, ...] = ("SS3", "SS4", "SS5")
 
 #: Sea states no training distribution may ever contain (P3-D1 section 6: ``unseen_seastate``).
 FORBIDDEN_SEA_STATES: tuple[str, ...] = ("SS6",)
+
+#: Time-averaged CPU cores one env worker costs, including its share of the learner's
+#: stepping loop, for the slot cost :attr:`TrainConfig.workers`. Measured 2026-09-24 on
+#: a PPO run with 16 train and 16 eval workers, reset prefetch on, host otherwise idle
+#: (process-tree CPU sampled every second): rollout collection 6.6 cores in total at HEAD
+#: env code (5.2 with the lazy-trajectory env), the PPO update ~1 core for ~2 s per
+#: rollout, evaluation 15.5-16.7 cores for 5-17 s every ``eval.interval_steps``;
+#: time-averaged ~6.4 cores. 0.4 x 16 workers + 1 learner = 8 slots covers that, so
+#: ``MAX_WORKERS = 34`` admits four PPO runs (~26 busy cores on average). Evaluation
+#: bursts overlap only briefly; when two coincide the evaluations slow down, nothing else.
+ENV_WORKER_CORES: float = 0.4
+
+#: Default of the optional ``prefetch_reset`` key (engineering only; see
+#: :attr:`TrainConfig.prefetch_reset`).
+PREFETCH_RESET_DEFAULT: bool = True
 
 #: Reward parameters that define the pre-registered structure, not a weight; never tuned.
 STRUCTURE_REWARD_KEYS: tuple[str, ...] = ("v_safe_m_s", "gate_height_m")
@@ -246,6 +267,11 @@ class TrainConfig:
         status_interval_s: Host-clock seconds between ``status.json`` heartbeats.
         log_interval: SB3 ``learn(log_interval=...)``: rollouts (PPO) or episodes (SAC).
         reward: Reward-weight overrides of ``configs/env/reward.yaml``; empty = committed.
+        prefetch_reset: Give every env worker (training and evaluation) a second landing
+            environment and prepare the next episode on it in a background thread
+            (:class:`rld.rl.wrappers.PoolSamplingEnv`). The episodes, observations, rewards
+            and evaluation rows are bit-identical either way; only throughput, memory and
+            CPU use change. Optional in the YAML (default :data:`PREFETCH_RESET_DEFAULT`).
         source: The YAML file this came from, or ``None``.
     """
 
@@ -268,6 +294,7 @@ class TrainConfig:
     status_interval_s: float
     log_interval: int
     reward: Mapping[str, float] = field(default_factory=dict)
+    prefetch_reset: bool = True
     source: Path | None = None
 
     @property
@@ -280,17 +307,29 @@ class TrainConfig:
 
     @property
     def workers(self) -> int:
-        """Return the CPU slots the run occupies: its busiest env pool plus the learner."""
-        return max(self.n_envs, self.eval.n_envs) + 1
+        """Return the scheduler slots the run occupies: its measured average core use.
+
+        ``ceil(ENV_WORKER_CORES * busiest env pool) + 1`` for the learner; see
+        :data:`ENV_WORKER_CORES` for the measurement. 8 for ``ppo.yaml`` (16 workers), 5 for
+        ``sac.yaml`` (8 workers; SAC's usage was not measured, and its synchronous gradient
+        steps leave its env workers idle more of the time, so this is conservative).
+        """
+        return math.ceil(ENV_WORKER_CORES * max(self.n_envs, self.eval.n_envs)) + 1
 
 
-def _take(raw: Mapping[str, Any], keys: tuple[str, ...], where: str) -> dict[str, Any]:
-    """Return ``raw`` after checking it has exactly ``keys``.
+def _take(
+    raw: Mapping[str, Any],
+    keys: tuple[str, ...],
+    where: str,
+    optional: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    """Return ``raw`` after checking it has exactly ``keys`` (plus any of ``optional``).
 
     Args:
         raw: A parsed YAML mapping.
         keys: Required keys.
         where: Location for the error message.
+        optional: Keys that may be present or absent.
 
     Returns:
         ``raw`` as a plain dict.
@@ -301,7 +340,7 @@ def _take(raw: Mapping[str, Any], keys: tuple[str, ...], where: str) -> dict[str
     if not isinstance(raw, Mapping):
         raise ValueError(f"{where}: expected a mapping, got {type(raw).__name__}")
     missing = sorted(set(keys) - set(raw))
-    unknown = sorted(set(raw) - set(keys))
+    unknown = sorted(set(raw) - set(keys) - set(optional))
     if missing or unknown:
         raise ValueError(f"{where}: missing keys {missing}, unknown keys {unknown}")
     return dict(raw)
@@ -359,6 +398,7 @@ def train_config_from_dict(raw: Mapping[str, Any], where: str = "<dict>") -> Tra
             "reward",
         ),
         where,
+        optional=("prefetch_reset",),
     )
     algo = str(top["algo"])
     if algo not in ALGOS:
@@ -480,6 +520,7 @@ def train_config_from_dict(raw: Mapping[str, Any], where: str = "<dict>") -> Tra
         status_interval_s=float(top["status_interval_s"]),
         log_interval=int(top["log_interval"]),
         reward=reward,
+        prefetch_reset=bool(top.get("prefetch_reset", PREFETCH_RESET_DEFAULT)),
     )
     _validate(cfg, where)
     return cfg

@@ -82,6 +82,13 @@ def test_ppo_run_artifacts(ppo_run: tuple[Path, dict[str, object]]) -> None:
     with (run_dir / "eval_episodes.csv").open() as handle:
         episodes = list(csv.DictReader(handle))
     assert len(episodes) == 12 and {r["ss"] for r in episodes} == {"SS3", "SS4", "SS5"}
+    # Both step counts survive: the evaluation's training step count and each episode's
+    # own length (the original writer let the second overwrite the first).
+    assert [int(r["train_steps"]) for r in episodes] == [1024] * 6 + [2048] * 6
+    assert all(1 <= int(r["steps"]) <= 1024 for r in episodes)
+    assert sum(int(r["steps"]) for r in episodes if r["eval_index"] == "1") == int(
+        evals[1]["eval_env_steps"]
+    )
 
     checkpoints = sorted((run_dir / "checkpoints").iterdir())
     assert [c.name for c in checkpoints] == ["step_0000001024", "step_0000002048"]
@@ -160,3 +167,25 @@ def test_sac_tiny_run(tmp_path: Path) -> None:
     assert policy.normalizer is not None and policy.normalizer.norm_reward is False
     obs = np.zeros(policy.model.observation_space.shape, dtype=np.float32)
     assert policy.act(obs).shape == (3,)
+
+
+def test_load_policy_reads_a_pre_p5d4_run(
+    ppo_run: tuple[Path, dict[str, object]], tmp_path: Path
+) -> None:
+    # A run trained before P5-D4 has no ppo.log_std_init in its config.yaml. It must still
+    # load, with the weights (log_std included) exactly as saved in model.zip.
+    import shutil
+
+    import yaml
+
+    run_dir, _ = ppo_run
+    legacy = tmp_path / "legacy"
+    shutil.copytree(run_dir, legacy)
+    raw = yaml.safe_load((legacy / "config.yaml").read_text())
+    del raw["ppo"]["log_std_init"]
+    (legacy / "config.yaml").write_text(yaml.safe_dump(raw))
+    new, old = load_policy(run_dir), load_policy(legacy)
+    for a, b in zip(
+        new.model.policy.state_dict().values(), old.model.policy.state_dict().values(), strict=True
+    ):
+        assert np.array_equal(a.numpy(), b.numpy())

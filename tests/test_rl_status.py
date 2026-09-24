@@ -154,7 +154,7 @@ def test_new_sweep_file(tmp_path: Path) -> None:
     path = new_sweep("sweep", [(cfg, 0), (cfg, 1)], 34, sweeps_dir=tmp_path, label="smoke")
     data = json.loads(path.read_text())
     assert data["kind"] == "sweep" and data["max_workers"] == 34
-    assert [j["cost"] for j in data["jobs"]] == [17, 17]
+    assert [j["cost"] for j in data["jobs"]] == [8, 8]  # ceil(0.4 * 16) + 1
     assert all(j["state"] == "queued" for j in data["jobs"])
     with pytest.raises(ValueError, match="max_workers"):
-        new_sweep("sweep", [(cfg, 0)], 16, sweeps_dir=tmp_path)
+        new_sweep("sweep", [(cfg, 0)], 7, sweeps_dir=tmp_path)

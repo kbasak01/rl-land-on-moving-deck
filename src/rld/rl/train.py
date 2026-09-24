@@ -40,6 +40,7 @@ scale, norm cap).
 
 import hashlib
 import json
+import multiprocessing
 import signal
 import subprocess
 import sys
@@ -96,6 +97,7 @@ __all__ = [
     "build_policy",
     "checkpoint_dir",
     "eval_episodes",
+    "forkserver_preload",
     "git_state",
     "load_policy",
     "load_vecnormalize",
@@ -231,6 +233,27 @@ def _refuse_if_finished(run_dir: Path) -> None:
 
 
 # --------------------------------------------------------------------------- pools and envs
+
+#: Modules the ``forkserver`` imports once, before it forks any env worker.
+FORKSERVER_PRELOAD: tuple[str, ...] = (
+    "torch",
+    "stable_baselines3",
+    "rld.rl.wrappers",
+    "rld.rl.eval_workers",
+)
+
+
+def forkserver_preload() -> None:
+    """Have the ``forkserver`` import the heavy modules once, before forking any worker.
+
+    ``SubprocVecEnv`` starts its workers from Python's ``forkserver``. Without a preload each
+    worker imports torch, SB3, PyBullet and dmf itself; with it they fork from a server
+    that already has them, sharing those pages copy-on-write. Measured at 16 workers with
+    prefetch (2026-09-24): proportional set size 479 -> 141 MB per worker (7.7 -> 2.4 GB for
+    the pool, forkserver included), start-up 4.2 -> 3.2 s, throughput unchanged. Takes
+    effect only if the forkserver has not started yet in this process (a no-op afterwards).
+    """
+    multiprocessing.set_forkserver_preload(list(FORKSERVER_PRELOAD))
 
 
 def build_env_configs(cfg: TrainConfig) -> EvalConfigs:
@@ -471,12 +494,17 @@ def train(cfg: TrainConfig, seed: int, run_dir: Path) -> dict[str, Any]:
             },
         )
         stage = tracker.curriculum.sampling_stage
+        if cfg.vec_env == "subproc":
+            forkserver_preload()
+        prefetch = cfg.prefetch_reset
         factories = [
-            EnvFactory(cfgs, tuple(train_pool), cfg.pad, seed, rank, stage, run_dir / "monitor")
+            EnvFactory(
+                cfgs, tuple(train_pool), cfg.pad, seed, rank, stage, run_dir / "monitor", prefetch
+            )
             for rank in range(cfg.n_envs)
         ]
         eval_factories = [
-            EnvFactory(cfgs, tuple(tune_pool), cfg.pad, seed, rank, None, None)
+            EnvFactory(cfgs, tuple(tune_pool), cfg.pad, seed, rank, None, None, prefetch)
             for rank in range(cfg.eval.n_envs)
         ]
         venv = VecNormalize(
@@ -699,6 +727,27 @@ class LearnedPolicy:
         return out
 
 
+def _upgrade_saved_run_config(raw: dict[str, Any]) -> dict[str, Any]:
+    """Fill keys added after a run was trained, with the value that run actually used.
+
+    Only :func:`load_policy` calls this; a *training* config must still state every key.
+
+    * ``ppo.log_std_init`` (added by P5-D4, commit ``cbdb7cf``). Earlier PPO runs, i.e. the
+      first smoke run ``artifacts/runs/ppo_smoke/0``, left SB3 at its default of 0.0. The
+      value only seeds a new model; a loaded model's ``log_std`` comes from ``model.zip``.
+
+    Args:
+        raw: A run directory's ``config.yaml`` mapping.
+
+    Returns:
+        The mapping, with missing post-hoc keys filled (a copy when anything changes).
+    """
+    ppo = raw.get("ppo")
+    if raw.get("algo") == "ppo" and isinstance(ppo, dict) and "log_std_init" not in ppo:
+        return {**raw, "ppo": {**ppo, "log_std_init": 0.0}}
+    return raw
+
+
 def load_policy(run_dir: Path, ckpt: str | int = "final") -> LearnedPolicy:
     """Load a trained policy with its frozen normalisation statistics.
 
@@ -710,7 +759,7 @@ def load_policy(run_dir: Path, ckpt: str | int = "final") -> LearnedPolicy:
         The :class:`LearnedPolicy` (CPU).
     """
     run_dir = Path(run_dir)
-    raw = yaml.safe_load((run_dir / "config.yaml").read_text())
+    raw = _upgrade_saved_run_config(yaml.safe_load((run_dir / "config.yaml").read_text()))
     cfg = train_config_from_dict(raw, str(run_dir / "config.yaml"))
     path = checkpoint_dir(run_dir, ckpt)
     algo_cls: Any = PPO if cfg.algo == "ppo" else SAC

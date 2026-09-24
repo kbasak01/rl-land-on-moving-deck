@@ -15,7 +15,8 @@ CFG ?= configs/rl/ppo.yaml
 SEED ?= 0
 SEEDS ?= 0 1 2 3 4
 # Global cap on concurrently busy CPU worker slots across every run and sweep (36 logical
-# CPUs minus 2). A run's cost is max(n_envs, eval.n_envs) + 1 (the learner).
+# CPUs minus 2). A run's cost is its measured average core use, ceil(0.4 * max(n_envs,
+# eval.n_envs)) + 1 (rld.rl.config.ENV_WORKER_CORES): 8 for a 16-worker PPO run.
 MAX_WORKERS ?= 34
 # Throughput measurement (Phase 0). STEPS is per (vec_cls, n_envs, act) row.
 STEPS ?= 6000

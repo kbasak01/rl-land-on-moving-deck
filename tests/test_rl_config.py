@@ -201,3 +201,18 @@ def test_ppo_log_std_init_reaches_the_policy(tmp_path: Path) -> None:
     model = _build_model(cfg, DummyVecEnv([FakeLanding]), 0, tmp_path)
     log_std = model.policy.log_std.detach().numpy()  # type: ignore[union-attr]
     assert np.allclose(log_std, -1.0)
+
+
+def test_prefetch_reset_is_optional_and_round_trips() -> None:
+    # Engineering switch, not a hyperparameter: absent (run dirs written before it existed)
+    # means the default; present, it must survive config.yaml.
+    from rld.rl.config import PREFETCH_RESET_DEFAULT
+
+    raw = yaml.safe_load((RL_CONFIG_DIR / "ppo.yaml").read_text())
+    raw.pop("prefetch_reset", None)
+    assert train_config_from_dict(raw).prefetch_reset is PREFETCH_RESET_DEFAULT is True
+    off = train_config_from_dict({**raw, "prefetch_reset": False})
+    assert off.prefetch_reset is False
+    again = train_config_from_dict(yaml.safe_load(yaml.safe_dump(config_to_dict(off))))
+    assert again == replace(off, source=None)
+    assert off.workers == 8  # ceil(0.4 * 16) + 1, whatever the switch
