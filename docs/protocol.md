@@ -2396,6 +2396,47 @@ and without a constant descent command of −0.2 (0.3 m/s).
 - **Rejected by the user:** running `DSLPIDControl` at the 240 Hz physics rate. It would need a
   dated P3-D1 deviation and a re-run of every committed baseline.
 
+### P5-D8 — Third smoke run learns; one update after the SS3→SS4 promotion collapses it (2026-09-24)
+
+*Run.* `make train-bg CFG=configs/rl/ppo_smoke_p5d7.yaml SEED=0` at `ed5d7ca`, with
+`log_std_init` −2.3. It finished `done` at 212 992 steps in 291 s, at 1 556 steps/s excluding
+eval.
+
+*Learning: healthy up to the promotion.*
+- In training episodes, crashes fell to about 0 (5 `off_plate_strike`), and 560 of 753 episodes
+  ended in a touchdown class. By training quarter, success went 0.011 → 0.043 → 0.181 → 0.234
+  and mean return −2.4 → +8.5.
+- Deterministic tune-pool success, SS3–SS5, rose monotonically from 20 k to 200 k: 0, 0, .011,
+  .106, .206, .267, .322, .411, .567, .744. At 200 k, SS3 was .983, SS4 .767 and SS5 .483.
+- The curriculum promoted SS3 → SS4 at 200 k, mid-rollout.
+
+*The collapse.*
+- At the final evaluation (212 992), one PPO update later, success was 0.000 at every SS:
+  timeout .661, bounce .339.
+- *Confirmed outside the training pipeline.* Flying the SS3 tune draw serially through
+  `load_policy`:
+  - the 200 k checkpoint scores 58/60;
+  - the `final` checkpoint scores 0/60 (46 timeout, 13 bounce, 1 off_pad).
+- *Swap test.*
+  - final weights + 200 k VecNormalize stats → 0/60;
+  - 200 k weights + final stats → 57/60.
+
+  So the weights carry the collapse, not the normalisation.
+- *What moved.* The update's logged learning rate was 5.09e-6 (the linear schedule; it is not
+  negative). The largest weight change was about 1.5e-3. SB3 initialises the action head with
+  gain 0.01, and its largest weight here is 9.5e-3, so a change of that size moves the
+  deterministic mean action by an amount that matters at this action scale.
+- *Not established.* Whether the SS3/SS4 mix in the update's rollout caused the collapse, or it
+  is ordinary PPO instability, is not known.
+
+*Why it matters.* P3-D1 §5 scores tuning trials on their **final** checkpoint. If collapses like
+this recur, the scores are noisy.
+
+*Decision (user, 2026-09-24).* Before tuning, run a 1 M-step diagnostic with the same config:
+`configs/rl/ppo_diag_p5d7.yaml`, which differs only in budget, evaluation interval (25 k),
+checkpoint interval and name. It is not a trial. Any config change that follows from it will be
+charged as one, as in P5-D4 and P5-D7.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|
