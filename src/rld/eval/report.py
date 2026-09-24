@@ -110,6 +110,10 @@ METHOD_LABELS: dict[str, str] = {
         "future deck motion"
     ),
     "pid_feedforward_lowvz": "pid_feedforward_lowvz (H1a closing-speed reference (P3-D1 §8))",
+    "pid_feedforward_lowvz_cut": (
+        "pid_feedforward_lowvz_cut (lowvz + latched post-contact throttle cut (P5-D2); "
+        "not the H1a reference)"
+    ),
     "gated_forecast": (
         "gated_forecast (not privileged: past-only ship-motion feed + dmf residual_interval band)"
     ),

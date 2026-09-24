@@ -1969,6 +1969,189 @@ evaluation).*
   **+41 %**.
 - **Rule unchanged.** No part of the rule was changed after the check.
 
+### P5-D3 — pid_feedforward_lowvz_cut on the frozen lists (2026-09-23)
+
+*What was flown.* `pid_feedforward_lowvz_cut` (registry name) through the e01 runner, exactly as
+e01 flew its five controllers.
+- *Lists and N.* Every frozen list, aft pad: static and `id`, `unseen_seastate`, `unseen_heading`
+  and `unseen_vessel` at every listed SS. That is 14 cells × N = 200 = 2 800 episodes, with none
+  skipped.
+- *Timing.* Flown after P5-D2 and before any Phase 5 training run, per the P5-D1 decision.
+- *Before the run.* `scripts/make_episodes.py --check` passed 10/10 (MANIFEST SHA-256
+  `e6f30e55…`). Config SHA-256 was `e5f19903…` and the resolved hash `123b890f…`, both as
+  recorded in P5-D2.
+- *Command.*
+  `scripts/eval_baselines.py --out-dir results/e01_lowvz_cut --controllers pid_feedforward_lowvz_cut --carry-from results/e02 --carry-methods pid_track_descend pid_feedforward pid_feedforward_lowvz gated oracle_gated --pad aft --workers 24`.
+  It ran at `140d55c` in 133.5 s.
+
+*Provenance notes.*
+- **The five baselines were carried, not re-flown.** They were carried from `results/e02`, not
+  from `results/e01`. `--carry-from results/e01` fails, because e01's `summary.csv` predates the
+  Phase 4 `forecaster_files_sha256` column.
+  - That first attempt did fly all 2 800 `lowvz_cut` episodes. It then raised in the carry step
+    **before writing anything**, so no number from it was seen.
+  - The run above is its only re-run, with nothing changed except the carry source.
+  - The script's reference check compared every carried aft row with `results/e01/episodes.csv`
+    (`c5852090…`): **14 000/14 000 byte-identical** (`run_info.json["reference_check"]`).
+  - All paired statistics below read lowvz and `pid_feedforward` directly from
+    `results/e01/episodes.csv`. `results/e01/` and the `make baselines` pin are untouched.
+- **Dirty tree at run start.** `run_info.json` records `git_dirty = true`. The dirty paths are:
+  - the user's two `.claude/skills/*.md` files;
+  - this entry's uncommitted eval-side files: `src/rld/eval/report.py` (a display label only),
+    `tests/test_eval_report.py` and the new `src/rld/eval/paired_outcomes.py`.
+
+  Nothing under `src/rld/control/`, `src/rld/envs/` or `configs/` was dirty, and none of the
+  dirty files is on the flight path.
+- **Re-rendering.** The markdown was re-rendered with `--render-only` after the display label
+  was added. Both it and every CSV re-render or re-score **byte-identically**.
+
+*Artifacts, all in `results/e01_lowvz_cut/`.*
+
+| file | SHA-256 |
+|---|---|
+| `episodes.csv` | `8fe15278…` |
+| `summary.csv` | `180eeef9…` |
+| `success_vs_seastate.md` | `e59f5008…` |
+| `paired_vs_lowvz.csv` | `87cd0433…` |
+| `p5d2_predictions.csv` | `da593380…` |
+| `paired_vs_pid_feedforward.csv` | `e1234e05…` |
+
+- *Tables.* `success_vs_seastate.md` prints all six controllers per cell, with the full outcome
+  breakdown and touchdown audit. `oracle_gated` is marked privileged there.
+- *Scoring.* The paired statistics come from `python -m rld.eval.paired_outcomes`. They use
+  P3-D1 §4's paired bootstrap: 10 000 replicates, seed 20260926, one "seed" per deterministic
+  controller, with episodes resampled and shared by both methods.
+
+**Headline: success per cell (%, Wilson 95 % CI, k/200).** The paired difference is
+`lowvz_cut − lowvz`, in points, with its paired-bootstrap 95 % CI. Success is never pooled
+across sea states.
+
+| cell | `lowvz_cut` | `lowvz` | `pid_feedforward` | cut − lowvz |
+|---|---|---|---|---|
+| static | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | +0.0 [+0.0, +0.0] |
+| id SS3 | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | +0.0 [+0.0, +0.0] |
+| id SS4 | 98.5 [95.7, 99.5] 197 | 98.0 [95.0, 99.2] 196 | 100.0 [98.1, 100.0] 200 | +0.5 [+0.0, +1.5] |
+| id SS5 | 98.0 [95.0, 99.2] 196 | 95.5 [91.7, 97.6] 191 | 99.0 [96.4, 99.7] 198 | **+2.5 [+0.5, +5.0]** |
+| id SS6 | 88.0 [82.8, 91.8] 176 | 85.0 [79.4, 89.3] 170 | 90.5 [85.6, 93.8] 181 | **+3.0 [+1.0, +5.5]** |
+| unseen_seastate SS6 | 89.5 [84.5, 93.0] 179 | 86.0 [80.5, 90.1] 172 | 90.0 [85.1, 93.4] 180 | **+3.5 [+1.0, +6.0]** |
+| unseen_heading SS3 | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | +0.0 [+0.0, +0.0] |
+| unseen_heading SS4 | 99.0 [96.4, 99.7] 198 | 99.0 [96.4, 99.7] 198 | 100.0 [98.1, 100.0] 200 | +0.0 [+0.0, +0.0] |
+| unseen_heading SS5 | 97.0 [93.6, 98.6] 194 | 96.5 [93.0, 98.3] 193 | 99.5 [97.2, 99.9] 199 | +0.5 [+0.0, +1.5] |
+| unseen_heading SS6 | 83.0 [77.2, 87.6] 166 | 70.0 [63.3, 75.9] 140 | 77.0 [70.7, 82.3] 154 | **+13.0 [+8.5, +18.0]** |
+| unseen_vessel SS3 | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | +0.0 [+0.0, +0.0] |
+| unseen_vessel SS4 | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | +0.0 [+0.0, +0.0] |
+| unseen_vessel SS5 | 99.5 [97.2, 99.9] 199 | 99.5 [97.2, 99.9] 199 | 99.5 [97.2, 99.9] 199 | +0.0 [+0.0, +0.0] |
+| unseen_vessel SS6 | 97.0 [93.6, 98.6] 194 | 95.0 [91.0, 97.3] 190 | 98.5 [95.7, 99.5] 197 | **+2.0 [+0.5, +4.0]** |
+
+- *Where the difference separates.* It separates from 0 (bold) in 5 of 14 cells. Where it does
+  not, the CI touches 0 or the cell has no losses to remove.
+- *Outcome breakdown.* Only `hard_landing` and `bounce` occur, for both controllers. There is no
+  `crash`, `off_pad` or `timeout` in any cell. Counts, `lowvz_cut` / `lowvz`:
+
+  | cell | `hard_landing` | `bounce` |
+  |---|---|---|
+  | id SS4 | 0 / 0 | 3 / 4 |
+  | id SS5 | 0 / 0 | 4 / 9 |
+  | id SS6 | 9 / 9 | 15 / 21 |
+  | unseen_seastate SS6 | 7 / 7 | 14 / 21 |
+  | unseen_heading SS4 | 0 / 0 | 2 / 2 |
+  | unseen_heading SS5 | 0 / 0 | 6 / 7 |
+  | unseen_heading SS6 | 24 / 24 | 10 / 36 |
+  | unseen_vessel SS5 | 0 / 0 | 1 / 1 |
+  | unseen_vessel SS6 | 0 / 0 | 6 / 10 |
+
+  Every other cell is 200/200 success for both.
+- *Which way outcomes changed.* Every one of the 50 changed outcomes is `bounce → success`.
+  None goes `success → bounce`, and there is no new `crash`.
+- *Closing speed.* p95 closing speed is identical to lowvz in every cell, by prediction 1: for
+  example 0.188 m/s at `id` SS5.
+
+**P5-D2 predictions, scored per episode on the identical lists** (`p5d2_predictions.csv`).
+1. **Pre-contact identity: HELD.**
+   - All 16 first-contact columns are text-identical (hence float64-identical) to lowvz in
+     **2 800/2 800** episodes:
+     - the 12 first-contact fields of `EpisodeRecord.as_row`;
+     - `detectors_disagree`, `closing_speed_world_z_m_s`, `time_to_touchdown_s` and
+       `td_in_quiescent_window`.
+   - The 40 episodes whose outcome is decided at or before first contact (all `hard_landing`)
+     have the identical outcome in **40/40**.
+   - *Not pre-registered; reported, not scored.* `termination_reason` also agrees in 35/40. In
+     5 SS6 `hard_landing` episodes (relative tilt 15.2–22.3° at contact), lowvz rocked off
+     (`release`) and `lowvz_cut` stayed down until `dwell_complete`. The class is decided at
+     contact, and only how the episode ended changed. That is post-contact behaviour, not a
+     pre-contact difference, and not a bug.
+   - *A check made stricter, then reverted.* My first scoring code also required
+     `termination_reason` to match. I reverted to P5-D2's wording ("outcome") after seeing the
+     5, and both numbers are in the CSV.
+2. **Bounce ratio ≈ 0.6×, not below ≈ 0.5×: HELD.**
+   - `lowvz_cut` bounces **61** times where lowvz bounces **111**. The ratio is **0.550**, with
+     a paired stratified-bootstrap 95 % CI of **[0.458, 0.640]**. Episodes are resampled within
+     each cell and shared by both methods, 10 000 replicates, seed 20260926.
+   - *The decision rule.* The rule "point ≥ 0.5 and the CI contains 0.6" was written into
+     `rld.eval.paired_outcomes` before the scoring was first run. The point is 0.050 above the
+     floor, and the CI's lower end (0.458) lies below it.
+   - *The removed fraction.* The cut removed 50/111 = 45 % of bounces, against P5-D2's expected
+     reach of ≈ 40 %.
+   - *Heterogeneity (post hoc, descriptive).* The per-cell ratio is 0.28 at `unseen_heading`
+     SS6 (10/36) and 0.44–1.0 in every other cell with bounces. That one cell supplies 26 of the
+     50 removed bounces, and without it the pooled ratio is 51/75 = 0.68.
+   - *A candidate explanation, not verified.* At 90° heading the deck is roll-dominated, and
+     P5-D1's mechanism B (a later, unloaded lift-off) is within the rule's reach. No
+     substep-level log was taken on the frozen lists.
+3. **Control effort and action jerk rise: HELD.**
+   - The paired mean difference (cut − lowvz) has a 95 % CI above 0 in **13/13** moving-deck
+     cells for both metrics, and also on the static pad.
+   - *Operationalisation.* P5-D2 gave only a direction. The rule "CI above 0 in every
+     moving-deck cell" was written before the scoring was first run.
+   - *Size.*
+     - `effort_mean_sq`, the committed per-cell metric (mean ‖a‖²): median per-episode ratio
+       3.9–7.1× by cell.
+     - `action_jerk_mean`: 1.32–2.40×.
+     - The per-episode sums `control_effort` and `action_jerk` give median ratios of 1.55× and
+       1.53× over all 2 800. That matches P5-D2's tune-pool "+55 %" if that figure used the
+       sum; P5-D2 does not name the column.
+
+**Not predicted by P5-D2.**
+- **Tunnelling.** 31 `lowvz_cut` episodes exceed the 5 mm `tunnelling_penetration_m` threshold;
+  lowvz has **0**. The maximum penetration is 7.03 mm, against 3.91 mm for lowvz.
+  - *Where.* `id` SS5 1, `id` SS6 5, `unseen_seastate` SS6 7 and `unseen_heading` SS6 18.
+  - *Outcomes.* 17 are `hard_landing`, 13 `success` and 1 `bounce`. Tunnelling does not enter
+    the outcome classification, and no outcome is attributed to it.
+  - *Likely cause, not verified.* A drone at idle thrust on a deck accelerating up into it
+    loads the contact harder than lowvz's near-hover thrust does.
+  - *Comparison.* It is of the same size as `pid_track_descend`'s e01 tunnelling (14, max
+    6.5 mm).
+  - *Consequence for RL.* It matters for Phase 5/6: a policy that cuts thrust after contact
+    will show tunnelling counts that lowvz does not. The Phase 7 tables must report
+    `tunnelling_n` beside success for every method, as P3-D1 §3 already requires.
+- **Detector disagreement.** It is 1/2 800, at `unseen_seastate` SS6, the same episode as
+  lowvz's, since first contact is identical.
+
+**Post hoc, not part of any prediction: `lowvz_cut` vs `pid_feedforward`**
+(`paired_vs_pid_feedforward.csv`, same bootstrap).
+- It separates in **no** cell. The largest difference is `unseen_heading` SS6, +6.0 points
+  [−1.0, +13.0]; `id` SS6 is −2.5 [−7.5, +2.5].
+- A post-contact rule on lowvz's approach therefore does not demonstrably beat the
+  success-tuned `pid_feedforward` anywhere on these lists.
+
+**What this means for H1 (P3-D1 §8 and P3-D4 are unchanged).**
+- **lowvz stays the H1a reference.** `lowvz_cut` is printed beside it.
+- **The P5-D1 consequence is now quantified.** A purely post-contact thrust rule, with lowvz's
+  approach bit for bit and no tuning, gains **+2.5 points [+0.5, +5.0]** of success over lowvz
+  at `id` SS5 (H1a's cell), at the identical p95 closing speed. So a `residual_ppo` that
+  matched lowvz's approach and learned only this cut would clear H1a's −2-point non-inferiority
+  bound by a margin, but would show r = 0 on closing speed.
+- **H1b's reference is untouched.** At `id` SS6, `lowvz_cut` (88.0 %) is below
+  `pid_feedforward` (90.5 %), −2.5 [−7.5, +2.5] paired.
+
+*Code (eval side only).*
+- `src/rld/eval/paired_outcomes.py` is new: episode pairing, first-contact identity, the paired
+  stratified ratio bootstrap, the per-cell paired table, and the `python -m` entry point.
+  `scripts/` is outside the eval-auditor's write scope; the main thread may move the entry
+  point there.
+- `tests/test_eval_paired_outcomes.py` is new.
+- `METHOD_LABELS` in `src/rld/eval/report.py` gains the `pid_feedforward_lowvz_cut` label.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|

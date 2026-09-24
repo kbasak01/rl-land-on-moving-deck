@@ -1,0 +1,108 @@
+{
+  "omp_num_threads": "1",
+  "cpu_count": "36",
+  "host": "DATTA-BASAK",
+  "timestamp_utc": "2026-09-23T23:59:55+00:00",
+  "workers": 24,
+  "chunk": 25,
+  "wall_s": 133.5,
+  "episodes": 16800,
+  "controllers": [
+    "pid_feedforward_lowvz_cut"
+  ],
+  "git_sha": "140d55ccfdd7072233a7e1ff08ecec9e084c5e4e",
+  "git_dirty": true,
+  "git_dirty_paths": [
+    " M .claude/skills/new-controller/SKILL.md",
+    " M .claude/skills/sweep-status/SKILL.md",
+    " M src/rld/eval/report.py",
+    " M tests/test_eval_report.py",
+    "?? src/rld/eval/paired_outcomes.py"
+  ],
+  "carried": {
+    "from": "results/e02",
+    "episodes_sha256": "206dcfb745def54486cdc4b291c2732f9d41e5da2cc8c1f0dfe0fe561021f89a",
+    "summary_sha256": "c3290b53b061a54a06039ab286abe45a289e8b2084252c106492d928a236b650",
+    "methods": [
+      "pid_track_descend",
+      "pid_feedforward",
+      "pid_feedforward_lowvz",
+      "gated",
+      "oracle_gated"
+    ],
+    "rows": 14000,
+    "note": "copied from the source run, not re-flown"
+  },
+  "pads": [
+    "aft"
+  ],
+  "lists": [
+    "id",
+    "unseen_seastate",
+    "unseen_heading",
+    "unseen_vessel",
+    "static"
+  ],
+  "per_cell": null,
+  "config_overrides": {},
+  "skipped_episodes": 0,
+  "reference_check": {
+    "reference": "/home/kbasak/projects_02/rl-land-on-moving-deck/results/e01/episodes.csv",
+    "reference_sha256": "c5852090822822fa822dd55d0cafb42c43f6c072b0e4365d223baa1f91e5ad7b",
+    "pad": "aft",
+    "applicable": true,
+    "header_identical": true,
+    "all_identical": true,
+    "methods": {
+      "pid_track_descend": {
+        "n_compared": 2800,
+        "n_identical": 2800,
+        "n_differ": 0,
+        "n_missing_in_reference": 0,
+        "n_reference_rows": 2800,
+        "first_mismatch": null
+      },
+      "pid_feedforward": {
+        "n_compared": 2800,
+        "n_identical": 2800,
+        "n_differ": 0,
+        "n_missing_in_reference": 0,
+        "n_reference_rows": 2800,
+        "first_mismatch": null
+      },
+      "pid_feedforward_lowvz": {
+        "n_compared": 2800,
+        "n_identical": 2800,
+        "n_differ": 0,
+        "n_missing_in_reference": 0,
+        "n_reference_rows": 2800,
+        "first_mismatch": null
+      },
+      "gated": {
+        "n_compared": 2800,
+        "n_identical": 2800,
+        "n_differ": 0,
+        "n_missing_in_reference": 0,
+        "n_reference_rows": 2800,
+        "first_mismatch": null
+      },
+      "oracle_gated": {
+        "n_compared": 2800,
+        "n_identical": 2800,
+        "n_differ": 0,
+        "n_missing_in_reference": 0,
+        "n_reference_rows": 2800,
+        "first_mismatch": null
+      }
+    },
+    "summary_provenance_differences": [
+      {
+        "method": "oracle_gated",
+        "column": "controller_config_sha256",
+        "committed": "e8bc4efd5615cea1a07f05f0368f226b682e11d78968b2a8d6b03c8f0862b4f1",
+        "live": "5daca06e217fc765611af98af2fc70f312ca4cbdafffe408d5827eae8138bce3",
+        "n_rows": "14"
+      }
+    ]
+  }
+}
