@@ -2437,6 +2437,83 @@ this recur, the scores are noisy.
 checkpoint interval and name. It is not a trial. Any config change that follows from it will be
 charged as one, as in P5-D4 and P5-D7.
 
+### P5-D9 — 1 M diagnostic: the collapse is hovering, not the curriculum; SAC device; tuning pre-registered (2026-09-24)
+
+*Diagnostic run.* `make train-bg CFG=configs/rl/ppo_diag_p5d7.yaml SEED=0` at `73f7ea3`. It
+finished `done` at 1 015 808 steps in 1 049 s (2.20 CPU-hours) and was evaluated every 25 k on
+the P3-D3 tune draw.
+- **Learning, then hovering.** Tune-pool success peaked at 0.27 (150 k). It then fell to 0.00 at
+  200 k **with no promotion** (still SS3), with 83 % timeout.
+- **The same shift in training.** By 25 k-step bins, the timeout share of training episodes went
+  0.27 → 0.48 → 0.58 → 0.75 → 0.85 from 150 k to 250 k, while training return rose.
+- **Reward economics that make hovering the better bet**, mean training return by outcome:
+  - success +53.4;
+  - bounce, off_pad and hard_landing −6.0 to −7.1;
+  - timeout +1.05 (p10 −3.5, p90 +3.8).
+
+  Attempting a landing therefore beats hovering only if p(success) exceeds about 12 %. The
+  stochastic policy (std ≈ 0.10) converted only 26 of 489 touchdowns (5 %).
+- **Recovery.** The policy climbed out of hovering on its own:
+  - success 0.34 (400 k), 0.61 (450 k), 0.79 (475 k);
+  - promoted SS3 → SS4 at 525 k (0.88) with **no collapse**, and SS4 → SS5 at 575 k (0.97);
+  - then 0.96–1.00 at every evaluation from 600 k to 1 015 808 (final 0.994).
+- **Final checkpoint, tune draw.**
+  - 179/180 successes and 1 bounce;
+  - p95 closing speed 0.340 m/s (p50 0.227);
+  - median time to touchdown 2.0 s;
+  - 0 tunnelling, 0 detector disagreement, 0 timeout.
+  - For reference, P3-D4 table on the same draw: `pid_feedforward` 1.000 / 1.000 / 1.000 at p95
+    0.22–0.25 m/s and 4.5 s; `pid_feedforward_lowvz` p95 0.13–0.17 m/s and 7.7 s. These are
+    tune-pool numbers, not results.
+- **Reading.**
+  - P5-D8's post-promotion collapse was the same hover trap, which occurs with or without a
+    promotion. A 2 M-step trial ends well after the recovery point observed here.
+  - The reward-weight search (w_time up to 0.03, r_fail 5–30) spans both hover-favouring and
+    landing-favouring settings, so the hover incentive is a hyperparameter property that the
+    pre-registered search can select against.
+  - The Phase 5 hacking audit must report the timeout fraction of training episodes, not only
+    of evaluation episodes.
+
+*SAC device (measured once, as the rl-trainer rule requires).* `scripts/p5_sac_device_bench.py`,
+committed `configs/rl/sac.yaml`, 30 000 steps per device into scratch run directories:
+- CPU 86.3 steps/s excluding eval, CUDA 87.0 steps/s. The two are equal because the run is
+  bound by one gradient step per transition collected (UTD = 1), not by device compute.
+- **Fixed: `device: cpu`** (unchanged), which leaves the GPU free.
+- Expected SAC trial wall time is about 1.6 h (0.5 M steps). SAC tuning is the long pole.
+
+*Tuning, pre-registered here before trial 1 (user decision, 2026-09-24: launch as registered).*
+
+| method | config (SHA-256) | trials drawn | charged before | per-trial budget | Sobol seed | trial seed |
+|---|---|---|---|---|---|---|
+| PPO | `configs/rl/tune_ppo.yaml` (`77aaa7f11a6690f2b5806900c3e3917a3385d04a55f1f2e2faee9316f9fad95d`) | 18 | 2 (P5-D4, P5-D7) | 2 M | 20260927 | 0 |
+| SAC | `configs/rl/tune_sac.yaml` (`3eded2be9a6ed7bed7981498dd5d9c93b52eb82ad627d64d81d651fa5d60abfe`) | 20 | 0 | 0.5 M | 20260928 | 0 |
+
+- **Base configs.**
+  - `configs/rl/ppo.yaml`: `08974a77077ffb342ce2cf9aa0593c12a09b65a10200ceaa844c2034a922fca9`.
+  - `configs/rl/sac.yaml`: `d07803ca1c9ae6f9bb1ec3c7812183f2e075ba29eeb4cae7b80425ae34e385da`.
+  - `configs/env/reward.yaml`: `d6bdb515f37b7253d60ba8eaf2cebfb5ccf8d59411006d58b7978a387e2481ec`, which fixes the reward's structure; only its
+    weights are searched.
+  - The evaluation draw is `configs/control/tuning.yaml` (`c7d099d2f8f85b34903d33860240f687481d5a1568d9f57dc85195168fcb43d7`), the P3-D3 tune
+    draw: 60 episodes per SS, SS3–SS5, aft.
+- **Search spaces**, as in the two YAML files:
+  - PPO: learning rate, n_steps, batch, epochs, entropy coefficient, width, `log_std_init`
+    [−3.0, −1.6], plus the reward weights;
+  - SAC: learning rate, batch, tau, learning_starts, width, plus the same reward-weight ranges.
+- **Score.**
+  - Each trial is scored on its **final checkpoint**, on the tune draw: mean success over SS3–SS5.
+  - Ties go to the lower pooled p95 touchdown closing speed, then the lower trial index.
+  - A failed trial is listed and cannot win.
+- **Nothing in tuning touches `results/episodes/`.** Trials train on the P3-D2 train pool with the
+  curriculum, exactly as a final run would.
+- **Commands.** Both use `MAX_WORKERS = 34` slots, counted globally; a slot costs 8 per PPO run and
+  5 per SAC run (P5-D6).
+  ```
+  make tune CFG=configs/rl/tune_ppo.yaml
+  make tune CFG=configs/rl/tune_sac.yaml
+  ```
+- **Outputs.** `results/tune/{ppo,sac}/trials.csv` and `selection.json`. The winners are written
+  to `configs/rl/{ppo,sac}.yaml` in a dated entry before any final 5-seed run starts.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|
