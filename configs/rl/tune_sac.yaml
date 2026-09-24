@@ -16,6 +16,7 @@
 
 method: sac
 base_config: configs/rl/sac.yaml
+trials_used_before_search: 0
 trials: 20
 sobol_seed: 20260928
 trial_seed: 0

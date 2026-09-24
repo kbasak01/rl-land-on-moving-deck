@@ -33,6 +33,7 @@ ppo:
   vf_coef: 0.5
   max_grad_norm: 0.5
   target_kl: null
+  log_std_init: -1.0            # std 0.37 in action units; SB3's 0 flips the drone (P5-D4)
 sac: null
 
 normalize:

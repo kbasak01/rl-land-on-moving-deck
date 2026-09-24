@@ -106,7 +106,10 @@ class TuneConfig:
     Attributes:
         method: Tuned method, e.g. ``"ppo"``.
         base_config: The final-run config whose hyperparameters are searched.
-        trials: Trials including trial 0; at most :data:`MAX_TRIALS`.
+        trials: Trials including trial 0 drawn by this search. ``trials +
+            trials_used_before_search`` is at most :data:`MAX_TRIALS`.
+        trials_used_before_search: Tune-pool training runs already charged to this method's
+            trial budget before the search (P5-D4: the PPO smoke run counts as one).
         sobol_seed: Seed of the scrambled Sobol sequence.
         trial_seed: The training seed every trial uses.
         trial_steps: Env-step budget per trial.
@@ -119,6 +122,7 @@ class TuneConfig:
     method: str
     base_config: Path
     trials: int
+    trials_used_before_search: int
     sobol_seed: int
     trial_seed: int
     trial_steps: int
@@ -161,6 +165,7 @@ def load_tune_config(path: Path) -> TuneConfig:
         "method",
         "base_config",
         "trials",
+        "trials_used_before_search",
         "sobol_seed",
         "trial_seed",
         "trial_steps",
@@ -197,6 +202,7 @@ def load_tune_config(path: Path) -> TuneConfig:
         method=str(raw["method"]),
         base_config=_abs(raw["base_config"]),
         trials=int(raw["trials"]),
+        trials_used_before_search=int(raw["trials_used_before_search"]),
         sobol_seed=int(raw["sobol_seed"]),
         trial_seed=int(raw["trial_seed"]),
         trial_steps=int(raw["trial_steps"]),
@@ -207,6 +213,13 @@ def load_tune_config(path: Path) -> TuneConfig:
     )
     if not 1 <= cfg.trials <= MAX_TRIALS:
         raise ValueError(f"{path}: trials must be in [1, {MAX_TRIALS}] (P3-D1), got {cfg.trials}")
+    if cfg.trials_used_before_search < 0:
+        raise ValueError(f"{path}: trials_used_before_search must be >= 0")
+    if cfg.trials + cfg.trials_used_before_search > MAX_TRIALS:
+        raise ValueError(
+            f"{path}: trials ({cfg.trials}) + trials_used_before_search "
+            f"({cfg.trials_used_before_search}) exceeds {MAX_TRIALS} (P3-D1)"
+        )
     if cfg.trial_steps < 1:
         raise ValueError(f"{path}: trial_steps must be positive")
     for index, trial_raw in trial_raw_configs(cfg):
@@ -423,6 +436,7 @@ def collect_trials(cfg: TuneConfig, runs_root: Path = RUNS_ROOT) -> list[dict[st
         if winner is None
         else {k[6:]: v for k, v in rows[winner].items() if k.startswith("param_")},
         "n_trials": len(rows),
+        "trials_used_before_search": cfg.trials_used_before_search,
         "n_done": len(scored),
         "tune_config": _rel(cfg.source),
     }

@@ -333,7 +333,11 @@ def _build_model(cfg: TrainConfig, venv: VecEnv, seed: int, run_dir: Path) -> Ba
             vf_coef=p.vf_coef,
             max_grad_norm=p.max_grad_norm,
             target_kl=p.target_kl,
-            policy_kwargs={"net_arch": {"pi": arch, "vf": arch}, "activation_fn": activation},
+            policy_kwargs={
+                "net_arch": {"pi": arch, "vf": arch},
+                "activation_fn": activation,
+                "log_std_init": p.log_std_init,
+            },
             tensorboard_log=tb,
             verbose=1,
             seed=seed,

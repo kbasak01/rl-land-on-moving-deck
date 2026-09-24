@@ -13,6 +13,7 @@ import math
 from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
 import pytest
 import yaml
 
@@ -73,7 +74,10 @@ def test_smoke_config_gives_eight_to_twelve_eval_points() -> None:
 def test_search_configs_pin_budgets_and_equal_trials() -> None:
     ppo = load_tune_config(RL_CONFIG_DIR / "tune_ppo.yaml")
     sac = load_tune_config(RL_CONFIG_DIR / "tune_sac.yaml")
-    assert ppo.trials == sac.trials <= MAX_TRIALS == 20
+    # P5-D4: PPO's smoke run is charged as one trial, so the TOTAL budgets are equal.
+    assert ppo.trials + ppo.trials_used_before_search == MAX_TRIALS == 20
+    assert sac.trials + sac.trials_used_before_search == MAX_TRIALS
+    assert ppo.trials_used_before_search == 1 and sac.trials_used_before_search == 0
     assert ppo.trial_steps == 2_000_000 and sac.trial_steps == 500_000
     assert ppo.trial_seed == sac.trial_seed == 0
     # The reward-weight search is the same for both methods.
@@ -137,6 +141,13 @@ def test_search_rejects_more_than_twenty_trials(tmp_path: Path) -> None:
         load_tune_config(_tune_yaml(tmp_path, trials=21))
 
 
+def test_search_charges_trials_used_before_search(tmp_path: Path) -> None:
+    # P5-D4: 19 drawn + 1 charged = 20 is allowed; 20 drawn + 1 charged is not.
+    assert load_tune_config(_tune_yaml(tmp_path, trials=19)).trials == 19
+    with pytest.raises(ValueError, match="exceeds"):
+        load_tune_config(_tune_yaml(tmp_path, trials=20))
+
+
 def test_search_rejects_structure_targets(tmp_path: Path) -> None:
     raw = yaml.safe_load((RL_CONFIG_DIR / "tune_ppo.yaml").read_text())
     space = dict(raw["search_space"])
@@ -172,3 +183,21 @@ def test_materialize_is_idempotent_and_refuses_changes(tmp_path: Path) -> None:
     changed = replace(cfg, sobol_seed=cfg.sobol_seed + 1)
     with pytest.raises(FileExistsError):
         materialize_trials(changed)
+
+
+def test_ppo_log_std_init_reaches_the_policy(tmp_path: Path) -> None:
+    # P5-D4: the committed PPO configs start at std 0.37, and the value is really passed to
+    # SB3 rather than silently left at its default of 0 (std 1.0).
+    from stable_baselines3.common.vec_env import DummyVecEnv
+
+    from _rl_helpers import FakeLanding, tiny_config
+    from rld.rl.train import _build_model
+
+    for name in ("ppo.yaml", "ppo_smoke.yaml"):
+        raw = yaml.safe_load((RL_CONFIG_DIR / name).read_text())
+        assert raw["ppo"]["log_std_init"] == -1.0
+    cfg = tiny_config("ppo")
+    assert cfg.ppo is not None and cfg.ppo.log_std_init == -1.0
+    model = _build_model(cfg, DummyVecEnv([FakeLanding]), 0, tmp_path)
+    log_std = model.policy.log_std.detach().numpy()  # type: ignore[union-attr]
+    assert np.allclose(log_std, -1.0)

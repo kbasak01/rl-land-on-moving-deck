@@ -2152,6 +2152,43 @@ across sea states.
 - `tests/test_eval_paired_outcomes.py` is new.
 - `METHOD_LABELS` in `src/rld/eval/report.py` gains the `pid_feedforward_lowvz_cut` label.
 
+### P5-D4 — PPO smoke run: exploration noise at the SB3 default flips the drone; the smoke run counts as one tuning trial (2026-09-23)
+
+*Run.* `make train-bg CFG=configs/rl/ppo_smoke.yaml SEED=0`, commit `51bee6f`. The only dirty
+paths were the user's two `.claude/skills` files. Budget 200 k steps, done at 212 992, 739 s wall,
+0.57 CPU-hours. It trained on the P3-D2 train pool and was evaluated every 20 k steps on the P3-D3
+tune draw (180 episodes, SS3–SS5). No frozen-list episode was read. The curriculum stayed at SS3.
+
+*Plumbing: healthy.*
+- `status.json` reached `done` with no NaN.
+- Each checkpoint holds both `model.zip` and `vecnormalize.pkl`, and `load_policy(run_dir,
+  "final")` reloads the policy.
+- All six outcome classes occurred across the evaluations.
+
+*Learning: not healthy.*
+- The PPO base config left `log_std_init` at SB3's default of 0, i.e. an initial action std of 1.0
+  on a Box(−1, 1) action. The training policy was therefore close to the P2-D9 random policy,
+  which crashes in 100 % of episodes.
+- In the smoke run, 4 152 of 4 157 training episodes (99.9 %) ended in `crash` after about 50
+  control steps. 4 088 of those crashes were `tilt_gt_crash`. Only 5 training episodes touched
+  down.
+- The deterministic evaluation policy did reach the deck. Its success peaked at 0.133 at 60 k
+  steps and ended at 0.006, and its p95 closing speed rose from 0.40 to 0.98 m/s.
+- Binned training return rose only from about −42 to −37, all of it on crash episodes.
+
+*Throughput.* 288 steps/s overall and 467 excluding evaluation. The host was about 91 % idle, so
+the run was stalled, not compute-bound. This goes to engineering; it is not a protocol matter.
+
+*Decision (user, 2026-09-23).*
+- The PPO base config sets `log_std_init = −1.0` (std ≈ 0.37).
+- `tune_ppo.yaml` searches `log_std_init` uniformly in [−2.3, −0.7] (std ≈ 0.10–0.50).
+- The base config was changed after a tune-pool training run was seen, so **the smoke run counts
+  as one of PPO's 20 trials**. The PPO search draws at most 19 trials, trial 0 being the new base.
+- SAC is unchanged: it keeps SB3's `log_std_init = −3` with automatic entropy tuning, and all 20
+  of its trials.
+- A second 200 k smoke run with the new setting must show touchdowns in training episodes before
+  any tuning trial launches. That second smoke run is a check of the change, not a trial.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|

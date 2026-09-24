@@ -115,6 +115,9 @@ class PPOConfig:
         vf_coef: Value-loss coefficient.
         max_grad_norm: Gradient-norm clip.
         target_kl: Early-stop KL per update, or ``None``.
+        log_std_init: Initial log standard deviation of the Gaussian policy, in normalised
+            action units (the action is Box(-1, 1)); -1.0 is std 0.37. SB3's default of 0
+            (std 1.0) flips the drone in 99.9 % of training episodes (P5-D4).
     """
 
     learning_rate: float
@@ -129,6 +132,7 @@ class PPOConfig:
     vf_coef: float
     max_grad_norm: float
     target_kl: float | None
+    log_std_init: float
 
 
 @dataclass(frozen=True)
@@ -396,6 +400,7 @@ def train_config_from_dict(raw: Mapping[str, Any], where: str = "<dict>") -> Tra
             vf_coef=float(p["vf_coef"]),
             max_grad_norm=float(p["max_grad_norm"]),
             target_kl=None if p["target_kl"] is None else float(p["target_kl"]),
+            log_std_init=float(p["log_std_init"]),
         )
     else:
         if top["sac"] is None:
