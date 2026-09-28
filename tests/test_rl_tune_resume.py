@@ -33,8 +33,9 @@ DEAD_PID = 2**22 + 12345
 
 def test_slot_cost_counts_torch_threads() -> None:
     raw = load_yaml(RL_CONFIG_DIR / "sac.yaml")
-    one = train_config_from_dict(raw)
+    one = train_config_from_dict(apply_overrides(raw, {"torch_threads": 1}))
     four = train_config_from_dict(apply_overrides(raw, {"torch_threads": 4}))
+    assert train_config_from_dict(raw).workers == four.workers  # committed: 4 threads (P5-D10)
     assert one.workers == math.ceil(0.4 * 8) + 1 == 5
     assert four.workers == math.ceil(0.4 * 8) + 4 == 8
     assert train_config_from_dict(load_yaml(RL_CONFIG_DIR / "ppo.yaml")).workers == 8
@@ -212,13 +213,16 @@ def test_collect_scores_latest_done_and_lists_superseded(tmp_path: Path) -> None
     assert by_trial[0]["run_dir"] == str(done)
     assert by_trial[0]["superseded_runs"] == "0:failed;0_r10:failed"
     assert by_trial[0]["mean_success"] == 1.0 and by_trial[0]["selected"]
-    # Trial 0 is the base config, whose `reward: {}` flies the committed weights; its row
-    # reports those (this used to be None and crashed the collection).
+    # Trial 0 is the base config. Its row reports the weights it actually trains with: the
+    # committed reward.yaml overlaid with the base config's own `reward:` overrides (empty
+    # before P5-D11, the tuning winner's after). This used to be None and crashed collection.
     from rld.envs.config import REWARD_CONFIG, load_reward
+    from rld.rl.config import load_train_config
 
     committed = load_reward(REWARD_CONFIG)
-    assert by_trial[0]["param_w_progress"] == committed.w_progress
-    assert by_trial[0]["param_r_fail"] == committed.r_hard_landing
+    base = load_train_config(cfg.base_config).reward
+    assert by_trial[0]["param_w_progress"] == base.get("w_progress", committed.w_progress)
+    assert by_trial[0]["param_r_fail"] == base.get("r_hard_landing", committed.r_hard_landing)
     assert by_trial[1]["resumed"] is True and by_trial[1]["resume_steps"] == "1000"
     assert by_trial[2]["state"] == "failed" and by_trial[3]["state"] == "missing"
     selection = json.loads((cfg.results_dir / "selection.json").read_text())

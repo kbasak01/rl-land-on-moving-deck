@@ -2606,6 +2606,67 @@ score read; 15 k timed steps after a 2 k warm-up, one measurement per cell; step
   Checkpoint resume limits a future loss to one checkpoint interval (PPO 1 M, SAC 250 k env
   steps). It does not prevent the loss.
 
+### P5-D11 — PPO search scored; trial 14 becomes the PPO final config; PPO sweep queued (2026-09-28)
+
+*Scoring.* The scheduler's `on_complete` hook ran `collect_trials` automatically when trial 17
+finished. It wrote `results/tune/ppo/trials.csv` and `selection.json` under the P5-D9 rule: mean
+tune-pool success over SS3–SS5 on the final checkpoint, then lower pooled p95 closing speed, then
+lower trial index.
+- Hashes (SHA-256):
+  - `results/tune/ppo/trials.csv`: `2ead58510a7a8699858dbcf14068d6cb8d12501c8c94841c801e202fab38edf9`
+  - `results/tune/ppo/selection.json`:
+    `93a4d045080f897453cb2ea8caee167cd90ac01f89ff71e41f7ca56b91357188`
+  - the resulting `configs/rl/ppo.yaml`:
+    `26b6c49f8552f5fa626c19bab5222205eb83d294854734a23c3b0b1b3d70e14a`
+- All 18 trials are `done`; none was superseded or resumed.
+- **14 of 18 trials scored 180/180** (mean success 1.000), so the tie-break decided.
+- Trials 6 and 4 scored 0.994 and trial 8 0.978.
+- **Trial 15 hovers:** success 0.011, SS5 mean time to touchdown 8.35 s, bounce 0.333 of its
+  few touchdowns. This is the P5-D9 hover trap, inside the search space.
+
+*Winner: trial 14.*
+- Mean success 1.000 and pooled p95 closing speed **0.233 m/s**. The next lowest among the 1.000
+  trials were 0.315, 0.318 and 0.318 (trials 3, 5 and 9).
+- At SS5: p95 0.241 m/s, mean time to touchdown 2.17 s, bounce 0.000.
+- Hyperparameters:
+  - learning rate 5.941708698045433e-4 (linear decay), n_steps 1024, batch 1024, 5 epochs;
+  - entropy coefficient 0.009895217847079038;
+  - width 512 (depth 2, tanh);
+  - `log_std_init` −2.7972111202776433 (std 0.061).
+- Reward weights:
+  - w_progress 13.580398401245475, w_vz 5.847430455465423, w_smooth 0.04575471046550012,
+    w_time 0.0007295555155724287;
+  - r_success 29.54699269030243;
+  - r_hard_landing = r_off_pad = r_bounce 6.8282349687069654;
+  - r_crash 42.44193982332945.
+- For reference only, P3-D4 table, same tune draw, SS5 p95: `pid_feedforward` 0.252 m/s,
+  `pid_feedforward_lowvz` 0.169 m/s. Tune-pool numbers are not results.
+
+*Final config.*
+- `configs/rl/ppo.yaml` now carries trial 14's values, copied at full precision from
+  `results/tune/ppo/configs/trial_14.yaml`.
+- The two parsed configs are equal in every field except `method`, `run_group` and
+  `total_steps` (10 M vs 2 M). `tests/test_rl_config.py::test_ppo_config_is_the_tuning_winner`
+  pins this.
+- **Carried difference.** Because the learning-rate schedule is linear to the budget, the final
+  runs decay it over 10 M steps instead of 2 M. This is inherent in tuning at a smaller budget
+  (P3-D1 §5) and is stated, not changed.
+- **Every Phase 6 PPO-family method inherits these hyperparameters and reward weights**, as
+  P3-D1 §5 requires.
+
+*Launch.*
+- `make sweep CFG=configs/rl/ppo.yaml SEEDS="0 1 2 3 4"`: 10 M steps per seed, slot cost 8.
+- It runs behind the 16 SAC trials already queued (global FIFO, P5-D10), so it starts as the SAC
+  search drains.
+- P3-D1 §5's budget rule applies: the first PPO seed's wall clock is reported, and any budget cut
+  is made before any evaluation result is read.
+
+*Test fix, owned by the main thread.* `5376f2f` changed `sac.yaml` to 4 threads without
+re-running the tests. `test_slot_cost_counts_torch_threads` then failed, because it assumed the
+committed file had 1 thread. The test now sets both thread counts explicitly and checks the
+committed value. `test_collect_scores_latest_done_and_lists_superseded` now expects trial 0's
+effective weights: the committed `reward.yaml` overlaid with the base config's overrides.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|

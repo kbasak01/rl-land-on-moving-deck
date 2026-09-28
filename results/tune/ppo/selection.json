@@ -1,0 +1,28 @@
+{
+  "method": "ppo",
+  "rule": "max mean tune-pool success over SS3-SS5 (final checkpoint), then min pooled p95 touchdown closing speed, then min trial index; failed trials cannot win",
+  "winner_trial": 14,
+  "winner_params": {
+    "learning_rate": 0.0005941708698045433,
+    "n_steps": 1024,
+    "batch_size": 1024,
+    "n_epochs": 5,
+    "ent_coef": 0.009895217847079038,
+    "net_width": 512,
+    "log_std_init": -2.7972111202776433,
+    "w_progress": 13.580398401245475,
+    "w_vz": 5.847430455465423,
+    "w_smooth": 0.04575471046550012,
+    "w_time": 0.0007295555155724287,
+    "r_success": 29.54699269030243,
+    "r_fail": 6.8282349687069654,
+    "r_crash": 42.44193982332945
+  },
+  "n_trials": 18,
+  "trials_used_before_search": 2,
+  "n_done": 18,
+  "tune_config": "configs/rl/tune_ppo.yaml",
+  "scored_from": "each trial's latest done run directory",
+  "superseded_runs": {},
+  "resumed_trials": []
+}

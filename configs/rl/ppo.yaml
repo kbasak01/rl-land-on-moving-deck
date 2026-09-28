@@ -2,9 +2,10 @@
 #
 # Budget: 10 M env steps per seed, seeds 0-4 (P3-D1 section 5). PPO overshoots the budget
 # by less than one rollout (n_steps * n_envs = 16 384 steps) and status.json records the
-# actual count. Hyperparameters are the rl-experiment defaults UNTIL the pre-registered
-# search (configs/rl/tune_ppo.yaml) has run; the winner is then written here with a dated
-# protocol entry, before any final run starts.
+# actual count. Hyperparameters and reward weights are the winner of the pre-registered
+# search (configs/rl/tune_ppo.yaml): trial 14, results/tune/ppo/selection.json, recorded in
+# docs/protocol.md P5-D11 before any final run started. Values are copied at full precision
+# from results/tune/ppo/configs/trial_14.yaml.
 #
 # Units: steps are env control steps (1/30 s model scale each; one model second is five
 # full-scale seconds at lambda = 1/25). *_s wall-clock fields are HOST seconds.
@@ -20,24 +21,24 @@ torch_threads: 1
 pad: aft
 
 policy:
-  width: 256
+  width: 512                    # trial 14 (P5-D11)
   depth: 2
   activation: tanh
 
 ppo:
-  learning_rate: 3.0e-4
+  learning_rate: 0.0005941708698045433
   lr_schedule: linear
   n_steps: 1024                 # per env; rollout = 16 384 steps
-  batch_size: 4096
-  n_epochs: 10
+  batch_size: 1024
+  n_epochs: 5
   gamma: 0.99                   # per 1/30 s control step
   gae_lambda: 0.95
   clip_range: 0.2
-  ent_coef: 0.0
+  ent_coef: 0.009895217847079038
   vf_coef: 0.5
   max_grad_norm: 0.5
   target_kl: null
-  log_std_init: -2.3            # std 0.10 in action units; >= 0.2 flips the drone at 30 Hz (P5-D7)
+  log_std_init: -2.7972111202776433   # std 0.061 in action units (P5-D7 range; P5-D11)
 sac: null
 
 normalize:
@@ -69,6 +70,15 @@ checkpoint_interval_steps: 1000000   # model.zip + vecnormalize.pkl each time, p
 status_interval_s: 60.0
 log_interval: 1                      # SB3 table every rollout
 
-# Reward-WEIGHT overrides of configs/env/reward.yaml; empty = the committed weights.
-# v_safe_m_s and gate_height_m are structure and cannot be set here.
-reward: {}
+# Reward-WEIGHT overrides of configs/env/reward.yaml (trial 14, P5-D11). v_safe_m_s and
+# gate_height_m are structure and cannot be set here.
+reward:
+  w_progress: 13.580398401245475
+  w_vz: 5.847430455465423
+  w_smooth: 0.04575471046550012
+  w_time: 0.0007295555155724287
+  r_success: 29.54699269030243
+  r_hard_landing: 6.8282349687069654
+  r_off_pad: 6.8282349687069654
+  r_bounce: 6.8282349687069654
+  r_crash: 42.44193982332945

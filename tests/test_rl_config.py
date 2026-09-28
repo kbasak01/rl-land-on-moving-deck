@@ -47,8 +47,26 @@ def test_ppo_config_pins_p3d1() -> None:
     assert cfg.curriculum.promote_success == 0.80
     assert cfg.curriculum.window_episodes == 100
     assert cfg.eval.tuning_config == TUNING_CONFIG and cfg.eval.episodes_per_ss is None
-    assert cfg.pad == "aft" and cfg.reward == {}
+    assert cfg.pad == "aft"
     assert cfg.workers <= 34
+
+
+def test_ppo_config_is_the_tuning_winner() -> None:
+    # P5-D11: the final-run config equals the selected trial's config in every field except
+    # the name, run group and step budget.
+    import dataclasses
+    import json
+
+    from rld.rl.tuning import REPO_ROOT
+
+    selection = json.loads((REPO_ROOT / "results/tune/ppo/selection.json").read_text())
+    winner = selection["winner_trial"]
+    final = dataclasses.asdict(load_train_config(RL_CONFIG_DIR / "ppo.yaml"))
+    trial = dataclasses.asdict(
+        load_train_config(REPO_ROOT / f"results/tune/ppo/configs/trial_{winner:02d}.yaml")
+    )
+    differs = {k for k in final if final[k] != trial[k]}
+    assert differs == {"method", "run_group", "total_steps", "source"}
 
 
 def test_sac_config_pins_p3d1() -> None:
@@ -186,7 +204,7 @@ def test_materialize_is_idempotent_and_refuses_changes(tmp_path: Path) -> None:
 
 
 def test_ppo_log_std_init_reaches_the_policy(tmp_path: Path) -> None:
-    # P5-D7: the committed PPO configs start at std 0.10, and the value is really passed to
+    # P5-D7/P5-D11: the committed PPO configs set log_std_init, and the value is really passed to
     # SB3 rather than silently left at its default of 0 (std 1.0). Each smoke config keeps the
     # value its run was flown with.
     from stable_baselines3.common.vec_env import DummyVecEnv
@@ -194,16 +212,16 @@ def test_ppo_log_std_init_reaches_the_policy(tmp_path: Path) -> None:
     from _rl_helpers import FakeLanding, tiny_config
     from rld.rl.train import _build_model
 
-    flown = {"ppo.yaml": -2.3, "ppo_smoke.yaml": 0.0, "ppo_smoke_p5d4.yaml": -1.0}
-    flown["ppo_smoke_p5d7.yaml"] = -2.3
+    flown = {"ppo_smoke.yaml": 0.0, "ppo_smoke_p5d4.yaml": -1.0, "ppo_smoke_p5d7.yaml": -2.3}
     for name, value in flown.items():
         raw = yaml.safe_load((RL_CONFIG_DIR / name).read_text())
         assert raw["ppo"]["log_std_init"] == value, name
     cfg = tiny_config("ppo")
-    assert cfg.ppo is not None and cfg.ppo.log_std_init == -2.3
+    assert cfg.ppo is not None
+    assert -3.0 <= cfg.ppo.log_std_init <= -1.6  # the P5-D7 search range; P5-D11 winner
     model = _build_model(cfg, DummyVecEnv([FakeLanding]), 0, tmp_path)
     log_std = model.policy.log_std.detach().numpy()  # type: ignore[union-attr]
-    assert np.allclose(log_std, -2.3)
+    assert np.allclose(log_std, cfg.ppo.log_std_init)
 
 
 def test_prefetch_reset_is_optional_and_round_trips() -> None:
