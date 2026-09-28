@@ -1,0 +1,43 @@
+# P5-D10: re-run of the P5-D9 SAC search after the 2026-09-24 VM termination, all 20 trials,
+# identical Sobol points; only run_group/results_dir differ, and the base sac.yaml now sets
+# torch_threads: 4. Supersedes tune_sac.yaml, whose runs are kept and never scored.
+# Pre-registered hyperparameter search for pure SAC (docs/protocol.md P3-D1 section 5).
+#
+# Budget: <= 20 trials (trial 0 = configs/rl/sac.yaml unchanged; trials 1-19 = the first 19
+# points of one scrambled Sobol sequence, seed `sobol_seed`), each trained for 0.5 M env
+# steps on the single training seed `trial_seed`, on the P3-D2 train pool with the
+# curriculum. Same trial count as PPO; the per-trial budget follows the 2 M : 10 M SAC:PPO
+# ratio of the final runs (P3-D1).
+#
+# Score (pre-registered, identical to tune_ppo.yaml): the final checkpoint on the fixed
+# P3-D3 tune-pool draw (180 episodes, SS3-SS5, deterministic): mean success over the sea
+# states; ties -> lower pooled p95 closing speed -> lower trial index. Tune pool only.
+#
+# The reward-weight ranges are the same as tune_ppo.yaml's; structure is fixed.
+#
+# Units: steps are env control steps (1/30 s model scale each); weights dimensionless.
+
+method: sac
+base_config: configs/rl/sac.yaml
+trials_used_before_search: 0
+trials: 20
+sobol_seed: 20260928
+trial_seed: 0
+trial_steps: 500000
+run_group: tune_sac_v2          # -> artifacts/runs/tune_sac_v2/trial_XX/0/
+results_dir: results/tune/sac_v2
+
+search_space:
+  learning_rate: {targets: [sac.learning_rate], low: 1.0e-4, high: 1.0e-3, scale: log}
+  batch_size: {targets: [sac.batch_size], choices: [256, 512]}
+  tau: {targets: [sac.tau], low: 0.002, high: 0.02, scale: log}
+  learning_starts: {targets: [sac.learning_starts], choices: [5000, 10000, 25000]}
+  net_width: {targets: [policy.width], choices: [256, 512]}
+  # reward weights (shared ranges with tune_ppo.yaml)
+  w_progress: {targets: [reward.w_progress], low: 5.0, high: 20.0}
+  w_vz: {targets: [reward.w_vz], low: 0.5, high: 8.0, scale: log}
+  w_smooth: {targets: [reward.w_smooth], low: 0.01, high: 0.2, scale: log}
+  w_time: {targets: [reward.w_time], low: 0.0, high: 0.03}
+  r_success: {targets: [reward.r_success], low: 25.0, high: 100.0}
+  r_fail: {targets: [reward.r_hard_landing, reward.r_off_pad, reward.r_bounce], low: 5.0, high: 30.0}
+  r_crash: {targets: [reward.r_crash], low: 10.0, high: 50.0}

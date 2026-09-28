@@ -2514,6 +2514,98 @@ committed `configs/rl/sac.yaml`, 30 000 steps per device into scratch run direct
 - **Outputs.** `results/tune/{ppo,sac}/trials.csv` and `selection.json`. The winners are written
   to `configs/rl/{ppo,sac}.yaml` in a dated entry before any final 5-seed run starts.
 
+### P5-D10 — VM terminated mid-tuning; reconcile and resume added; SAC search re-run at 4 torch threads (2026-09-28)
+
+*Incident.*
+- The WSL VM was terminated at about 12:15 EDT on 2026-09-24. `last -x` shows no clean shutdown
+  between the 2026-09-23 18:12 boot and the 2026-09-24 16:24 boot.
+- Every live training process and both P5-D9 tuning schedulers died. The runs' logs end in
+  normal training output, with no error.
+- The cause on the Windows side (sleep, update restart, `wsl --shutdown`) is not known.
+- *State at termination.*
+  - **PPO:** trials 00–15 done; 16–17 never started. They were waiting for slots held by SAC,
+    because the two schedulers were not FIFO across each other.
+  - **SAC:** trials 00, 02, 03 and 06 done; 01, 04, 05, 07, 08 and 09 dead part-way
+    (127 k–484 k of 500 k steps); 10–19 never started.
+
+*Recovery code* (commit `f272cc5`; `make test` 438 passed, 1 skipped by design; `make lint`
+clean).
+- **Reconcile** (`scripts/reconcile_runs.py`). A run whose status says `running`, whose writing
+  process is gone, and whose status is older than 3 × max(eval interval ÷ fps, heartbeat) is
+  marked `failed`, with the reason and `reconciled_at`. Nothing else in the record changes.
+  - Applied 2026-09-28T11:46:12Z: the six dead SAC trials became `failed` ("host terminated; pid
+    dead since 2026-09-24T16:14:45–16:15:27Z"), and both sweeps became `interrupted`.
+  - No run directory was deleted or moved. The pre-change JSONs are kept in scratch.
+- **Checkpoint resume.** Periodic checkpoints now hold the resume state as well:
+  - curriculum stage and window, counters, per-worker sampler RNGs, learner RNGs;
+  - for SAC, the replay buffer.
+
+  A `failed` run can be resumed in place, with `make train-bg … RESUME=<run_dir>` or a scheduler
+  job, and the resume is recorded in `status.json` and `provenance.json`.
+  - *Not bit-exact:* in-flight episodes are dropped, VecNormalize gets one extra update, PPO
+    loses its partial rollout, and SAC loses the checkpoint step's own transitions. This is
+    documented in `rld.rl.resume`.
+  - Replaced CSV rows are first copied to `*.before_resume<k>.csv`.
+  - Identical tiny PPO and SAC runs before and after this change give identical weights, evals
+    and monitor rows, so the new checkpoint code does not change training.
+- **Search resume.**
+  - Re-invoking `make tune` skips `done` trials, starts never-run ones, and re-runs `failed` ones:
+    fresh into `<seed>_r<k>` by default, or resumed if a search sets `resume_failed: true`. It
+    refuses while any trial is live or unreconciled.
+  - `--collect` scores each trial from its latest `done` attempt and lists superseded runs.
+- **Scheduling.** All schedulers share one global FIFO by enqueue time, so the 2026-09-24
+  starvation cannot recur. The slot cost is now `ceil(0.4 × busiest pool) + torch_threads`.
+- **Bug fixed.** `collect_trials` would have crashed when scoring PPO trial 0, whose base config
+  holds no reward weights (`float(None)`). Automatic scoring would have ended as
+  `done_with_errors` with no `trials.csv`. Trial 0's row now reports the committed `reward.yaml`
+  weights it actually trains with.
+
+*SAC throughput* (`scripts/p5_sac_throughput_bench.py`; scratch run dirs, train pool only, no
+score read; 15 k timed steps after a 2 k warm-up, one measurement per cell; steps/s run alone):
+
+| width | CPU, 1 / 2 / 4 threads | CUDA, 1 / 2 / 4 threads |
+|---|---|---|
+| 256 | 80.0 / 96.1 / 103.3 | 71.8 / 71.7 / 75.0 |
+| 512 | 32.3 / 47.7 / 64.4 | 67.0 / 75.6 / 72.5 |
+
+- **Concurrent**, steps/s per run:
+  - 4 × CPU at 4 threads: 41.6 at width 512, 73.6 at width 256;
+  - 6 × CPU at 1 thread, width 512: 26.0;
+  - CUDA totals are capped at about 190–200 steps/s summed over all concurrent SAC runs,
+    whatever the width.
+- **Why tuning ran slower.** The 14–58 steps/s seen during tuning is most plausibly contention
+  with 4 concurrent PPO runs on 18 physical cores (36 logical). That mix was not reproduced.
+- **P5-D9's CPU = GPU reading** was measured at width 256 and 1 thread only. At width 512 or
+  with more threads it does not hold.
+
+*Decision (user, 2026-09-28: follow the recommendations).*
+- **Every SAC run, tuning and final, uses `device: cpu`, `torch_threads: 4`** (slot cost 8).
+  - It is the fastest per run on CPU: 1.3× at width 256 and 2× at width 512.
+  - The device is unchanged from P5-D9; only the thread count changes.
+  - `configs/rl/sac.yaml` is now `c8eda091453c9ab020e9c3f24348061ffe9732d167d5c6e46158d5b28f08ae85`
+    (superseding P5-D9's hash).
+- **The SAC search is re-run in full as `configs/rl/tune_sac_v2.yaml`**
+  (`4c2b6d7f8133e5386bde1274eab2711720ffce0f552dde7503bf89e7f41036d8`).
+  - It has the same 20 Sobol points, checked by comparing the `--dry-run` output byte for byte
+    with `tune_sac.yaml`'s.
+  - It has the same budgets, seeds and scoring rule. Only `run_group` (`tune_sac_v2`) and
+    `results_dir` (`results/tune/sac_v2`) differ, plus the base config's thread count.
+  - Every SAC trial therefore runs under one runtime setting.
+  - The `tune_sac` runs, 4 done and 6 failed, are kept on disk, **never scored**, and superseded
+    by `tune_sac_v2`.
+  - Failed trials re-run fresh (`resume_failed` defaults to false), so every trial is one
+    uninterrupted run.
+- **The PPO search completes in place.** `tune_ppo.yaml` is unchanged: trials 00–15 are skipped
+  as done, and 16–17 run fresh. The code change was verified not to alter PPO training.
+- **Launch order**, PPO first so the FIFO serves its two trials first:
+  ```
+  make tune CFG=configs/rl/tune_ppo.yaml
+  make tune CFG=configs/rl/tune_sac_v2.yaml
+  ```
+- **Recommended to the user:** make sure the host does not sleep or restart during runs.
+  Checkpoint resume limits a future loss to one checkpoint interval (PPO 1 M, SAC 250 k env
+  steps). It does not prevent the loss.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|
