@@ -286,6 +286,44 @@ class PoolSamplingEnv(gym.Wrapper[FloatArray, FloatArray, FloatArray, FloatArray
         self._discard_pending()
         self._queue = queue
 
+    def sampler_state(self) -> dict[str, Any]:
+        """Return the draw state a resumed run needs to continue this worker's stream.
+
+        The RNG state is the one the **next serial draw** would use: with a prefetched
+        episode pending, that is the state from *before* its early draw (the prefetch is
+        discarded on restore and redrawn identically). The episode in flight is not part of
+        it; a resumed worker starts at the episode after it.
+
+        Returns:
+            ``{"rank", "train_seed", "stage", "rng"}`` (``rng`` is the PCG64 state dict).
+        """
+        pending = self._pending
+        rng = pending.rng_state if pending is not None else self._rng.bit_generator.state
+        return {
+            "rank": self._rank,
+            "train_seed": self._train_seed,
+            "stage": self.stage,
+            "rng": copy.deepcopy(dict(rng)),
+        }
+
+    def restore_sampler_state(self, state: Mapping[str, Any]) -> None:
+        """Restore a :meth:`sampler_state` taken from the same worker of the same run.
+
+        Args:
+            state: From :meth:`sampler_state`.
+
+        Raises:
+            ValueError: If the rank or training seed differs.
+        """
+        if int(state["rank"]) != self._rank or int(state["train_seed"]) != self._train_seed:
+            raise ValueError(
+                f"sampler state of rank {state['rank']} seed {state['train_seed']} given to "
+                f"rank {self._rank} seed {self._train_seed}"
+            )
+        self._discard_pending()
+        self.set_stage(state["stage"])
+        self._rng.bit_generator.state = copy.deepcopy(dict(state["rng"]))
+
     def pool_keys(self) -> list[RealizationKey]:
         """Return every realization key this worker may fly, in pool order."""
         return [key_for_spec(s) for s in self._all]
@@ -538,6 +576,9 @@ class EnvFactory:
         monitor_dir: Directory for ``<rank>.monitor.csv``, or ``None`` for no Monitor.
         prefetch: Build a second landing environment and prepare each next episode on it
             in a background thread (:class:`PoolSamplingEnv`, "Reset prefetch").
+        monitor_suffix: Inserted between the rank and ``.monitor.csv``; a resumed run
+            segment writes ``<rank>.resume<k>.monitor.csv`` so that no earlier monitor file
+            is overwritten.
     """
 
     cfgs: EvalConfigs
@@ -548,6 +589,7 @@ class EnvFactory:
     stage: str | None
     monitor_dir: Path | None
     prefetch: bool = False
+    monitor_suffix: str = ""
 
     def _motion(self, spec: RealizationSpec) -> EpisodeMotionSource:
         """Return the deck-motion source of one realization."""
@@ -584,9 +626,12 @@ class EnvFactory:
         )
         if self.monitor_dir is not None:
             self.monitor_dir.mkdir(parents=True, exist_ok=True)
+            target = self.monitor_dir / f"{self.rank}{self.monitor_suffix}.monitor.csv"
+            if target.exists():  # Monitor opens with "w": never let it truncate a record
+                raise FileExistsError(f"{target} exists; a monitor file is never overwritten")
             wrapped = Monitor(
                 wrapped,
-                filename=str(self.monitor_dir / str(self.rank)),
+                filename=str(self.monitor_dir / f"{self.rank}{self.monitor_suffix}"),
                 info_keywords=MONITOR_KEYWORDS,
             )
         return wrapped

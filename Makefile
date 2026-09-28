@@ -13,10 +13,15 @@ PYTEST ?= $(shell [ -x .venv/bin/pytest ] && echo .venv/bin/pytest || echo pytes
 # (Phase 5); for `make tune` CFG is a search config, e.g. configs/rl/tune_ppo.yaml.
 CFG ?= configs/rl/ppo.yaml
 SEED ?= 0
+# `make train-bg CFG=... SEED=... RESUME=<run_dir or checkpoint dir>` continues a FAILED run in
+# place from its latest resumable checkpoint (rld.rl.resume); CFG and SEED must be the run's.
+RESUME ?=
 SEEDS ?= 0 1 2 3 4
 # Global cap on concurrently busy CPU worker slots across every run and sweep (36 logical
 # CPUs minus 2). A run's cost is its measured average core use, ceil(0.4 * max(n_envs,
-# eval.n_envs)) + 1 (rld.rl.config.ENV_WORKER_CORES): 8 for a 16-worker PPO run.
+# eval.n_envs)) + torch_threads (rld.rl.config.ENV_WORKER_CORES): 8 for a 16-worker PPO
+# run with one torch thread, 8 for an 8-worker SAC run with four.
+# Several schedulers share the cap as ONE first-in first-out queue by enqueue time.
 MAX_WORKERS ?= 34
 # Throughput measurement (Phase 0). STEPS is per (vec_cls, n_envs, act) row.
 STEPS ?= 6000
@@ -91,13 +96,17 @@ dmf-forecasters: $(DMF_CORPUS)/manifest.parquet
 # (importing pybullet prints a banner first); it refuses, exit 3, if that group and seed
 # already finished; the run then goes to nohup with stdout+stderr in
 # <run_dir>/train.log, and status.json beside it. Never tee (see dmf-forecasters above).
+# With RESUME=<failed run dir | its latest checkpoint dir>, --prepare validates the resume
+# instead (exit 3 with the reason if refused) and the run continues in that directory,
+# appending to its train.log.
 train-bg:
-	@OUT=$$($(PY) scripts/train.py --config $(CFG) --seed $(SEED) --prepare) || exit $$?; \
+	@if [ -n "$(RESUME)" ]; then RES="--resume $(RESUME)"; else RES=""; fi; \
+	OUT=$$($(PY) scripts/train.py --config $(CFG) --seed $(SEED) --prepare $$RES) || exit $$?; \
 	RUN_DIR=$$(printf '%s\n' "$$OUT" | tail -n 1); \
 	[ -d "$$RUN_DIR" ] || { echo "train-bg: no run directory from --prepare: $$OUT" >&2; exit 1; }; \
 	PYTHONUNBUFFERED=1 OMP_NUM_THREADS=$${OMP_NUM_THREADS:-1} MKL_NUM_THREADS=$${MKL_NUM_THREADS:-1} \
-		nohup $(PY) scripts/train.py --config $(CFG) --seed $(SEED) --run-dir "$$RUN_DIR" \
-		> "$$RUN_DIR/train.log" 2>&1 < /dev/null & \
+		nohup $(PY) scripts/train.py --config $(CFG) --seed $(SEED) --run-dir "$$RUN_DIR" $$RES \
+		>> "$$RUN_DIR/train.log" 2>&1 < /dev/null & \
 	echo "pid $$!"; echo "run_dir $$RUN_DIR"; echo "log $$RUN_DIR/train.log"; \
 	echo "status $$RUN_DIR/status.json"
 # Phase 5 -- rl-trainer: several seeds of one config behind the MAX_WORKERS cap. Returns at

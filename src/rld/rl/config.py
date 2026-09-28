@@ -78,7 +78,7 @@ FORBIDDEN_SEA_STATES: tuple[str, ...] = ("SS6",)
 #: (process-tree CPU sampled every second): rollout collection 6.6 cores in total at HEAD
 #: env code (5.2 with the lazy-trajectory env), the PPO update ~1 core for ~2 s per
 #: rollout, evaluation 15.5-16.7 cores for 5-17 s every ``eval.interval_steps``;
-#: time-averaged ~6.4 cores. 0.4 x 16 workers + 1 learner = 8 slots covers that, so
+#: time-averaged ~6.4 cores. 0.4 x 16 workers + 1 learner thread = 8 slots covers that, so
 #: ``MAX_WORKERS = 34`` admits four PPO runs (~26 busy cores on average). Evaluation
 #: bursts overlap only briefly; when two coincide the evaluations slow down, nothing else.
 ENV_WORKER_CORES: float = 0.4
@@ -309,12 +309,14 @@ class TrainConfig:
     def workers(self) -> int:
         """Return the scheduler slots the run occupies: its measured average core use.
 
-        ``ceil(ENV_WORKER_CORES * busiest env pool) + 1`` for the learner; see
-        :data:`ENV_WORKER_CORES` for the measurement. 8 for ``ppo.yaml`` (16 workers), 5 for
-        ``sac.yaml`` (8 workers; SAC's usage was not measured, and its synchronous gradient
-        steps leave its env workers idle more of the time, so this is conservative).
+        ``ceil(ENV_WORKER_CORES * busiest env pool)`` for the env workers, plus
+        ``torch_threads`` for the learner (a learner with ``t`` intra-op threads keeps up
+        to ``t`` cores busy during its gradient steps); see :data:`ENV_WORKER_CORES` for the
+        measurement. With one torch thread: 8 for ``ppo.yaml`` (16 workers), 5 for
+        ``sac.yaml`` (8 workers); a 4-thread SAC run costs 8.
         """
-        return math.ceil(ENV_WORKER_CORES * max(self.n_envs, self.eval.n_envs)) + 1
+        pool = math.ceil(ENV_WORKER_CORES * max(self.n_envs, self.eval.n_envs))
+        return pool + self.torch_threads
 
 
 def _take(

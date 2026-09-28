@@ -34,7 +34,9 @@ def main() -> int:
     jobs = [(str(c), s) for c in args.config for s in args.seeds]
     label = "-".join(c.stem for c in args.config)
     sweeps_dir = args.runs_root / SWEEPS_DIR.name
-    path = new_sweep("sweep", jobs, args.max_workers, sweeps_dir=sweeps_dir, label=label)
+    path = new_sweep(
+        "sweep", jobs, args.max_workers, sweeps_dir=sweeps_dir, label=label, poll_s=args.poll_s
+    )
     pid = detach_scheduler(path, args.runs_root, args.poll_s)
     print(f"sweep {path.stem}: {len(jobs)} jobs, max_workers {args.max_workers}")
     print(f"  sweep file     {path}")

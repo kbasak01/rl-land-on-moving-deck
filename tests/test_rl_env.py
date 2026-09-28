@@ -12,6 +12,7 @@ Units: steps are env control steps (1/30 s model scale each); rewards dimensionl
 """
 
 import copy
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -78,7 +79,10 @@ def _same(a: tuple[object, ...], b: tuple[object, ...]) -> bool:
 @pytest.mark.slow
 def test_vecnormalize_saved_reloaded_and_frozen(factory: EnvFactory, tmp_path: Path) -> None:
     rng = np.random.default_rng(BASE_SEED)
-    train = VecNormalize(DummyVecEnv([factory]), norm_obs=True, norm_reward=True, clip_obs=10.0)
+    # Its own monitor directory: the shared fixture's already holds 0.monitor.csv, and a
+    # monitor file is never overwritten (EnvFactory refuses).
+    own = replace(factory, monitor_dir=tmp_path / "monitor")
+    train = VecNormalize(DummyVecEnv([own]), norm_obs=True, norm_reward=True, clip_obs=10.0)
     try:
         train.seed(BASE_SEED)
         train.reset()
@@ -98,7 +102,7 @@ def test_vecnormalize_saved_reloaded_and_frozen(factory: EnvFactory, tmp_path: P
     finally:
         train.close()
 
-    loaded = load_vecnormalize(path, DummyVecEnv([factory]))
+    loaded = load_vecnormalize(path, DummyVecEnv([replace(own, monitor_dir=None)]))
     try:
         assert loaded.training is False and loaded.norm_reward is False
         assert _same(_stats(loaded), saved)  # bit-identical reload

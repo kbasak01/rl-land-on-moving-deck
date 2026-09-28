@@ -10,11 +10,16 @@ What a run does
    clip_obs=10)``. PPO runs on the CPU; SAC on ``cfg.device``.
 3. Every ``eval.interval_steps``: the tune-pool evaluation, the curriculum update and a
    ``status.json`` write (:mod:`rld.rl.callbacks`). Every ``checkpoint_interval_steps``: a
-   checkpoint with ``model.zip`` **and** ``vecnormalize.pkl``.
+   checkpoint with ``model.zip`` **and** ``vecnormalize.pkl``, plus the resume state
+   (and the SAC replay buffer) that makes it resumable.
 4. At the end: a final evaluation (unless one just ran), the ``final/`` checkpoint and
    ``status.json`` ``state: done``. On any exception -- including SIGTERM, turned into
    ``SystemExit`` -- the traceback goes to stderr (the run's ``train.log``) and
-   ``status.json`` says ``state: failed``. A failed run directory is kept, never reused.
+   ``status.json`` says ``state: failed``. A failed run directory is kept; it is never
+   reused for a *fresh* run, but it may be **resumed** in place from its latest resumable
+   checkpoint (``train(..., resume_from=...)``; every periodic checkpoint is resumable --
+   :mod:`rld.rl.resume` documents what is saved, what a resume records, and what is not
+   bit-exact). One process at a time holds ``<run_dir>/.run.lock``.
 
 Run directories
 ---------------
@@ -38,13 +43,17 @@ host seconds; actions are the shared normalised velocity setpoint (``v_max`` = 1
 scale, norm cap).
 """
 
+import fcntl
 import hashlib
 import json
 import multiprocessing
+import os
 import signal
 import subprocess
 import sys
 import traceback
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from types import FrameType
@@ -68,6 +77,7 @@ from rld.envs.observation import observation_space
 from rld.eval.envs import EvalConfigs, load_eval_configs
 from rld.provenance import environment_provenance
 from rld.rl.callbacks import (
+    REPLAY_BUFFER_FILE,
     CheckpointCallback,
     PeriodicEvalCallback,
     RunTracker,
@@ -77,6 +87,7 @@ from rld.rl.callbacks import (
     atomic_write_json,
     frozen_normalizer,
     save_checkpoint,
+    utc_now,
 )
 from rld.rl.config import (
     FORBIDDEN_SEA_STATES,
@@ -86,7 +97,18 @@ from rld.rl.config import (
     train_config_from_dict,
 )
 from rld.rl.curriculum import Curriculum
-from rld.rl.procs import pid_alive
+from rld.rl.procs import status_owner_alive
+from rld.rl.resume import (
+    ResumeError,
+    ResumePlan,
+    collect_resume_state,
+    normalizer_digest,
+    params_digest,
+    plan_resume,
+    resolve_resume_target,
+    restore_rng,
+    truncate_eval_logs,
+)
 from rld.rl.wrappers import EnvFactory
 
 __all__ = [
@@ -101,6 +123,7 @@ __all__ = [
     "git_state",
     "load_policy",
     "load_vecnormalize",
+    "prepare_resume",
     "prepare_run_dir",
     "read_status",
     "train",
@@ -214,6 +237,34 @@ def prepare_run_dir(cfg: TrainConfig, seed: int, runs_root: Path = RUNS_ROOT) ->
     raise RunDirExistsError(f"no free run directory for {cfg.run_group}/{seed}")
 
 
+def prepare_resume(cfg: TrainConfig, seed: int, target: Path) -> tuple[Path, Path]:
+    """Validate a resume without writing anything (``make train-bg RESUME=...``).
+
+    Args:
+        cfg: The training config given; must equal the run's own ``config.yaml``.
+        seed: The training seed given; must be the run's.
+        target: A failed run directory (its latest checkpoint) or that checkpoint.
+
+    Returns:
+        ``(run_dir, checkpoint)``.
+
+    Raises:
+        ResumeError: If the resume is not allowed (:func:`rld.rl.resume.plan_resume`).
+    """
+    run_dir, ckpt = resolve_resume_target(target)
+    text = yaml.safe_dump(config_to_dict(cfg), sort_keys=False)
+    plan_resume(
+        run_dir,
+        ckpt,
+        seed=seed,
+        algo=cfg.algo,
+        config_text=text,
+        config_sha256=hashlib.sha256(text.encode()).hexdigest(),
+        status=read_status(run_dir),
+    )
+    return run_dir, ckpt
+
+
 def _refuse_if_finished(run_dir: Path) -> None:
     """Raise if ``run_dir`` holds a finished or live run.
 
@@ -228,7 +279,7 @@ def _refuse_if_finished(run_dir: Path) -> None:
         return
     if status.get("state") == "done":
         raise RunDirExistsError(f"{run_dir} holds a finished run; refusing to train it again")
-    if status.get("state") == "running" and pid_alive(status.get("pid")):
+    if status.get("state") == "running" and status_owner_alive(status):
         raise RunDirExistsError(f"{run_dir} holds a live run (pid {status.get('pid')})")
 
 
@@ -407,24 +458,116 @@ def _episodes_digest(episodes: list[TuningEpisode]) -> str:
 # --------------------------------------------------------------------------- training
 
 
-def train(cfg: TrainConfig, seed: int, run_dir: Path) -> dict[str, Any]:
-    """Train one run into an existing, empty run directory.
+def _record_resume_provenance(run_dir: Path, plan: ResumePlan) -> None:
+    """Append the resume record, with this process's environment, to ``provenance.json``.
+
+    Every original field is kept; only the ``resumes`` list grows.
+    """
+    path = run_dir / "provenance.json"
+    data = json.loads(path.read_text())
+    data["resumes"] = [
+        *(data.get("resumes") or []),
+        {**plan.record, "environment": environment_provenance(REPO_ROOT)},
+    ]
+    atomic_write_json(path, data)
+
+
+@contextmanager
+def _run_lock(run_dir: Path) -> Iterator[None]:
+    """Hold ``<run_dir>/.run.lock`` exclusively for the life of one training process.
+
+    Two processes can never train into one run directory at once (e.g. a hand resume and a
+    scheduler resume of the same failed run).
+
+    Raises:
+        RunDirExistsError: If another process holds it.
+    """
+    with (run_dir / ".run.lock").open("a") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RunDirExistsError(f"{run_dir} is being trained by another process") from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _load_model(
+    cfg: TrainConfig, plan: ResumePlan, venv: VecNormalize, run_dir: Path
+) -> BaseAlgorithm:
+    """Load a resumable checkpoint's model (and SAC replay buffer) onto the new envs.
+
+    Args:
+        cfg: The training config.
+        plan: The validated resume.
+        venv: The restored training ``VecNormalize``.
+        run_dir: The run directory (TensorBoard under ``tb/``).
+
+    Returns:
+        The model, with ``_last_obs`` cleared so that ``learn`` resets the new envs.
+    """
+    algo_cls: Any = PPO if cfg.algo == "ppo" else SAC
+    device = "cpu" if cfg.algo == "ppo" else cfg.device
+    model: BaseAlgorithm = algo_cls.load(
+        str(plan.checkpoint / "model.zip"), env=venv, device=device, force_reset=True
+    )
+    model.tensorboard_log = str(run_dir / "tb")
+    if cfg.algo == "sac":
+        model.load_replay_buffer(str(plan.checkpoint / REPLAY_BUFFER_FILE))  # type: ignore[attr-defined]
+    model._last_obs = None  # SB3 saves it in model.zip; the envs are new
+    return model
+
+
+def train(
+    cfg: TrainConfig, seed: int, run_dir: Path, *, resume_from: Path | None = None
+) -> dict[str, Any]:
+    """Train one run into an existing run directory, fresh or resumed from a checkpoint.
 
     Args:
         cfg: The training config.
         seed: The training seed.
-        run_dir: From :func:`prepare_run_dir`; must exist and hold no ``status.json``.
+        run_dir: From :func:`prepare_run_dir` (fresh: must hold no ``status.json``), or the
+            failed run to continue (resume).
+        resume_from: A resumable checkpoint of ``run_dir`` (its latest), or ``None`` for a
+            fresh run. See :mod:`rld.rl.resume` for what is restored, what is recorded and
+            what is not bit-exact.
 
     Returns:
         The final ``status.json`` payload (``state: done``).
 
     Raises:
-        FileExistsError: If ``run_dir`` already holds a status file.
+        FileExistsError: If a fresh ``run_dir`` already holds a status file.
+        ResumeError: If the resume is not allowed (the message says why).
         BaseException: Whatever training raised, after ``status.json`` says ``failed``.
     """
     if not run_dir.is_dir():
         raise FileNotFoundError(f"run directory {run_dir} does not exist; use prepare_run_dir")
-    if (run_dir / "status.json").exists():
+    if resume_from is None and (run_dir / "status.json").exists():
+        raise FileExistsError(f"{run_dir} already holds a run; never reused")
+    with _run_lock(run_dir):
+        return _train_locked(cfg, seed, run_dir, resume_from)
+
+
+def _train_locked(
+    cfg: TrainConfig, seed: int, run_dir: Path, resume_from: Path | None
+) -> dict[str, Any]:
+    """Body of :func:`train`, under the run lock."""
+    resolved = config_to_dict(cfg)
+    config_text = yaml.safe_dump(resolved, sort_keys=False)
+    config_sha = hashlib.sha256(config_text.encode()).hexdigest()
+    plan: ResumePlan | None = None
+    if resume_from is not None:
+        plan = plan_resume(
+            run_dir,
+            Path(resume_from),
+            seed=seed,
+            algo=cfg.algo,
+            config_text=config_text,
+            config_sha256=config_sha,
+            status=read_status(run_dir),
+        )
+    elif (run_dir / "status.json").exists():
         raise FileExistsError(f"{run_dir} already holds a run; never reused")
     previous = signal.getsignal(signal.SIGTERM)
     try:
@@ -433,40 +576,95 @@ def train(cfg: TrainConfig, seed: int, run_dir: Path) -> dict[str, Any]:
         previous = None
 
     torch.set_num_threads(cfg.torch_threads)
-    resolved = config_to_dict(cfg)
-    config_text = yaml.safe_dump(resolved, sort_keys=False)
-    (run_dir / "config.yaml").write_text(config_text)
-    if cfg.source is not None and cfg.source.exists():
-        (run_dir / "config_source.yaml").write_bytes(cfg.source.read_bytes())
     git = git_state(REPO_ROOT)
-    started_steps = 0
     run_id = f"{cfg.run_group.replace('/', '-')}-s{seed}-{run_dir.name}"
+    static: dict[str, Any] = {
+        "method": cfg.method,
+        "seed": int(seed),
+        "run_id": run_id,
+        "run_group": cfg.run_group,
+        "run_dir": str(run_dir),
+        "algo": cfg.algo,
+        "budget": cfg.total_steps,
+        "eval_interval_steps": cfg.eval.interval_steps,
+        "status_interval_s": cfg.status_interval_s,
+        "n_envs": cfg.n_envs,
+        "workers": cfg.workers,
+        "device": "cpu" if cfg.algo == "ppo" else cfg.device,
+        "git_sha": git["git_sha"],
+        "git_dirty": git["git_dirty"],
+        "config": None if cfg.source is None else str(cfg.source),
+        "config_sha256": config_sha,
+        "log": str(run_dir / "train.log"),
+        "resumed_from": None,
+    }
+    if plan is None:
+        (run_dir / "config.yaml").write_text(config_text)
+        if cfg.source is not None and cfg.source.exists():
+            (run_dir / "config_source.yaml").write_bytes(cfg.source.read_bytes())
+        status = StatusWriter(run_dir / "status.json", static)
+        started_steps = 0
+    else:
+        prev = plan.previous
+        # The run's identity is its first segment's; the commit it was started from stays
+        # in git_sha, each resume's own commit is in its record.
+        for key in ("run_id", "run_dir", "git_sha", "git_dirty", "config"):
+            static[key] = prev.get(key, static[key])
+        plan.record.update(
+            {
+                "segment": plan.segment,
+                "resumed_at": utc_now(),
+                "resumed_from": str(plan.checkpoint),
+                "resume_steps": plan.steps,
+                "previous_state": prev.get("state"),
+                "previous_error": prev.get("error"),
+                "previous_steps": prev.get("steps"),
+                "previous_updated": prev.get("updated"),
+                "previous_pid": prev.get("pid"),
+                "previous_reconciled_at": prev.get("reconciled_at"),
+                "abandoned_steps": max(int(prev.get("steps") or 0) - plan.steps, 0),
+                "git_sha": git["git_sha"],
+                "git_dirty": git["git_dirty"],
+                "pid": os.getpid(),
+            }
+        )
+        static.update(
+            {
+                "resumed_from": str(plan.checkpoint),
+                "resumed_at": plan.record["resumed_at"],
+                "resume_steps": plan.steps,
+                "resumes": [*(prev.get("resumes") or []), plan.record],
+            }
+        )
+        status = StatusWriter(
+            run_dir / "status.json",
+            static,
+            started=prev.get("started"),
+            wall_offset_s=float(prev.get("wall_s") or 0.0),
+            cpu_offset_h=float(prev.get("cpu_hours") or 0.0),
+            steps_offset=plan.steps,
+        )
+        started_steps = plan.steps
+        print(
+            f"resuming {run_dir} from {plan.checkpoint.name} (segment {plan.segment}, "
+            f"{plan.record['abandoned_steps']} steps after the checkpoint abandoned)",
+            flush=True,
+        )
+        if git["git_sha"] != prev.get("git_sha"):
+            print(
+                f"warning: resuming at commit {git['git_sha']} but the run started at "
+                f"{prev.get('git_sha')}; recorded in resumes[-1]",
+                flush=True,
+            )
 
     cfgs = build_env_configs(cfg)
-    status = StatusWriter(
-        run_dir / "status.json",
-        {
-            "method": cfg.method,
-            "seed": int(seed),
-            "run_id": run_id,
-            "run_group": cfg.run_group,
-            "run_dir": str(run_dir),
-            "algo": cfg.algo,
-            "budget": cfg.total_steps,
-            "eval_interval_steps": cfg.eval.interval_steps,
-            "status_interval_s": cfg.status_interval_s,
-            "n_envs": cfg.n_envs,
-            "workers": cfg.workers,
-            "device": "cpu" if cfg.algo == "ppo" else cfg.device,
-            "git_sha": git["git_sha"],
-            "git_dirty": git["git_dirty"],
-            "config": None if cfg.source is None else str(cfg.source),
-            "config_sha256": hashlib.sha256(config_text.encode()).hexdigest(),
-            "log": str(run_dir / "train.log"),
-            "resumed_from": None,
-        },
-    )
     tracker = RunTracker(status, Curriculum(cfg.curriculum))
+    if plan is not None:
+        tracker.curriculum.restore(plan.state["curriculum"])
+        saved = plan.state["tracker"]
+        tracker.last_eval = saved["last_eval"]
+        tracker.eval_env_steps = int(saved["eval_env_steps"])
+        tracker.eval_wall_s = float(saved["eval_wall_s"])
     tracker.write("running", started_steps)
 
     venv: VecNormalize | None = None
@@ -479,27 +677,48 @@ def train(cfg: TrainConfig, seed: int, run_dir: Path) -> dict[str, Any]:
         tune_keys = {key_for_spec(s) for s in tune_pool}
         if any(key_for_spec(e.realization) not in tune_keys for e in episodes):
             raise RuntimeError("an evaluation episode is not a tune-pool realization")
-        atomic_write_json(
-            run_dir / "provenance.json",
-            {
-                **environment_provenance(REPO_ROOT),
-                **git,
-                "seed": int(seed),
-                "train_pool_n": len(train_pool),
-                "tune_pool_n": len(tune_pool),
-                "eval_episodes_n": len(episodes),
-                "eval_episodes_sha256": _episodes_digest(episodes),
-                "eval_tuning_config": str(cfg.eval.tuning_config),
-                "reward": vars(cfgs.reward),
-            },
-        )
+        episodes_sha = _episodes_digest(episodes)
+        if plan is None:
+            atomic_write_json(
+                run_dir / "provenance.json",
+                {
+                    **environment_provenance(REPO_ROOT),
+                    **git,
+                    "seed": int(seed),
+                    "train_pool_n": len(train_pool),
+                    "tune_pool_n": len(tune_pool),
+                    "eval_episodes_n": len(episodes),
+                    "eval_episodes_sha256": episodes_sha,
+                    "eval_tuning_config": str(cfg.eval.tuning_config),
+                    "reward": vars(cfgs.reward),
+                },
+            )
+        else:
+            original = json.loads((run_dir / "provenance.json").read_text())
+            if original.get("eval_episodes_sha256") != episodes_sha:
+                raise ResumeError(
+                    "the evaluation draw differs from the one this run started with "
+                    f"({original.get('eval_episodes_sha256')} != {episodes_sha})"
+                )
+            plan.record["eval_logs"] = truncate_eval_logs(
+                run_dir, int(plan.state["eval_cb"]["n_evals"]), plan.segment
+            )
         stage = tracker.curriculum.sampling_stage
         if cfg.vec_env == "subproc":
             forkserver_preload()
         prefetch = cfg.prefetch_reset
+        suffix = "" if plan is None else f".resume{plan.segment}"
         factories = [
             EnvFactory(
-                cfgs, tuple(train_pool), cfg.pad, seed, rank, stage, run_dir / "monitor", prefetch
+                cfgs,
+                tuple(train_pool),
+                cfg.pad,
+                seed,
+                rank,
+                stage,
+                run_dir / "monitor",
+                prefetch,
+                suffix,
             )
             for rank in range(cfg.n_envs)
         ]
@@ -507,20 +726,47 @@ def train(cfg: TrainConfig, seed: int, run_dir: Path) -> dict[str, Any]:
             EnvFactory(cfgs, tuple(tune_pool), cfg.pad, seed, rank, None, None, prefetch)
             for rank in range(cfg.eval.n_envs)
         ]
-        venv = VecNormalize(
-            _vec(factories, cfg.vec_env),
-            training=True,
-            norm_obs=cfg.normalize.norm_obs,
-            norm_reward=cfg.normalize.norm_reward,
-            clip_obs=cfg.normalize.clip_obs,
-            clip_reward=cfg.normalize.clip_reward,
-            gamma=cfg.gamma,
-        )
+        if plan is None:
+            venv = VecNormalize(
+                _vec(factories, cfg.vec_env),
+                training=True,
+                norm_obs=cfg.normalize.norm_obs,
+                norm_reward=cfg.normalize.norm_reward,
+                clip_obs=cfg.normalize.clip_obs,
+                clip_reward=cfg.normalize.clip_reward,
+                gamma=cfg.gamma,
+            )
+        else:
+            venv = VecNormalize.load(
+                str(plan.checkpoint / "vecnormalize.pkl"), _vec(factories, cfg.vec_env)
+            )
+            venv.training = True
+            venv.norm_reward = cfg.normalize.norm_reward
         evaluator = TunePoolEvaluator(
             eval_factories, episodes, cfg.vec_env, deterministic=cfg.eval.deterministic
         )
-        model = _build_model(cfg, venv, seed, run_dir)
+        if plan is None:
+            model = _build_model(cfg, venv, seed, run_dir)
+        else:
+            model = _load_model(cfg, plan, venv, run_dir)
+            samplers = plan.state["samplers"]
+            if len(samplers) != cfg.n_envs:
+                raise ResumeError(f"checkpoint has {len(samplers)} samplers, run {cfg.n_envs}")
+            for rank, sampler in enumerate(samplers):
+                venv.env_method("restore_sampler_state", sampler, indices=[rank])
+            restore_rng(plan.state["rng"], model)
+            restored: dict[str, Any] = {
+                "params_sha256": params_digest(model),
+                "vecnormalize_sha256": normalizer_digest(venv),
+                "num_timesteps": int(model.num_timesteps),
+            }
+            buffer = getattr(model, "replay_buffer", None)
+            if buffer is not None:
+                restored["replay_buffer_size"] = int(buffer.size())
+            plan.record["restored"] = restored
+            _record_resume_provenance(run_dir, plan)
         train_venv = venv
+        train_model = model
 
         def broadcast(new_stage: str | None) -> None:
             train_venv.env_method("set_stage", new_stage)
@@ -529,21 +775,52 @@ def train(cfg: TrainConfig, seed: int, run_dir: Path) -> dict[str, Any]:
             return train_venv
 
         eval_cb = PeriodicEvalCallback(
-            evaluator, tracker, run_dir, cfg.method, cfg.eval.interval_steps, broadcast, get_norm
+            evaluator,
+            tracker,
+            run_dir,
+            cfg.method,
+            cfg.eval.interval_steps,
+            broadcast,
+            get_norm,
+            tb_name="eval" if plan is None else f"eval_resume{plan.segment}",
         )
-        callbacks = CallbackList(
-            [
-                eval_cb,
-                CheckpointCallback(run_dir, cfg.checkpoint_interval_steps, get_norm, tracker),
-                StatusCallback(tracker, cfg.status_interval_s),
-            ]
+        the_eval_cb = eval_cb
+
+        def resume_state(next_ckpt: int) -> dict[str, Any]:
+            return collect_resume_state(
+                model=train_model,
+                venv=train_venv,
+                tracker=tracker,
+                eval_cb=the_eval_cb,
+                next_ckpt=next_ckpt,
+                seed=seed,
+                algo=cfg.algo,
+                config_sha256=config_sha,
+            )
+
+        ckpt_cb = CheckpointCallback(
+            run_dir, cfg.checkpoint_interval_steps, get_norm, tracker, resume_state
         )
-        model.learn(
-            total_timesteps=cfg.total_steps,
-            callback=callbacks,
-            log_interval=cfg.log_interval,
-            tb_log_name=cfg.algo,
-        )
+        if plan is not None:
+            eval_cb.restore_counters(plan.state["eval_cb"])
+            ckpt_cb.next_ckpt = int(plan.state["next_ckpt"])
+            tracker.write("running", started_steps)
+        callbacks = CallbackList([eval_cb, ckpt_cb, StatusCallback(tracker, cfg.status_interval_s)])
+        if plan is None:
+            model.learn(
+                total_timesteps=cfg.total_steps,
+                callback=callbacks,
+                log_interval=cfg.log_interval,
+                tb_log_name=cfg.algo,
+            )
+        else:
+            model.learn(
+                total_timesteps=max(cfg.total_steps - int(model.num_timesteps), 0),
+                callback=callbacks,
+                log_interval=cfg.log_interval,
+                tb_log_name=f"{cfg.algo}_resume{plan.segment}",
+                reset_num_timesteps=False,
+            )
         steps = int(model.num_timesteps)
         if eval_cb.last_eval_steps != steps:
             eval_cb.run_eval(steps)
@@ -570,7 +847,7 @@ def train(cfg: TrainConfig, seed: int, run_dir: Path) -> dict[str, Any]:
     except BaseException as exc:
         traceback.print_exc(file=sys.stderr)
         sys.stderr.flush()
-        steps = 0 if model is None else int(model.num_timesteps)
+        steps = started_steps if model is None else int(model.num_timesteps)
         status.write(
             "failed",
             steps=steps,

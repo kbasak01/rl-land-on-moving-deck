@@ -40,27 +40,80 @@ def read_evals(run_dir: Path) -> pd.DataFrame:
     return pd.read_csv(run_dir / "evals.csv").sort_values("steps").reset_index(drop=True)
 
 
-def read_monitor(run_dir: Path) -> pd.DataFrame:
+def _monitor_segment(name: str) -> int:
+    """Return the resume segment of a monitor file: ``<rank>.resume<k>.monitor.csv`` -> k."""
+    parts = name.split(".")
+    tag = parts[1] if len(parts) > 3 else ""
+    return int(tag[len("resume") :]) if tag.startswith("resume") and tag[6:].isdigit() else 0
+
+
+def _resume_cutoffs(run_dir: Path) -> dict[int, float]:
+    """Return, per resume segment ``k``, the Unix time its checkpoint was saved.
+
+    Training episodes of earlier segments that ended after that time belong to the branch
+    the resume abandoned.
+    """
+    try:
+        status = json.loads((run_dir / "status.json").read_text())
+    except (OSError, ValueError):
+        return {}
+    out: dict[int, float] = {}
+    for record in status.get("resumes") or []:
+        try:
+            meta = json.loads((Path(record["resumed_from"]) / "checkpoint.json").read_text())
+            saved = meta.get("saved_unix")
+            out[int(record["segment"])] = (
+                float(saved) if saved is not None else pd.Timestamp(meta["saved"]).timestamp()
+            )
+        except (OSError, ValueError, KeyError):
+            continue
+    return out
+
+
+def read_monitor(run_dir: Path, include_abandoned: bool = False) -> pd.DataFrame:
     """Read every worker's monitor file into one frame with cumulative steps.
+
+    A resumed run (:mod:`rld.rl.resume`) has one file per worker per segment; each file's
+    ``t`` is relative to its own start, so rows are ordered by absolute time
+    (``t_start`` from the file header + ``t``). Episodes of an earlier segment that ended
+    after the checkpoint a later segment resumed from belong to the abandoned branch and
+    are dropped unless ``include_abandoned``.
 
     Args:
         run_dir: The run directory.
+        include_abandoned: Keep the abandoned branch's episodes (flagged ``abandoned``).
 
     Returns:
         Columns ``r`` (episode return), ``l`` (length, steps), ``t`` (host seconds since
-        start) plus the logged info keys, sorted by ``t``, with ``steps`` = cumulative
-        ``l`` across all workers (the approximate training step at each episode's end).
+        its file's start), ``t_abs`` (Unix seconds), ``segment``, ``abandoned``, plus the
+        logged info keys, sorted by ``t_abs``, with ``steps`` = cumulative ``l`` across all
+        workers (the approximate training step at each episode's end).
     """
     frames = []
     for path in sorted((run_dir / "monitor").glob("*.monitor.csv")):
         with path.open() as handle:
             header = handle.readline()
-            if not header.startswith("#"):
+            t_start = 0.0
+            if header.startswith("#"):
+                try:
+                    t_start = float(json.loads(header[1:]).get("t_start", 0.0))
+                except ValueError:
+                    t_start = 0.0
+            else:
                 handle.seek(0)
-            frames.append(pd.read_csv(handle))
+            frame = pd.read_csv(handle)
+        frame["t_abs"] = t_start + frame["t"]
+        frame["segment"] = _monitor_segment(path.name)
+        frames.append(frame)
     if not frames:
-        return pd.DataFrame(columns=["r", "l", "t", "steps"])
-    df = pd.concat(frames, ignore_index=True).sort_values("t").reset_index(drop=True)
+        return pd.DataFrame(columns=["r", "l", "t", "t_abs", "segment", "abandoned", "steps"])
+    df = pd.concat(frames, ignore_index=True)
+    df["abandoned"] = False
+    for segment, saved in _resume_cutoffs(run_dir).items():
+        df.loc[(df["segment"] < segment) & (df["t_abs"] > saved), "abandoned"] = True
+    if not include_abandoned:
+        df = df[~df["abandoned"]]
+    df = df.sort_values("t_abs").reset_index(drop=True)
     df["steps"] = df["l"].cumsum()
     return df
 

@@ -20,6 +20,19 @@ Procedure (``configs/rl/tune_<method>.yaml``)
   :func:`rld.control.tuning.select_trial`, the rule the baselines were selected by. A
   failed trial is listed with ``state = failed`` and cannot win; it is never dropped.
 
+* **Re-invoking a search** (``make tune`` again on the same config, e.g. after a host
+  restart; :func:`plan_trials`): a trial with a ``done`` run is skipped; a trial whose
+  latest run ``failed`` is re-run -- resumed in place from that run's latest resumable
+  checkpoint if the search config says ``resume_failed: true`` and one exists
+  (:mod:`rld.rl.resume`), otherwise trained afresh into the next ``<seed>_r<k>``
+  directory; a trial never started is started. A live or unreconciled (``running`` with a
+  dead writer) trial run makes the re-invocation refuse. ``resume_failed`` is optional and
+  defaults to ``false``: a fresh re-run is the protocol-clean choice (one uninterrupted
+  training pass per trial); a resumed trial is flagged in ``trials.csv``.
+* **Collection** scores each trial from its **latest** ``done`` run (run directories
+  ordered by their numeric ``_r<k>`` suffix) and lists every other run directory of the
+  trial -- failed or abandoned attempts it supersedes -- in ``superseded_runs``.
+
 Nothing here reads ``results/episodes/``; the tune pool is the only scoring data.
 
 Outputs: ``<results_dir>/configs/trial_XX.yaml`` (the materialised trial configs, written
@@ -48,10 +61,12 @@ from rld.rl.config import RUNS_ROOT, apply_overrides, load_train_config, train_c
 __all__ = [
     "MAX_TRIALS",
     "SearchParam",
+    "TrialPlan",
     "TuneConfig",
     "collect_trials",
     "load_tune_config",
     "materialize_trials",
+    "plan_trials",
     "trial_points",
     "trial_raw_configs",
     "trial_run_dirs",
@@ -117,6 +132,9 @@ class TuneConfig:
         results_dir: Where configs, ``trials.csv`` and ``selection.json`` go.
         params: The search dimensions, in Sobol coordinate order.
         source: The YAML file.
+        resume_failed: On re-invocation, resume a failed trial from its latest resumable
+            checkpoint instead of re-training it from scratch (optional key, default
+            False).
     """
 
     method: str
@@ -130,6 +148,7 @@ class TuneConfig:
     results_dir: Path
     params: tuple[SearchParam, ...]
     source: Path
+    resume_failed: bool = False
 
 
 def _rel(path: Path) -> str:
@@ -173,10 +192,14 @@ def load_tune_config(path: Path) -> TuneConfig:
         "results_dir",
         "search_space",
     )
+    optional = ("resume_failed",)
     if missing := sorted(set(needed) - set(raw)):
         raise ValueError(f"{path}: missing {missing} (is this a tune_*.yaml?)")
-    if unknown := sorted(set(raw) - set(needed)):
+    if unknown := sorted(set(raw) - set(needed) - set(optional)):
         raise ValueError(f"{path}: unknown keys {unknown}")
+    resume_failed = raw.get("resume_failed", False)
+    if not isinstance(resume_failed, bool):
+        raise ValueError(f"{path}: resume_failed must be true or false")
     params: list[SearchParam] = []
     for name, spec in dict(raw["search_space"]).items():
         spec = dict(spec)
@@ -210,6 +233,7 @@ def load_tune_config(path: Path) -> TuneConfig:
         results_dir=_abs(raw["results_dir"]),
         params=tuple(params),
         source=path,
+        resume_failed=resume_failed,
     )
     if not 1 <= cfg.trials <= MAX_TRIALS:
         raise ValueError(f"{path}: trials must be in [1, {MAX_TRIALS}] (P3-D1), got {cfg.trials}")
@@ -255,6 +279,20 @@ def _get(raw: Mapping[str, Any], dotted: str) -> Any:
             return None
         node = node[part]
     return node
+
+
+def _base_value(base: Mapping[str, Any], dotted: str) -> Any:
+    """Return the value a base config trains with for one search target.
+
+    A ``reward.<weight>`` the base config does not override (``reward: {}``) is the
+    committed ``configs/env/reward.yaml`` weight -- the value trial 0 actually flies with.
+    """
+    value = _get(base, dotted)
+    if value is None and dotted.startswith("reward."):
+        from rld.envs.config import REWARD_CONFIG, load_reward
+
+        value = getattr(load_reward(REWARD_CONFIG), dotted.split(".", 1)[1])
+    return value
 
 
 def trial_raw_configs(cfg: TuneConfig) -> list[tuple[int, dict[str, Any]]]:
@@ -318,13 +356,97 @@ def materialize_trials(cfg: TuneConfig) -> list[Path]:
     return paths
 
 
+def _attempt(name: str, seed: str) -> int | None:
+    """Return the attempt number of a run directory name: ``<seed>`` -> 1, ``<seed>_r<k>`` -> k."""
+    if name == seed:
+        return 1
+    prefix = f"{seed}_r"
+    if name.startswith(prefix) and name[len(prefix) :].isdigit():
+        return int(name[len(prefix) :])
+    return None
+
+
 def trial_run_dirs(cfg: TuneConfig, index: int, runs_root: Path = RUNS_ROOT) -> list[Path]:
-    """Return every run directory of one trial (the original and any ``_r<k>`` reruns)."""
+    """Return every run directory of one trial, oldest attempt first.
+
+    The original ``<seed>`` and each rerun ``<seed>_r<k>``, ordered by ``k`` numerically
+    (``_r10`` after ``_r9``, which a string sort gets wrong).
+    """
     parent = runs_root / cfg.run_group / f"trial_{index:02d}"
     seed = str(cfg.trial_seed)
-    return sorted(
-        p for p in parent.glob(f"{seed}*") if p.name == seed or p.name.startswith(f"{seed}_r")
-    )
+    found = [(k, p) for p in parent.glob(f"{seed}*") if (k := _attempt(p.name, seed)) is not None]
+    return [p for _, p in sorted(found)]
+
+
+@dataclass(frozen=True)
+class TrialPlan:
+    """What a (re-)invoked search does with one trial.
+
+    Attributes:
+        trial: Trial index.
+        action: ``"skip_done"`` (a run is done), ``"fresh"`` (never started, or re-train a
+            failed trial from scratch into the next ``_r<k>``), ``"resume"`` (continue the
+            latest failed run from its latest resumable checkpoint), ``"live"`` (a run is
+            still training) or ``"unreconciled"`` (a run says ``running`` but its process
+            is gone).
+        run_dir: The run that decided it (``None`` for a never-started trial).
+        resume_from: The checkpoint for ``"resume"``, else ``None``.
+    """
+
+    trial: int
+    action: str
+    run_dir: Path | None
+    resume_from: Path | None = None
+
+
+def _status(run_dir: Path) -> dict[str, Any]:
+    """Return a run's ``status.json`` or ``{}``."""
+    try:
+        loaded: Any = json.loads((run_dir / "status.json").read_text())
+    except (OSError, ValueError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def plan_trials(cfg: TuneConfig, runs_root: Path = RUNS_ROOT) -> list[TrialPlan]:
+    """Decide, per trial, what re-invoking the search does (module docstring).
+
+    Args:
+        cfg: The search config (``resume_failed`` decides between resume and fresh).
+        runs_root: Root of all runs.
+
+    Returns:
+        One plan per trial, in trial order.
+    """
+    from rld.rl.procs import status_owner_alive
+    from rld.rl.resume import latest_resumable_checkpoint
+
+    plans = []
+    for index in range(cfg.trials):
+        dirs = trial_run_dirs(cfg, index, runs_root)
+        statuses = [(d, _status(d)) for d in dirs]
+        done = [d for d, s in statuses if s.get("state") == "done"]
+        running = [(d, s) for d, s in statuses if s.get("state") == "running"]
+        if done:
+            plans.append(TrialPlan(index, "skip_done", done[-1]))
+            continue
+        if live := [d for d, s in running if status_owner_alive(s)]:
+            plans.append(TrialPlan(index, "live", live[-1]))
+            continue
+        if running:
+            plans.append(TrialPlan(index, "unreconciled", running[-1][0]))
+            continue
+        failed = [d for d, s in statuses if s.get("state") == "failed"]
+        if not failed:
+            plans.append(TrialPlan(index, "fresh", None))
+            continue
+        latest = failed[-1]
+        ckpt = latest_resumable_checkpoint(latest) if cfg.resume_failed else None
+        if ckpt is not None:
+            plans.append(TrialPlan(index, "resume", latest, ckpt))
+        else:
+            plans.append(TrialPlan(index, "fresh", latest))
+    return plans
 
 
 def _final_rows(run_dir: Path) -> list[dict[str, Any]]:
@@ -371,37 +493,42 @@ def collect_trials(cfg: TuneConfig, runs_root: Path = RUNS_ROOT) -> list[dict[st
     sea_states = list(load_train_config(cfg.base_config).curriculum.stages)
     rows: list[dict[str, Any]] = []
     scored: list[tuple[int, TrialResult]] = []
+    superseded_by_trial: dict[int, list[str]] = {}
     for index, point in enumerate(points):
-        values = {p.name: point.get(p.name, _get(base, p.targets[0])) for p in cfg.params}
+        values = {p.name: point.get(p.name, _base_value(base, p.targets[0])) for p in cfg.params}
         dirs = trial_run_dirs(cfg, index, runs_root)
-        done = [
-            d
-            for d in dirs
-            if (
-                json.loads((d / "status.json").read_text()) if (d / "status.json").exists() else {}
-            ).get("state")
-            == "done"
-        ]
+        statuses = {d: _status(d) for d in dirs}
+        done = [d for d in dirs if statuses[d].get("state") == "done"]
         row: dict[str, Any] = {"trial": index, **{f"param_{k}": v for k, v in values.items()}}
+        chosen = done[-1] if done else (dirs[-1] if dirs else None)
+        superseded = [
+            f"{d.name}:{statuses[d].get('state', 'no_status')}" for d in dirs if d != chosen
+        ]
+        superseded_by_trial[index] = superseded
         if not done:
             state = "missing" if not dirs else "failed"
             row.update(
                 {
                     "state": state,
                     "run_dir": str(dirs[-1]) if dirs else "",
+                    "superseded_runs": ";".join(superseded),
                     "mean_success": float("nan"),
                 }
             )
             rows.append(row)
             continue
         run_dir = done[-1]
-        status = json.loads((run_dir / "status.json").read_text())
+        status = statuses[run_dir]
         result = summarise_trial(cfg.method, index, values, _final_rows(run_dir), sea_states)
         scored.append((index, result))
+        resumes = status.get("resumes") or []
         row.update(
             {
                 "state": "done",
                 "run_dir": str(run_dir),
+                "superseded_runs": ";".join(superseded),
+                "resumed": bool(resumes),
+                "resume_steps": ";".join(str(r.get("resume_steps")) for r in resumes),
                 "steps": status.get("steps"),
                 "wall_s": status.get("wall_s"),
                 "cpu_hours": status.get("cpu_hours"),
@@ -439,6 +566,9 @@ def collect_trials(cfg: TuneConfig, runs_root: Path = RUNS_ROOT) -> list[dict[st
         "trials_used_before_search": cfg.trials_used_before_search,
         "n_done": len(scored),
         "tune_config": _rel(cfg.source),
+        "scored_from": "each trial's latest done run directory",
+        "superseded_runs": {str(k): v for k, v in superseded_by_trial.items() if v},
+        "resumed_trials": [r["trial"] for r in rows if r.get("resumed")],
     }
     (cfg.results_dir / "selection.json").write_text(
         json.dumps(selection, indent=2, default=str) + "\n"

@@ -45,6 +45,7 @@ import copy
 import csv
 import json
 import os
+import pickle
 import socket
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -72,6 +73,8 @@ from rld.rl.procs import tree_cpu_seconds
 from rld.rl.wrappers import EnvFactory
 
 __all__ = [
+    "REPLAY_BUFFER_FILE",
+    "RESUME_STATE_FILE",
     "STATUS_KEYS",
     "CheckpointCallback",
     "PeriodicEvalCallback",
@@ -179,16 +182,32 @@ def frozen_normalizer(normalizer: VecNormalize) -> VecNormalize:
     return normalizer_from_state(normalizer_state(normalizer))
 
 
+#: File names inside a checkpoint directory.
+RESUME_STATE_FILE: str = "resume_state.pkl"
+REPLAY_BUFFER_FILE: str = "replay_buffer.pkl"
+
+
 def save_checkpoint(
-    model: BaseAlgorithm, normalizer: VecNormalize | None, directory: Path, meta: Mapping[str, Any]
+    model: BaseAlgorithm,
+    normalizer: VecNormalize | None,
+    directory: Path,
+    meta: Mapping[str, Any],
+    resume_state: Mapping[str, Any] | None = None,
 ) -> Path:
     """Save the model and its normalisation statistics together, atomically.
+
+    With ``resume_state`` the checkpoint is also **resumable**
+    (:func:`rld.rl.resume.resume_checkpoint`): the pickled training state goes to
+    ``resume_state.pkl`` and, for an off-policy model, the replay buffer to
+    ``replay_buffer.pkl`` (SB3 ``save_replay_buffer``). ``checkpoint.json`` records which.
 
     Args:
         model: The SB3 model.
         normalizer: The training ``VecNormalize`` (``None`` only if normalisation is off).
         directory: Final checkpoint directory; must not exist yet.
         meta: Extra fields for ``checkpoint.json`` (steps, curriculum stage, ...).
+        resume_state: Everything else a run needs to continue (curriculum window, RNG
+            states, callback counters, ...), or ``None`` for a model-only checkpoint.
 
     Returns:
         ``directory``.
@@ -198,12 +217,23 @@ def save_checkpoint(
     """
     if directory.exists():
         raise FileExistsError(f"checkpoint {directory} exists; refusing to overwrite")
-    tmp = directory.with_name(f".{directory.name}.tmp")
+    # The pid keeps a half-written directory left by a killed process from blocking the
+    # resumed run when it reaches the same step (that leftover is kept, never deleted).
+    tmp = directory.with_name(f".{directory.name}.{os.getpid()}.tmp")
     tmp.mkdir(parents=True, exist_ok=False)
     model.save(str(tmp / "model.zip"))
     if normalizer is not None:
         normalizer.save(str(tmp / "vecnormalize.pkl"))
-    atomic_write_json(tmp / "checkpoint.json", {**meta, "saved": utc_now()})
+    extra: dict[str, Any] = {"resumable": resume_state is not None, "replay_buffer": False}
+    if resume_state is not None:
+        with (tmp / RESUME_STATE_FILE).open("wb") as handle:
+            pickle.dump(dict(resume_state), handle, protocol=pickle.HIGHEST_PROTOCOL)
+        if getattr(model, "replay_buffer", None) is not None:
+            model.save_replay_buffer(str(tmp / REPLAY_BUFFER_FILE))  # type: ignore[attr-defined]
+            extra["replay_buffer"] = True
+            extra["replay_buffer_size"] = int(model.replay_buffer.size())  # type: ignore[attr-defined]
+    stamp = {"saved": utc_now(), "saved_unix": time.time()}
+    atomic_write_json(tmp / "checkpoint.json", {**meta, **extra, **stamp})
     tmp.replace(directory)
     return directory
 
@@ -390,28 +420,56 @@ class TunePoolEvaluator:
 class StatusWriter:
     """Write ``status.json`` for one run.
 
+    A resumed run (:mod:`rld.rl.resume`) continues the same file: ``started`` stays the
+    original start, ``wall_s`` and ``cpu_hours`` are the earlier segments' totals (as last
+    recorded by them) plus this segment's, and ``fps`` / ``eta_s`` are this segment's rate.
+    ``resumes`` lists every resume.
+
     Attributes:
         path: ``<run_dir>/status.json``.
         static: Fields fixed for the run's lifetime.
-        started_monotonic: Host monotonic clock at start, seconds.
+        started: UTC start of the run (of its first segment).
+        started_monotonic: Host monotonic clock at the start of this segment, seconds.
+        wall_offset_s: Host seconds of earlier segments.
+        cpu_offset_h: CPU hours of earlier segments.
+        steps_offset: Training steps this segment started from.
     """
 
-    def __init__(self, path: Path, static: Mapping[str, Any]) -> None:
+    def __init__(
+        self,
+        path: Path,
+        static: Mapping[str, Any],
+        *,
+        started: str | None = None,
+        wall_offset_s: float = 0.0,
+        cpu_offset_h: float = 0.0,
+        steps_offset: int = 0,
+    ) -> None:
         """Hold the fixed fields.
 
         Args:
             path: Destination file.
             static: Fields fixed for the run: method, seed, run_id, budget, ... .
+            started: The run's original UTC start (resumed runs); now when ``None``.
+            wall_offset_s: Host seconds already spent by earlier segments.
+            cpu_offset_h: CPU hours already spent by earlier segments.
+            steps_offset: Training steps at the start of this segment.
         """
         self.path = path
         self.static = dict(static)
-        self.started = utc_now()
+        self.started = utc_now() if started is None else started
         self.started_monotonic = time.monotonic()
+        self.wall_offset_s = float(wall_offset_s)
+        self.cpu_offset_h = float(cpu_offset_h)
+        self.steps_offset = int(steps_offset)
         self.last: dict[str, Any] = {}
 
     def cpu_hours(self) -> float:
-        """Return CPU time of this process and its live children (the env workers), hours."""
-        return tree_cpu_seconds() / 3600.0
+        """Return CPU time of this process and its live children (the env workers), hours.
+
+        Includes earlier segments of a resumed run (:attr:`cpu_offset_h`).
+        """
+        return self.cpu_offset_h + tree_cpu_seconds() / 3600.0
 
     def write(
         self,
@@ -440,7 +498,8 @@ class StatusWriter:
         """
         wall = time.monotonic() - self.started_monotonic
         budget = int(self.static["budget"])
-        fps = steps / wall if wall > 0 and steps > 0 else 0.0
+        segment_steps = steps - self.steps_offset
+        fps = segment_steps / wall if wall > 0 and segment_steps > 0 else 0.0
         eta = (budget - steps) / fps if fps > 0 and state == "running" else None
         payload: dict[str, Any] = {
             "state": state,
@@ -462,7 +521,7 @@ class StatusWriter:
             "device": self.static.get("device"),
             "started": self.started,
             "updated": utc_now(),
-            "wall_s": wall,
+            "wall_s": self.wall_offset_s + wall,
             "cpu_hours": self.cpu_hours(),
             "pid": os.getpid(),
             "host": socket.gethostname(),
@@ -473,6 +532,11 @@ class StatusWriter:
             "log": self.static.get("log"),
             "resumed_from": self.static.get("resumed_from"),
             "error": error,
+            **{
+                k: self.static[k]
+                for k in ("resumed_at", "resume_steps", "resumes")
+                if k in self.static
+            },
             **dict(extra or {}),
         }
         atomic_write_json(self.path, payload)
@@ -501,7 +565,15 @@ class RunTracker:
         self.curriculum = curriculum
         self.last_eval: dict[str, Any] | None = None
         self.eval_env_steps = 0
+        #: Host seconds in evaluations, all segments of a resumed run.
         self.eval_wall_s = 0.0
+        #: Host seconds in evaluations, this segment only.
+        self.segment_eval_wall_s = 0.0
+
+    def add_eval_time(self, seconds: float) -> None:
+        """Account host seconds spent in one evaluation."""
+        self.eval_wall_s += seconds
+        self.segment_eval_wall_s += seconds
 
     def write(self, state: RunState, steps: int, error: str | None = None) -> None:
         """Write ``status.json`` with the current shared state.
@@ -528,14 +600,16 @@ class RunTracker:
             steps: Training env steps so far.
 
         Returns:
-            ``eval_wall_s`` (host seconds in evaluations) and ``fps_excl_eval`` (training
-            env steps per host second of non-evaluation time; learner updates included).
+            ``eval_wall_s`` (host seconds in evaluations, all segments) and
+            ``fps_excl_eval`` (this segment's training env steps per host second of
+            non-evaluation time; learner updates included).
         """
         wall = time.monotonic() - self.status.started_monotonic
-        train_wall = wall - self.eval_wall_s
+        train_wall = wall - self.segment_eval_wall_s
+        done = steps - self.status.steps_offset
         return {
             "eval_wall_s": self.eval_wall_s,
-            "fps_excl_eval": steps / train_wall if train_wall > 0 and steps > 0 else 0.0,
+            "fps_excl_eval": done / train_wall if train_wall > 0 and done > 0 else 0.0,
         }
 
 
@@ -568,6 +642,7 @@ class PeriodicEvalCallback(BaseCallback):
         interval_steps: int,
         broadcast: Callable[[str | None], None],
         normalizer: Callable[[], VecNormalize | None],
+        tb_name: str = "eval",
     ) -> None:
         """Wire the evaluation.
 
@@ -579,6 +654,8 @@ class PeriodicEvalCallback(BaseCallback):
             interval_steps: Training env steps between evaluations.
             broadcast: Sends a new sampling stage to every training worker.
             normalizer: Returns the training normaliser at call time.
+            tb_name: TensorBoard subdirectory under ``tb/`` (a resumed segment writes its
+                own, ``eval_resume<k>``, so abandoned and resumed points never interleave).
         """
         super().__init__(verbose=0)
         self.evaluator = evaluator
@@ -591,7 +668,22 @@ class PeriodicEvalCallback(BaseCallback):
         self.next_eval = self.interval
         self.n_evals = 0
         self.last_eval_steps = -1
+        self.tb_name = tb_name
         self._tb: Any = None
+
+    def counters(self) -> dict[str, int]:
+        """Return the counters a resumed run restores with :meth:`restore_counters`."""
+        return {
+            "n_evals": self.n_evals,
+            "next_eval": self.next_eval,
+            "last_eval_steps": self.last_eval_steps,
+        }
+
+    def restore_counters(self, counters: Mapping[str, int]) -> None:
+        """Restore :meth:`counters` (evaluation index, next due step, last evaluated step)."""
+        self.n_evals = int(counters["n_evals"])
+        self.next_eval = int(counters["next_eval"])
+        self.last_eval_steps = int(counters["last_eval_steps"])
 
     def _on_step(self) -> bool:
         """Run an evaluation whenever the step counter crosses the next multiple."""
@@ -606,7 +698,7 @@ class PeriodicEvalCallback(BaseCallback):
         if self._tb is None:
             from torch.utils.tensorboard import SummaryWriter
 
-            self._tb = SummaryWriter(log_dir=str(self.run_dir / "tb" / "eval"))
+            self._tb = SummaryWriter(log_dir=str(self.run_dir / "tb" / self.tb_name))
         return self._tb
 
     def run_eval(self, steps: int) -> dict[str, Any]:
@@ -625,7 +717,7 @@ class PeriodicEvalCallback(BaseCallback):
         rows, eval_steps = self.evaluator.evaluate(self.model, self.get_normalizer())
         eval_s = time.monotonic() - t0
         tracker.eval_env_steps += eval_steps
-        tracker.eval_wall_s += eval_s
+        tracker.add_eval_time(eval_s)
         stage = cur.stage
         stage_success = [r["outcome"] == "success" for r in rows if r["ss"] == stage]
         promoted = cur.observe(stage_success, steps)
@@ -686,7 +778,12 @@ class PeriodicEvalCallback(BaseCallback):
 
 
 class CheckpointCallback(BaseCallback):
-    """Save ``model.zip`` + ``vecnormalize.pkl`` every ``interval`` training steps."""
+    """Save ``model.zip`` + ``vecnormalize.pkl`` (+ resume state) every ``interval`` steps.
+
+    In a :class:`~stable_baselines3.common.callbacks.CallbackList` it must come **after**
+    :class:`PeriodicEvalCallback`, so that a checkpoint taken at an evaluation step already
+    holds that evaluation's curriculum update.
+    """
 
     def __init__(
         self,
@@ -694,6 +791,7 @@ class CheckpointCallback(BaseCallback):
         interval_steps: int,
         normalizer: Callable[[], VecNormalize | None],
         tracker: RunTracker,
+        resume_state: Callable[[int], Mapping[str, Any]] | None = None,
     ) -> None:
         """Wire the checkpoints.
 
@@ -702,26 +800,32 @@ class CheckpointCallback(BaseCallback):
             interval_steps: Training env steps between checkpoints.
             normalizer: Returns the training normaliser at call time.
             tracker: Shared run state (for the stage recorded in ``checkpoint.json``).
+            resume_state: Called with the next checkpoint's step; returns the state that
+                makes the checkpoint resumable (:func:`save_checkpoint`), or ``None`` for
+                model-only checkpoints.
         """
         super().__init__(verbose=0)
         self.run_dir = run_dir
         self.interval = int(interval_steps)
         self.get_normalizer = normalizer
         self.tracker = tracker
+        self.get_resume_state = resume_state
         self.next_ckpt = self.interval
 
     def _on_step(self) -> bool:
         """Checkpoint whenever the step counter crosses the next multiple."""
         if self.num_timesteps >= self.next_ckpt:
             assert self.model is not None
+            while self.next_ckpt <= self.num_timesteps:
+                self.next_ckpt += self.interval
+            state = None if self.get_resume_state is None else self.get_resume_state(self.next_ckpt)
             save_checkpoint(
                 self.model,
                 self.get_normalizer(),
                 self.run_dir / "checkpoints" / f"step_{self.num_timesteps:010d}",
                 {"steps": self.num_timesteps, "curriculum": self.tracker.curriculum.state()},
+                state,
             )
-            while self.next_ckpt <= self.num_timesteps:
-                self.next_ckpt += self.interval
         return True
 
 

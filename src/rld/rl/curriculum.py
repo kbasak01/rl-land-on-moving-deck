@@ -139,6 +139,38 @@ class Curriculum:
         )
         return True
 
+    def snapshot(self) -> dict[str, Any]:
+        """Return everything needed to continue: stage index, promotion history, the window.
+
+        Unlike :meth:`state` (a summary for ``status.json``) this holds the window's
+        individual success flags, so a resumed run promotes exactly when the uninterrupted
+        one would have, given the same evaluation outcomes.
+        """
+        return {
+            "stages": list(self.cfg.stages),
+            "index": self.index,
+            "history": [dict(h) for h in self.history],
+            "window": [bool(x) for x in self._window],
+        }
+
+    def restore(self, snap: dict[str, Any]) -> None:
+        """Restore a :meth:`snapshot`.
+
+        Args:
+            snap: From :meth:`snapshot` of a curriculum with the same stages.
+
+        Raises:
+            ValueError: If the stages differ or the index is out of range.
+        """
+        if tuple(snap["stages"]) != tuple(self.cfg.stages):
+            raise ValueError(f"curriculum stages {snap['stages']} != {list(self.cfg.stages)}")
+        index = int(snap["index"])
+        if not 0 <= index < len(self.cfg.stages):
+            raise ValueError(f"stage index {index} out of range")
+        self.index = index
+        self.history = [dict(h) for h in snap["history"]]
+        self._window = deque((bool(x) for x in snap["window"]), maxlen=self.cfg.window_episodes)
+
     def state(self) -> dict[str, Any]:
         """Return a JSON-serialisable summary for ``status.json``."""
         return {
