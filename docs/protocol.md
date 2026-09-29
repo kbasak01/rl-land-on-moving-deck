@@ -2667,6 +2667,59 @@ committed file had 1 thread. The test now sets both thread counts explicitly and
 committed value. `test_collect_scores_latest_done_and_lists_superseded` now expects trial 0's
 effective weights: the committed `reward.yaml` overlaid with the base config's overrides.
 
+### P5-D12 — PPO budget rule: no cut; SAC search scored; trial 10 becomes the SAC final config (2026-09-29)
+
+*PPO budget rule (P3-D1 §5), applied before any evaluation result is read.*
+- The first final PPO seed, `artifacts/runs/ppo/0` at `1d67488`, took **3.17 h** wall clock for
+  10 010 624 steps (15.3 CPU-hours). Seeds 1–3 took 3.22, 3.13 and 3.07 h. Seed 4 was at 9.24 M
+  steps and 2.42 h when this entry was written.
+- **Projection for the PPO family** (25 runs × 10 M, P3-D1 §5): about 25 × 3.2 h = 80 h as a
+  single stream, or about 20 h at the four concurrent runs the slot cap allows. That is far
+  below the 5-day threshold. **No budget cut is made.**
+- **Provenance note.** `git_dirty` is true on all five runs. For seeds 0–2 the dirty paths are
+  only the user's two `.claude/skills` files. Seeds 3–4 also list the untracked
+  `results/tune/sac_v2/{selection.json,trials.csv}`: SAC scoring wrote those files while those
+  runs were queued. They are outputs, not code or config, and do not affect training.
+
+*SAC scoring.* The scheduler's `on_complete` hook scored all 20 `tune_sac_v2` trials under the
+P5-D9 rule. None was superseded or resumed.
+- Hashes (SHA-256):
+  - `results/tune/sac_v2/trials.csv`: `884b285511a4ec8217cda748c812b64449380149c34b500aa6f72f70c2faf57f`
+  - `results/tune/sac_v2/selection.json`:
+    `90d1e19faae45340a26b7f956dba7adadbedd36e0a52fbf4fd65462406d500b4`
+- **Winner: trial 10.**
+  - Mean tune-pool success **0.978**, pooled p95 closing speed 0.472 m/s.
+  - At SS5: success 0.933, p95 0.503 m/s, mean time to touchdown 1.28 s, timeout 0.
+  - Runners-up: trial 14 and trial 7 (0.950), trial 6 (0.944), trial 17 (0.939).
+- **No SAC trial scored 180/180.** Six scored 0.000:
+  - trials 2, 5, 12, 19 and 4 are **timeout-dominated** (0.83–0.97 at SS5); trial 4 has a
+    mean time to touchdown of 8.1 s. That is the same hover trap as PPO trial 15.
+  - trial 13 touched down (SS5 mean time to touchdown 4.5 s, timeout 0.05) but had no success.
+- **SAC lands harder than PPO on the tune draw.** The SAC winner's pooled p95 is 0.472 m/s,
+  against 0.233 for the PPO winner. Tune-pool numbers are not results, and SAC's 2 M budget
+  against PPO's 10 M is a confound (P3-D1 §5).
+- Winner hyperparameters:
+  - learning rate 2.8376762147927807e-4, batch 256, tau 0.01665660378704859;
+  - learning_starts 10 000, width 512 (depth 2, ReLU);
+  - `device: cpu`, `torch_threads: 4` (P5-D10).
+- Winner reward weights:
+  - w_progress 19.067129995673895, w_vz 2.5956556352380216, w_smooth 0.04927539336297006,
+    w_time 0.010835396256297826;
+  - r_success 93.97084654774517;
+  - r_hard_landing = r_off_pad = r_bounce 16.795000918209553;
+  - r_crash 13.287172988057137.
+
+*Final config.*
+- `configs/rl/sac.yaml` (`a46f94152e99cd325ec30eb7de6c25c79be05c2294519eddee235e09b8bf5159`)
+  carries trial 10's values at full precision.
+- Its parsed config equals `results/tune/sac_v2/configs/trial_10.yaml` except `method`,
+  `run_group` and `total_steps` (2 M vs 0.5 M). This is pinned by
+  `test_final_config_is_the_tuning_winner`, parametrised over PPO and SAC.
+- **Expected wall clock:** at the 40–70 steps/s seen for width 512 under contention, each 2 M-step
+  seed takes roughly 8–14 h. The five seeds share the 34 slots at a cost of 8 each.
+
+*Launch.* `make sweep CFG=configs/rl/sac.yaml SEEDS="0 1 2 3 4"`.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|

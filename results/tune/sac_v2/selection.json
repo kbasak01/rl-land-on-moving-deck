@@ -1,0 +1,26 @@
+{
+  "method": "sac",
+  "rule": "max mean tune-pool success over SS3-SS5 (final checkpoint), then min pooled p95 touchdown closing speed, then min trial index; failed trials cannot win",
+  "winner_trial": 10,
+  "winner_params": {
+    "learning_rate": 0.00028376762147927807,
+    "batch_size": 256,
+    "tau": 0.01665660378704859,
+    "learning_starts": 10000,
+    "net_width": 512,
+    "w_progress": 19.067129995673895,
+    "w_vz": 2.5956556352380216,
+    "w_smooth": 0.04927539336297006,
+    "w_time": 0.010835396256297826,
+    "r_success": 93.97084654774517,
+    "r_fail": 16.795000918209553,
+    "r_crash": 13.287172988057137
+  },
+  "n_trials": 20,
+  "trials_used_before_search": 0,
+  "n_done": 20,
+  "tune_config": "configs/rl/tune_sac_v2.yaml",
+  "scored_from": "each trial's latest done run directory",
+  "superseded_runs": {},
+  "resumed_trials": []
+}

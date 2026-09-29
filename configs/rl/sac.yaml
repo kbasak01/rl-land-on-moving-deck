@@ -1,11 +1,12 @@
 # Pure SAC, final runs (docs/protocol.md P3-D1 sections 5-6; plan Phase 5).
 #
 # Budget: 2 M env steps per seed, seeds 0-4 (P3-D1 section 5; NOT equal to PPO's 10 M --
-# every PPO-vs-SAC statement carries that confound). Hyperparameters are the rl-experiment
-# defaults UNTIL the pre-registered search (configs/rl/tune_sac.yaml) has run.
+# every PPO-vs-SAC statement carries that confound). Hyperparameters and reward weights are
+# the winner of the pre-registered search (configs/rl/tune_sac_v2.yaml): trial 10,
+# results/tune/sac_v2/selection.json, recorded in docs/protocol.md P5-D12 before any final
+# SAC run started, copied at full precision from results/tune/sac_v2/configs/trial_10.yaml.
 #
-# device: SAC's device is measured CPU vs GPU once before launch, recorded in the protocol,
-# and then fixed here. Until then: cpu.
+# device / torch_threads: measured (P5-D9, P5-D10) and fixed at cpu / 4.
 #
 # Units: steps are env control steps (1/30 s model scale each). *_s fields are HOST seconds.
 
@@ -20,16 +21,16 @@ torch_threads: 4               # P5-D10: fastest per run on CPU (1.3x at width 2
 pad: aft
 
 policy:
-  width: 256
+  width: 512                    # trial 10 (P5-D12)
   depth: 2
   activation: relu
 
 ppo: null
 sac:
-  learning_rate: 3.0e-4
+  learning_rate: 0.00028376762147927807
   buffer_size: 1000000
   batch_size: 256
-  tau: 0.005
+  tau: 0.01665660378704859
   gamma: 0.99                   # per 1/30 s control step
   learning_starts: 10000        # uniform-random transitions before the first update
   train_freq: 1                 # vector steps between updates
@@ -60,4 +61,15 @@ checkpoint_interval_steps: 250000
 status_interval_s: 60.0
 log_interval: 200                    # SB3 table every 200 episodes
 
-reward: {}
+# Reward-WEIGHT overrides of configs/env/reward.yaml (trial 10, P5-D12). v_safe_m_s and
+# gate_height_m are structure and cannot be set here.
+reward:
+  w_progress: 19.067129995673895
+  w_vz: 2.5956556352380216
+  w_smooth: 0.04927539336297006
+  w_time: 0.010835396256297826
+  r_success: 93.97084654774517
+  r_hard_landing: 16.795000918209553
+  r_off_pad: 16.795000918209553
+  r_bounce: 16.795000918209553
+  r_crash: 13.287172988057137

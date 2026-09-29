@@ -51,19 +51,23 @@ def test_ppo_config_pins_p3d1() -> None:
     assert cfg.workers <= 34
 
 
-def test_ppo_config_is_the_tuning_winner() -> None:
-    # P5-D11: the final-run config equals the selected trial's config in every field except
-    # the name, run group and step budget.
+@pytest.mark.parametrize(
+    ("final_name", "results_dir"),
+    [("ppo.yaml", "results/tune/ppo"), ("sac.yaml", "results/tune/sac_v2")],
+)
+def test_final_config_is_the_tuning_winner(final_name: str, results_dir: str) -> None:
+    # P5-D11 (PPO), P5-D12 (SAC): each final-run config equals its search's selected trial
+    # config in every field except the name, run group and step budget.
     import dataclasses
     import json
 
     from rld.rl.tuning import REPO_ROOT
 
-    selection = json.loads((REPO_ROOT / "results/tune/ppo/selection.json").read_text())
+    selection = json.loads((REPO_ROOT / results_dir / "selection.json").read_text())
     winner = selection["winner_trial"]
-    final = dataclasses.asdict(load_train_config(RL_CONFIG_DIR / "ppo.yaml"))
+    final = dataclasses.asdict(load_train_config(RL_CONFIG_DIR / final_name))
     trial = dataclasses.asdict(
-        load_train_config(REPO_ROOT / f"results/tune/ppo/configs/trial_{winner:02d}.yaml")
+        load_train_config(REPO_ROOT / results_dir / f"configs/trial_{winner:02d}.yaml")
     )
     differs = {k for k in final if final[k] != trial[k]}
     assert differs == {"method", "run_group", "total_steps", "source"}
