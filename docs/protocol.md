@@ -3005,6 +3005,99 @@ method alike.*
   unchanged. The script (evaluation-side) checks MANIFEST, reads `id.parquet`, and passes the rows
   into `rld.rl.audit`, which never opens a list.
 
+## Phase 6
+
+### P6-D1 — Phase 6 method definitions, fixed before any Phase 6 training step (2026-09-30)
+
+*Status.* This entry was written and committed before any Phase 6 smoke or final run. P3-D1 is
+unchanged; its block SHA-256 is still `21465588…`.
+
+*Inherited, unchanged (P3-D1 §5, P5-D11, P5-D12).*
+- All four methods take `configs/rl/ppo.yaml` verbatim: trial 14's hyperparameters and reward
+  weights, `log_std_init` −2.80, 10 M env steps, seeds 0–4.
+- They use the same P3-D2 train pool, the same curriculum, and the same tune-pool evaluation draw.
+- `tests/test_rl_config.py::test_phase6_config_inherits_ppo` pins every final config equal to
+  `ppo.yaml` except in `method`, `run_group` and the three component keys below.
+- None of the four has a hyperparameter search of its own.
+
+**`residual_ppo`** (`src/rld/rl/residual.py`).
+- *Executed action.* `clip(a_pid_ff(o) + 0.3·π(o), −1, 1)`, then the env's own norm cap (P2-D2).
+  α = 0.3 in normalised units is 0.45 m/s model scale.
+- *The base.* `pid_feedforward` with the committed `configs/control/pid_feedforward.yaml`. It is
+  built as the runner builds the baseline, reset every episode, and fed the raw observation.
+- *The policy's input.* π reads the unchanged 25-entry observation. The base action is **not**
+  appended, as P3-D1 writes "π(o)".
+  - `pid_feedforward`'s lateral integrator is state the policy does not see.
+- *Initialisation.* Only `action_net`'s weight and bias are zero-initialised. The value head, the
+  MLPs and `log_std` are not.
+  - The initial deterministic policy is therefore exactly `pid_feedforward`.
+  - **Effective exploration std** is 0.3 × 0.061 = **0.018** normalised units. This follows from
+    inheriting `ppo.yaml`'s `log_std_init`, and it is stated rather than re-tuned.
+- *One composition path.* Training (`ResidualActionWrapper`), the tune-pool evaluation workers,
+  and evaluation (`ResidualPolicy`) all call the same `compose_residual`.
+- **Gate test.** `tests/test_rl_residual.py::test_gate_zeroed_residual_is_pid_feedforward` flies
+  the zero-initialised committed network through `rld.eval.runner.run_list` on 14 frozen `id`
+  episodes (2 220 steps).
+  - The sample is SS3–SS6 × 3, plus `pid_feedforward`'s first SS6 `bounce` and first SS6
+    `hard_landing` from e01.
+  - Every episode column except `method` is identical to `pid_feedforward`, and every per-step
+    float32 action is bit-identical.
+  - The training-wrapper path reproduces the same actions.
+  - It needs only committed files, so it cannot skip.
+
+**Forecast observation block** (`ppo_forecast`, `residual_ppo_forecast`;
+`src/rld/rl/forecast_obs.py`). This is the Phase 4 block deferred by P4-D4a.
+- *Forecaster.* dmf `residual_interval` (DLinear-OLS), the same one as the primary
+  `gated_forecast` arm. A test pins that.
+- *Block.* `leads_full_s(forecast, (1, 2, 3) s full)`, i.e. 0.2 / 0.4 / 0.6 s model: point pad z
+  (m) and pad v_z (m/s), model scale.
+  - Layout `[z1, vz1, z2, vz2, z3, vz3]`, clipped to ±10 so the box stays finite. The clip never
+    binds.
+  - It is appended after the 25 env entries, giving 31. `VecNormalize` normalises it.
+- *Feed.* It is computed from a past-only `ShipMotionFeed` advanced to the control time. Training
+  builds the feed per episode in the wrapper; evaluation receives it from the runner
+  (`needs_motion_feed=True`).
+  - Train/eval parity is bit-identical on 3 `id` episodes, including episodes from the prefetch
+    standby slot.
+  - Perturbing the future leaves the block bit-identical.
+- *Threads.* ORT runs with 1 intra-op and 1 inter-op thread in every worker.
+- *Carried caveats.*
+  1. The forecaster was fitted on the P3-D2 dev pool (P4-D1). Its forecasts are therefore
+     **in-sample during training** and out-of-sample on the frozen lists, so the policy may learn
+     to trust them more than test-time accuracy warrants.
+  2. The feed is an extra ideal ship-motion sensor that `ppo` does not have (P4-D3). So `ppo_forecast`
+     vs `ppo` (H3) compares sensor suites as well as information about the future.
+- *Cost.* A forecast adds about 1.2 ms per env step (+73 % at p50, measured with one worker). The
+  feed's 200-sample pre-fill runs on the reset-prefetch thread.
+
+**`ppo_sinusoid`** (`motion: sinusoid`; `src/rld/rl/motion.py`).
+- *Motion.* Every training episode, every periodic tune-pool evaluation episode, and therefore
+  curriculum promotion and the learning curves, fly a `SinusoidDeckMotion`. It is built per
+  episode and matched to the episode's P3-D2 realization:
+  - amplitude √2 × the committed RMS in `results/deck_stats_seeds.csv` (aft rows), which matches
+    `matched_rms` to rtol 1e-9;
+  - the realization's peak encounter period;
+  - phases drawn from the episode seed.
+- *No JONSWAP.* No JONSWAP motion enters its training. The frozen-list evaluation on JONSWAP (Gate
+  6) and the H4 cross (Phase 7) are evaluation-side.
+
+**Smoke runs are pipeline checks, not tuning trials.**
+- One per method: seed 0, 100 k steps, `method` = `run_group` = `<method>_smoke`.
+- Nothing read from them may change a hyperparameter. A failure that seems to need such a change
+  goes to the user and would be a dated deviation.
+
+**Also recorded.**
+- `load_policy` refuses to load if `pid_feedforward.yaml` or the forecaster's `meta.json` has
+  changed since training. Their digests are in `provenance.json["components"]`.
+- `config_to_dict` omits the new keys at their defaults, so the Phase 5 run configs and their
+  hashes are unchanged.
+- **Eval side, open.** `rld.eval.learned` and the audit's re-flight do not yet pass
+  `needs_motion_feed` for the forecast runs, and they fail loudly until they do. That is the
+  eval-auditor's work, before e06.
+- **Slot cost, open.** The scheduler formula is unchanged, since there are no extra threads. But a
+  forecast worker uses about 70 % more CPU per step. Process-tree CPU is measured on the smoke
+  runs before the final forecast runs are queued.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|

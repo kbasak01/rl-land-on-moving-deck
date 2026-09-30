@@ -37,6 +37,25 @@ The worker's output is bit-identical to the serial path, because
 * each instance keeps its own deck-motion cache, so the background reset never shares a
   motion object with the episode being flown.
 
+Per-episode deck motion
+-----------------------
+By default each realization's deck-motion source is built once per slot and cached (a
+JONSWAP realization does not depend on the episode). With ``episode_motion_factory`` -- the
+``ppo_sinusoid`` arm, :mod:`rld.rl.motion` -- the source is built for every episode from
+``(realization, episode seed)`` instead, and never cached: a sinusoid's phases come from the
+episode seed. Built in :meth:`PoolSamplingEnv._reset_slot`, so a prefetched episode builds
+its own source on the standby slot.
+
+Per-episode preparation
+-----------------------
+``prepare_episode`` (optional) is called with the slot's landing env right after its reset,
+in the same thread -- the background thread for a prefetched episode -- and its result is
+handed up in the reset ``info`` under :data:`PREPARED_INFO_KEY`. The forecast block uses it
+to pre-fill the episode's ship-motion feed (200 source evaluations, ~80 ms) off the stepping
+thread; the wrapper that consumes the key removes it, so it never reaches ``Monitor`` or the
+vector env. The result must be a pure function of the reset env (the feed is), so the
+episode is the same whichever thread prepared it.
+
 The pool is fixed at construction and every realization in it is checked against
 :data:`rld.rl.config.FORBIDDEN_SEA_STATES`, so an SS6 realization cannot even be *held*.
 Nothing here reads ``results/episodes/``.
@@ -71,10 +90,11 @@ from rld.control.tuning import TuningEpisode
 from rld.deck.splits import key_for_spec
 from rld.envs.platform import EpisodeMotionSource
 from rld.eval.envs import EvalConfigs, make_env, motion_for, pad_offset_for
-from rld.rl.config import FORBIDDEN_SEA_STATES
+from rld.rl.config import FORBIDDEN_SEA_STATES, ForecastObsConfig, MotionKind, ResidualConfig
 
 __all__ = [
     "MONITOR_KEYWORDS",
+    "PREPARED_INFO_KEY",
     "TRAIN_SALT",
     "EnvFactory",
     "PoolSamplingEnv",
@@ -83,6 +103,9 @@ __all__ = [
 #: Mixed into every training sampler seed sequence, so a training seed ``s`` cannot produce
 #: the same draws as the same integer used as an episode or realization seed elsewhere.
 TRAIN_SALT: int = 0x7A1B5E
+
+#: Reset-info key carrying the result of ``prepare_episode`` (module docstring).
+PREPARED_INFO_KEY: str = "rld_prepared_episode"
 
 #: Terminal-info keys ``Monitor`` writes to ``monitor/<rank>.monitor.csv``.
 MONITOR_KEYWORDS: tuple[str, ...] = (
@@ -187,6 +210,8 @@ class PoolSamplingEnv(gym.Wrapper[FloatArray, FloatArray, FloatArray, FloatArray
         stage: str | None,
         deck_origin_m: tuple[float, float, float],
         standby: gym.Env[FloatArray, FloatArray] | None = None,
+        episode_motion_factory: Callable[[RealizationSpec, int], EpisodeMotionSource] | None = None,
+        prepare_episode: Callable[[gym.Env[FloatArray, FloatArray]], Any] | None = None,
     ) -> None:
         """Wrap ``env``.
 
@@ -204,6 +229,13 @@ class PoolSamplingEnv(gym.Wrapper[FloatArray, FloatArray, FloatArray, FloatArray
             standby: A second, identically configured landing environment. Given, the next
                 episode is reset on it in a background thread while the current one runs;
                 ``None`` keeps every reset serial.
+            episode_motion_factory: ``(spec, episode seed) -> deck-motion source``, built
+                fresh for every episode (module docstring, "Per-episode deck motion"); when
+                given, ``motion_factory`` is not used. ``None`` = one cached source per
+                realization.
+            prepare_episode: Called with the slot's env after each reset, in the resetting
+                thread; its result goes to the reset info under :data:`PREPARED_INFO_KEY`
+                (module docstring, "Per-episode preparation").
 
         Raises:
             ValueError: If the pool is empty or holds a forbidden sea state.
@@ -219,6 +251,8 @@ class PoolSamplingEnv(gym.Wrapper[FloatArray, FloatArray, FloatArray, FloatArray
             self.pool.setdefault(spec.sea_state, []).append(spec)
         self._all = list(pool)
         self._motion_factory = motion_factory
+        self._episode_motion_factory = episode_motion_factory
+        self._prepare_episode = prepare_episode
         self._offset_factory = offset_factory
         # One environment instance per slot; slot ``self._active`` flies the current episode.
         self._slots: list[gym.Env[FloatArray, FloatArray]] = [env]
@@ -360,8 +394,15 @@ class PoolSamplingEnv(gym.Wrapper[FloatArray, FloatArray, FloatArray, FloatArray
         spec = candidates[int(self._rng.integers(0, len(candidates)))]
         return _Scheduled(spec, int(self._rng.integers(0, 2**31 - 1)))
 
-    def _motion(self, spec: RealizationSpec, slot: int) -> EpisodeMotionSource:
-        """Return the (cached) deck-motion source of one realization for one slot."""
+    def _motion(self, scheduled: _Scheduled, slot: int) -> EpisodeMotionSource:
+        """Return the deck-motion source of one episode for one slot.
+
+        Cached per realization and slot, unless an ``episode_motion_factory`` builds a new
+        source for every episode.
+        """
+        spec = scheduled.spec
+        if self._episode_motion_factory is not None:
+            return self._episode_motion_factory(spec, scheduled.episode_seed)
         key = key_for_spec(spec)
         cache = self._motions[slot]
         if key not in cache:
@@ -379,13 +420,19 @@ class PoolSamplingEnv(gym.Wrapper[FloatArray, FloatArray, FloatArray, FloatArray
             options: Passed through to the environment's ``reset``.
 
         Returns:
-            The environment's ``(observation, info)``.
+            The environment's ``(observation, info)``; with ``prepare_episode``, ``info``
+            also holds its result under :data:`PREPARED_INFO_KEY`.
         """
         env = self._slots[slot]
         landing: _LandingLike = env  # type: ignore[assignment]
         spec = scheduled.spec
-        landing.set_motion(self._motion(spec, slot), self._pad, self._offset_factory(spec.vessel))
-        return env.reset(seed=scheduled.episode_seed, options=options)
+        landing.set_motion(
+            self._motion(scheduled, slot), self._pad, self._offset_factory(spec.vessel)
+        )
+        obs, info = env.reset(seed=scheduled.episode_seed, options=options)
+        if self._prepare_episode is not None:
+            info = {**info, PREPARED_INFO_KEY: self._prepare_episode(env)}
+        return obs, info
 
     def _activate(self, slot: int) -> None:
         """Make ``slot`` the environment that steps (and that ``unwrapped`` reaches)."""
@@ -579,6 +626,15 @@ class EnvFactory:
         monitor_suffix: Inserted between the rank and ``.monitor.csv``; a resumed run
             segment writes ``<rank>.resume<k>.monitor.csv`` so that no earlier monitor file
             is overwritten.
+        residual: Residual RL: wrap in :class:`~rld.rl.residual.ResidualActionWrapper`
+            (the worker owns the base controller), or ``None``.
+        forecast_obs: Forecast observation block: wrap in
+            :class:`~rld.rl.forecast_obs.ForecastObsWrapper` (the worker owns a
+            one-thread forecaster), or ``None``.
+        motion: ``"jonswap"`` (each realization's dmf source) or ``"sinusoid"`` (a
+            matched sinusoid per episode, :mod:`rld.rl.motion`).
+        sinusoid_rms: ``((key, (roll_deg, pitch_deg, heave_m)), ...)``, the committed RMS,
+            full scale, of every realization in ``pool``; required for ``"sinusoid"``.
     """
 
     cfgs: EvalConfigs
@@ -590,6 +646,24 @@ class EnvFactory:
     monitor_dir: Path | None
     prefetch: bool = False
     monitor_suffix: str = ""
+    residual: ResidualConfig | None = None
+    forecast_obs: ForecastObsConfig | None = None
+    motion: MotionKind = "jonswap"
+    sinusoid_rms: tuple[tuple[RealizationKey, tuple[float, float, float]], ...] = ()
+
+    def __post_init__(self) -> None:
+        """Check the motion kind has what it needs.
+
+        Raises:
+            ValueError: On an unknown motion kind, or a sinusoid factory without the RMS of
+                every pool realization.
+        """
+        if self.motion not in ("jonswap", "sinusoid"):
+            raise ValueError(f"unknown motion kind {self.motion!r}")
+        if self.motion == "sinusoid":
+            have = {key for key, _ in self.sinusoid_rms}
+            if missing := [key_for_spec(s) for s in self.pool if key_for_spec(s) not in have]:
+                raise ValueError(f"no committed RMS for {len(missing)} pool realizations")
 
     def _motion(self, spec: RealizationSpec) -> EpisodeMotionSource:
         """Return the deck-motion source of one realization."""
@@ -601,14 +675,54 @@ class EnvFactory:
         """Return the pad lever arm for ``vessel``, metres model scale."""
         return pad_offset_for(self.cfgs, vessel, self.pad)
 
+    def _episode_motion_factory(
+        self,
+    ) -> Callable[[RealizationSpec, int], EpisodeMotionSource] | None:
+        """Return the per-episode sinusoid builder, or ``None`` for JONSWAP."""
+        if self.motion != "sinusoid":
+            return None
+        from rld.rl.motion import sinusoid_motion
+
+        table = dict(self.sinusoid_rms)
+        cfgs = self.cfgs
+
+        def build(spec: RealizationSpec, episode_seed: int) -> EpisodeMotionSource:
+            return sinusoid_motion(cfgs, spec, episode_seed, table[key_for_spec(spec)])
+
+        return build
+
+    def _prepare_episode(self) -> Callable[[gym.Env[FloatArray, FloatArray]], Any] | None:
+        """Return the forecast block's feed builder (run in the resetting thread), or None."""
+        if self.forecast_obs is None:
+            return None
+        from rld.rl.forecast_obs import episode_feed
+
+        pads, scale = self.cfgs.pads, self.cfgs.scaling.froude_scale()
+
+        def prepare(env: gym.Env[FloatArray, FloatArray]) -> Any:
+            return episode_feed(env, pads, scale)
+
+        return prepare
+
     def __call__(self) -> gym.Env[FloatArray, FloatArray]:
-        """Build the worker's environment: landing env(s) -> pool sampling -> Monitor."""
+        """Build the worker's environment.
+
+        Landing env(s) -> pool sampling -> [residual action] -> [forecast block] -> Monitor.
+        """
         from stable_baselines3.common.monitor import Monitor
 
         first = self.pool[0]
-        base = make_env(self.cfgs, self._motion(first), first.vessel, self.pad, self.seed)
+        episode_motion = self._episode_motion_factory()
+
+        def first_source() -> EpisodeMotionSource:
+            # One object per instance, as before. The constructor's source is replaced
+            # before the first reset; with sinusoid motion it is a sinusoid too, so no
+            # JONSWAP source is ever attached to a sinusoid run's env.
+            return self._motion(first) if episode_motion is None else episode_motion(first, 0)
+
+        base = make_env(self.cfgs, first_source(), first.vessel, self.pad, self.seed)
         standby = (
-            make_env(self.cfgs, self._motion(first), first.vessel, self.pad, self.seed)
+            make_env(self.cfgs, first_source(), first.vessel, self.pad, self.seed)
             if self.prefetch
             else None
         )
@@ -623,7 +737,19 @@ class EnvFactory:
             stage=self.stage,
             deck_origin_m=self.cfgs.landing.platform.deck_origin_m,
             standby=standby,
+            episode_motion_factory=episode_motion,
+            prepare_episode=self._prepare_episode(),
         )
+        if self.residual is not None:
+            from rld.rl.residual import ResidualActionWrapper, build_base_controller
+
+            wrapped = ResidualActionWrapper(
+                wrapped, build_base_controller(self.residual.base, self.cfgs), self.residual.alpha
+            )
+        if self.forecast_obs is not None:
+            from rld.rl.forecast_obs import ForecastObsWrapper
+
+            wrapped = ForecastObsWrapper(wrapped, self.cfgs, self.forecast_obs)
         if self.monitor_dir is not None:
             self.monitor_dir.mkdir(parents=True, exist_ok=True)
             target = self.monitor_dir / f"{self.rank}{self.monitor_suffix}.monitor.csv"

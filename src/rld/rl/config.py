@@ -2,16 +2,26 @@
 
 One YAML file describes one training run up to its seed. Every key is required unless noted
 and every unknown key is an error, so a typo in a search-space target cannot silently train
-the default. The one optional key, ``prefetch_reset``, is an engineering switch that cannot
-change what is trained (see :attr:`TrainConfig.prefetch_reset`); it defaults so that run
-directories written before it existed still load. The checks that encode protocol
-decisions live here, at load time:
+the default. Four keys are optional:
+
+* ``prefetch_reset``, an engineering switch that cannot change what is trained (see
+  :attr:`TrainConfig.prefetch_reset`);
+* ``residual``, ``forecast_obs`` and ``motion``, the Phase 6 method components (P3-D1
+  sections 5-6): residual RL on a classical base, the forecast observation block, and the
+  deck-motion model the run trains on. Absent means off (``null``, ``null``, ``jonswap``),
+  which is exactly what every run written before they existed trained with, so those run
+  directories still load; :func:`config_to_dict` writes them only when they are not the
+  default, so the serialised text (and its SHA-256) of a pure PPO or SAC config is unchanged.
+
+The checks that encode protocol decisions live here, at load time:
 
 * PPO trains on the CPU (CLAUDE.md, "SB3 MLP on GPU is slower than CPU");
 * reward normalisation is PPO-only (plan Phase 5 item 1);
 * the curriculum's stages are a subset of SS3-SS5 and **never** SS6 (P3-D1 section 6);
 * only reward **weights** may be overridden -- ``v_safe_m_s`` and ``gate_height_m`` shape the
-  reward's structure and are fixed (``configs/env/reward.yaml``).
+  reward's structure and are fixed (``configs/env/reward.yaml``);
+* a residual base is a registered, non-privileged controller that takes no ship-motion feed,
+  and residual RL is PPO-only (its zero-initialised last layer is PPO's ``action_net``).
 
 The P3-D1 budget numbers (10 M PPO, 2 M SAC, 5 seeds, <= 20 trials, 0.80 over >= 100
 episodes) are *not* enforced here, because smoke and test configs legitimately differ;
@@ -37,6 +47,10 @@ from rld.envs.config import RewardConfig
 __all__ = [
     "ALGOS",
     "FORBIDDEN_SEA_STATES",
+    "FORECAST_GRID_FULL_HZ",
+    "FORECAST_HORIZON_FULL_S",
+    "MOTION_KINDS",
+    "OPTIONAL_KEYS",
     "PREFETCH_RESET_DEFAULT",
     "REWARD_WEIGHT_KEYS",
     "RL_CONFIG_DIR",
@@ -46,9 +60,12 @@ __all__ = [
     "ENV_WORKER_CORES",
     "CurriculumConfig",
     "EvalConfig",
+    "ForecastObsConfig",
+    "MotionKind",
     "NormalizeConfig",
     "PPOConfig",
     "PolicyConfig",
+    "ResidualConfig",
     "SACConfig",
     "TrainConfig",
     "apply_overrides",
@@ -96,7 +113,22 @@ REWARD_WEIGHT_KEYS: tuple[str, ...] = tuple(
     f.name for f in fields(RewardConfig) if f.name not in STRUCTURE_REWARD_KEYS
 )
 
+#: Deck-motion models a run may train on: dmf's JONSWAP realizations (every method but
+#: ``ppo_sinusoid``) or the matched single-frequency sinusoid (the H4 arm, plan D0.4).
+MOTION_KINDS: tuple[str, ...] = ("jonswap", "sinusoid")
+
+#: The forecaster's lead grid, hertz **full** scale (dmf's 10 Hz corpus rate): every lead of
+#: the forecast observation block must be a multiple of 0.1 s full scale.
+FORECAST_GRID_FULL_HZ: float = 10.0
+
+#: The forecaster's horizon, seconds **full** scale (150 leads at 10 Hz = 3.0 s model).
+FORECAST_HORIZON_FULL_S: float = 15.0
+
+#: Top-level keys a config may omit (module docstring).
+OPTIONAL_KEYS: tuple[str, ...] = ("prefetch_reset", "residual", "forecast_obs", "motion")
+
 Activation = Literal["tanh", "relu"]
+MotionKind = Literal["jonswap", "sinusoid"]
 
 
 @dataclass(frozen=True)
@@ -243,6 +275,47 @@ class CurriculumConfig:
 
 
 @dataclass(frozen=True)
+class ResidualConfig:
+    """Residual RL on a classical base (P3-D1 section 6).
+
+    The executed action is ``clip(a_base(o) + alpha * pi(o), -1, 1)`` in the shared
+    normalised action space, after which the environment applies its own norm cap
+    (:func:`rld.rl.residual.compose_residual`).
+
+    Attributes:
+        alpha: Residual scale, normalised action units (0.3 = 0.45 m/s model scale at
+            ``v_max`` = 1.5 m/s).
+        base: Registry name of the base controller (``"pid_feedforward"``), built from its
+            committed config under ``configs/control/``.
+    """
+
+    alpha: float
+    base: str
+
+
+@dataclass(frozen=True)
+class ForecastObsConfig:
+    """The forecast observation block (P4-D4a "Deferred"; plan Phase 6).
+
+    Attributes:
+        forecaster: Name of the fitted dmf model directory under ``artifacts/dmf/``
+            (``"residual_interval"``, the forecaster ``configs/control/gated_forecast.yaml``
+            uses).
+        leads_full_s: Forecast leads, seconds **full** scale (1, 2, 3 s = 0.2, 0.4, 0.6 s
+            model at ``lam = 1/25``); each contributes the point pad ``z`` (metres model) and
+            pad ``v_z`` (metres per second model), so the block has ``2 * len`` entries.
+    """
+
+    forecaster: str
+    leads_full_s: tuple[float, ...]
+
+    @property
+    def block_size(self) -> int:
+        """Return the number of observation entries the block appends, dimensionless."""
+        return 2 * len(self.leads_full_s)
+
+
+@dataclass(frozen=True)
 class TrainConfig:
     """One training run, up to its seed.
 
@@ -267,6 +340,13 @@ class TrainConfig:
         status_interval_s: Host-clock seconds between ``status.json`` heartbeats.
         log_interval: SB3 ``learn(log_interval=...)``: rollouts (PPO) or episodes (SAC).
         reward: Reward-weight overrides of ``configs/env/reward.yaml``; empty = committed.
+        residual: Residual RL on a classical base, or ``None`` (optional in the YAML).
+        forecast_obs: The forecast observation block appended to the environment
+            observation, or ``None`` (optional in the YAML).
+        motion: The deck-motion model of every training **and** tune-pool evaluation
+            episode: ``"jonswap"`` (dmf's realizations) or ``"sinusoid"`` (each episode a
+            :class:`~rld.deck.sinusoid.SinusoidDeckMotion` matched to its realization,
+            phases from the episode seed). Optional in the YAML (default ``"jonswap"``).
         prefetch_reset: Give every env worker (training and evaluation) a second landing
             environment and prepare the next episode on it in a background thread
             (:class:`rld.rl.wrappers.PoolSamplingEnv`). The episodes, observations, rewards
@@ -295,6 +375,9 @@ class TrainConfig:
     log_interval: int
     reward: Mapping[str, float] = field(default_factory=dict)
     prefetch_reset: bool = True
+    residual: ResidualConfig | None = None
+    forecast_obs: ForecastObsConfig | None = None
+    motion: MotionKind = "jonswap"
     source: Path | None = None
 
     @property
@@ -314,6 +397,12 @@ class TrainConfig:
         to ``t`` cores busy during its gradient steps); see :data:`ENV_WORKER_CORES` for the
         measurement. With one torch thread: 8 for ``ppo.yaml`` (16 workers), 5 for
         ``sac.yaml`` (8 workers); a 4-thread SAC run costs 8.
+
+        The Phase 6 components start no thread: the residual base is a few NumPy operations
+        per step, and the forecast block's ONNX Runtime session runs with one intra-op and
+        one inter-op thread, sequentially, on the stepping thread. They make each step
+        dearer, not wider, so the formula is unchanged; the forecast block's per-step cost
+        is recorded with the method (P6-D1).
         """
         pool = math.ceil(ENV_WORKER_CORES * max(self.n_envs, self.eval.n_envs))
         return pool + self.torch_threads
@@ -400,7 +489,7 @@ def train_config_from_dict(raw: Mapping[str, Any], where: str = "<dict>") -> Tra
             "reward",
         ),
         where,
-        optional=("prefetch_reset",),
+        optional=OPTIONAL_KEYS,
     )
     algo = str(top["algo"])
     if algo not in ALGOS:
@@ -502,6 +591,23 @@ def train_config_from_dict(raw: Mapping[str, Any], where: str = "<dict>") -> Tra
         raise ValueError(f"{where}: reward must be a mapping of weight overrides")
     reward = {str(k): float(v) for k, v in reward_raw.items()}
 
+    residual: ResidualConfig | None = None
+    if top.get("residual") is not None:
+        r = _take(top["residual"], ("alpha", "base"), f"{where}: residual")
+        residual = ResidualConfig(alpha=float(r["alpha"]), base=str(r["base"]))
+    forecast_obs: ForecastObsConfig | None = None
+    if top.get("forecast_obs") is not None:
+        f = _take(top["forecast_obs"], ("forecaster", "leads_full_s"), f"{where}: forecast_obs")
+        leads = f["leads_full_s"]
+        if not isinstance(leads, list | tuple):
+            raise ValueError(f"{where}: forecast_obs.leads_full_s must be a list")
+        forecast_obs = ForecastObsConfig(
+            forecaster=str(f["forecaster"]), leads_full_s=tuple(float(x) for x in leads)
+        )
+    motion = str(top.get("motion") or "jonswap")
+    if motion not in MOTION_KINDS:
+        raise ValueError(f"{where}: motion must be one of {MOTION_KINDS}, got {motion!r}")
+
     cfg = TrainConfig(
         method=method,
         run_group=run_group,
@@ -523,6 +629,9 @@ def train_config_from_dict(raw: Mapping[str, Any], where: str = "<dict>") -> Tra
         log_interval=int(top["log_interval"]),
         reward=reward,
         prefetch_reset=bool(top.get("prefetch_reset", PREFETCH_RESET_DEFAULT)),
+        residual=residual,
+        forecast_obs=forecast_obs,
+        motion=cast(MotionKind, motion),
     )
     _validate(cfg, where)
     return cfg
@@ -576,8 +685,68 @@ def _validate(cfg: TrainConfig, where: str) -> None:
         errors.append(f"reward keys {unknown} are not reward weights")
     if negative := sorted(k for k, v in cfg.reward.items() if v < 0.0):
         errors.append(f"reward weights {negative} must be non-negative (penalties are magnitudes)")
+    errors += _residual_errors(cfg)
+    errors += _forecast_errors(cfg.forecast_obs)
     if errors:
         raise ValueError(f"{where}: " + "; ".join(errors))
+
+
+def _residual_errors(cfg: TrainConfig) -> list[str]:
+    """Return what is wrong with a config's residual block (empty when fine or absent).
+
+    Args:
+        cfg: The parsed config.
+
+    Returns:
+        Error messages.
+    """
+    res = cfg.residual
+    if res is None:
+        return []
+    from rld.control.registry import REGISTRY  # local: the registry imports every controller
+
+    errors: list[str] = []
+    if cfg.algo != "ppo":
+        errors.append("residual RL is PPO-only (its zero-initialised layer is PPO's action_net)")
+    if not (math.isfinite(res.alpha) and 0.0 < res.alpha <= 1.0):
+        errors.append(f"residual.alpha must be in (0, 1] normalised units, got {res.alpha}")
+    item = REGISTRY.get(res.base)
+    if item is None:
+        errors.append(f"residual.base {res.base!r} is not a registered controller")
+    elif item.privileged or item.needs_motion_feed:
+        errors.append(
+            f"residual.base {res.base!r} is privileged or needs a motion feed; the base must "
+            "see only the observation"
+        )
+    return errors
+
+
+def _forecast_errors(fc: ForecastObsConfig | None) -> list[str]:
+    """Return what is wrong with a forecast-observation block (empty when fine or absent).
+
+    Args:
+        fc: The block, or ``None``.
+
+    Returns:
+        Error messages.
+    """
+    if fc is None:
+        return []
+    errors: list[str] = []
+    name = fc.forecaster
+    if not name or Path(name).name != name or name.startswith((".", "_")):
+        errors.append(f"forecast_obs.forecaster must be a model directory name, got {name!r}")
+    leads = fc.leads_full_s
+    if not leads or len(set(leads)) != len(leads):
+        errors.append(f"forecast_obs.leads_full_s must be non-empty and distinct, got {leads}")
+    for lead in leads:
+        steps = lead * FORECAST_GRID_FULL_HZ
+        if not (0.0 < lead <= FORECAST_HORIZON_FULL_S and abs(steps - round(steps)) < 1e-9):
+            errors.append(
+                f"forecast_obs lead {lead} s (full) is not on the 0.1 s grid inside "
+                f"(0, {FORECAST_HORIZON_FULL_S}]"
+            )
+    return errors
 
 
 def load_train_config(path: Path) -> TrainConfig:
@@ -602,13 +771,23 @@ def config_to_dict(cfg: TrainConfig) -> dict[str, Any]:
 
     Returns:
         A plain nested dict; paths repository-relative, tuples as lists, ``source``
-        dropped.
+        dropped, and ``residual`` / ``forecast_obs`` / ``motion`` omitted at their defaults.
     """
     out = asdict(cfg)
     out.pop("source", None)
     out["eval"]["tuning_config"] = _rel(cfg.eval.tuning_config)
     out["curriculum"]["stages"] = list(cfg.curriculum.stages)
     out["reward"] = dict(cfg.reward)
+    # The Phase 6 keys are written only when set, so a config without them serialises to
+    # the same text (and SHA-256) as before they existed (module docstring).
+    if cfg.residual is None:
+        out.pop("residual")
+    if cfg.forecast_obs is None:
+        out.pop("forecast_obs")
+    else:
+        out["forecast_obs"]["leads_full_s"] = list(cfg.forecast_obs.leads_full_s)
+    if cfg.motion == "jonswap":
+        out.pop("motion")
     return out
 
 
@@ -618,7 +797,8 @@ def apply_overrides(raw: Mapping[str, Any], overrides: Mapping[str, Any]) -> dic
     Args:
         raw: A raw YAML mapping (before parsing).
         overrides: ``{"ppo.learning_rate": 1e-4, "reward.w_vz": 3.0, ...}``. A ``reward.*``
-            key may add a weight absent from the base; any other key must already exist.
+            key may add a weight absent from the base, and one of :data:`OPTIONAL_KEYS` may
+            be added at the top level; any other key must already exist.
 
     Returns:
         The overridden mapping, still unparsed; :func:`train_config_from_dict` validates it.
@@ -637,7 +817,8 @@ def apply_overrides(raw: Mapping[str, Any], overrides: Mapping[str, Any]) -> dic
                 raise KeyError(f"override target {dotted!r}: {part!r} is not a mapping")
             node = node[part]
         leaf = parts[-1]
-        if leaf not in node and parts[0] != "reward":
+        optional_top = len(parts) == 1 and leaf in OPTIONAL_KEYS
+        if leaf not in node and parts[0] != "reward" and not optional_top:
             raise KeyError(f"override target {dotted!r} does not exist in the base config")
         node[leaf] = value
     return out

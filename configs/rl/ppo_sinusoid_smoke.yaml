@@ -1,0 +1,88 @@
+# ppo_sinusoid SMOKE RUN (docs/protocol.md P6-D1, step 4).
+#
+# A pipeline check, NOT a tuning trial: nothing is read from it to change a hyperparameter.
+# Identical to configs/rl/ppo_sinusoid.yaml except:
+# - method and run_group (<method>_smoke, so it can never be labelled as the method);
+# - total_steps 100 000 (7 rollouts of 16 384 = 114 688 steps);
+# - eval.interval_steps 20 000 (6 periodic evaluations + the final one);
+# - checkpoint_interval_steps 50 000 (2 checkpoints + final/, each with vecnormalize.pkl).
+#
+# Units: steps are env control steps (1/30 s model scale each). *_s fields are HOST seconds.
+
+method: ppo_sinusoid_smoke
+run_group: ppo_sinusoid_smoke      # -> artifacts/runs/ppo_sinusoid_smoke/<seed>/
+algo: ppo
+total_steps: 100000             # smoke: 7 rollouts = 114 688 steps
+n_envs: 16
+vec_env: subproc
+device: cpu                     # PPO always trains on the CPU (CLAUDE.md)
+torch_threads: 1
+pad: aft
+
+policy:
+  width: 512                    # trial 14 (P5-D11)
+  depth: 2
+  activation: tanh
+
+ppo:
+  learning_rate: 0.0005941708698045433
+  lr_schedule: linear
+  n_steps: 1024                 # per env; rollout = 16 384 steps
+  batch_size: 1024
+  n_epochs: 5
+  gamma: 0.99                   # per 1/30 s control step
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.009895217847079038
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  target_kl: null
+  log_std_init: -2.7972111202776433   # std 0.061 in action units (P5-D7 range; P5-D11)
+sac: null
+
+normalize:
+  norm_obs: true
+  norm_reward: true             # PPO only
+  clip_obs: 10.0
+  clip_reward: 10.0
+
+# Periodic evaluation on the P3-D2 TUNE pool only: the fixed P3-D3 draw from
+# configs/control/tuning.yaml (seed 20260923, 60 episodes per SS, SS3-SS5, aft) -- the same
+# 180 episodes the classical baselines were tuned and re-checked on (P3-D4 table).
+# Deterministic policy. Evaluation steps are NOT charged to the budget (reported apart).
+eval:
+  interval_steps: 20000         # smoke: 6 periodic evaluations + the final one
+  n_envs: 16
+  tuning_config: configs/control/tuning.yaml
+  episodes_per_ss: null         # null = the committed draw, unchanged
+  deterministic: true
+
+# P3-D1 section 6: SS3 -> SS4 -> SS5, promote at rolling tune-pool success >= 0.80 over
+# >= 100 episodes at the current SS. SS6 is never trained on (rejected by the loader).
+curriculum:
+  enabled: true
+  stages: [SS3, SS4, SS5]
+  promote_success: 0.80
+  window_episodes: 100
+
+checkpoint_interval_steps: 50000     # smoke: 2 checkpoints + final/, each with vecnormalize.pkl
+status_interval_s: 60.0
+log_interval: 1                      # SB3 table every rollout
+
+# Reward-WEIGHT overrides of configs/env/reward.yaml (trial 14, P5-D11). v_safe_m_s and
+# gate_height_m are structure and cannot be set here.
+reward:
+  w_progress: 13.580398401245475
+  w_vz: 5.847430455465423
+  w_smooth: 0.04575471046550012
+  w_time: 0.0007295555155724287
+  r_success: 29.54699269030243
+  r_hard_landing: 6.8282349687069654
+  r_off_pad: 6.8282349687069654
+  r_bounce: 6.8282349687069654
+  r_crash: 42.44193982332945
+
+# Phase 6 components (P6-D1). Absent keys mean off (null, null, jonswap); ppo.yaml omits them.
+residual: null
+forecast_obs: null
+motion: sinusoid                # one matched sinusoid per episode (train AND tune-pool eval)
