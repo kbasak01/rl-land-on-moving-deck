@@ -1062,6 +1062,15 @@ def render_learned(out_dir: Path, title: str) -> str:
         "episodes are outside the development pool (P3-D2).",
         "- `oracle_gated` is privileged: it reads the true future deck motion. It is a "
         "commit-timing oracle, not a bound on success, and never a deployable result.",
+        "- **Measurement caveats from the reward-hacking audit (P5-D14; `results/audit/`)**, "
+        "both frozen definitions applied to every method alike. (1) The recorded closing "
+        "speed is read after the first contact substep's solver impulse, about 7 % below the "
+        "speed one substep earlier; in a re-flight sample 15 of 445 `sac` successes (3.4 %) "
+        "arrived above 0.5 m/s one substep before contact (`ppo` 0 of 500). (2) Up to 41 `sac` "
+        "successes (1 / 3 / 13 / 24 at SS3–SS6, per 1 000 seed-episodes) had an unloaded "
+        "stretch while tunnelled, and whether they would have lost contact for more than the "
+        "50 ms grace without the overlap is not shown (`ppo`: 2 at SS6). Both can only raise "
+        "`sac`'s success, by at most a few points at SS5/SS6.",
         "- No hypothesis (H1–H5) is scored here and no method contrast is tested; the spread "
         "and aggregates are descriptive.",
         "- Rendered from `summary.csv`, `seeds.csv`, `aggregate.csv` and "

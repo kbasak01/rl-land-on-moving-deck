@@ -2695,6 +2695,12 @@ P5-D9 rule. None was superseded or resumed.
   - trials 2, 5, 12, 19 and 4 are **timeout-dominated** (0.83–0.97 at SS5); trial 4 has a
     mean time to touchdown of 8.1 s. That is the same hover trap as PPO trial 15.
   - trial 13 touched down (SS5 mean time to touchdown 4.5 s, timeout 0.05) but had no success.
+- **Single-seed trial scores are noisy** (added at the Gate 5 review, 2026-09-30). The superseded
+  `tune_sac` v1 run of trial 03 (same Sobol point, width 256, 1 torch thread) ended at 0.000 tune
+  success after hovering (`artifacts/runs/tune_sac/trial_03/0/evals.csv`). Its v2 re-run scored
+  0.872. The v1 runs of trials 00, 02 and 06 reproduced their v2 scores. Thread count alone
+  changes the arithmetic, so the two runs are not bit-comparable, but the swing shows how much
+  one seed can move a trial's score. v1 was never used for selection.
 - **SAC lands harder than PPO on the tune draw.** The SAC winner's pooled p95 is 0.472 m/s,
   against 0.233 for the PPO winner. Tune-pool numbers are not results, and SAC's 2 M budget
   against PPO's 10 M is a confound (P3-D1 §5).
@@ -2821,6 +2827,16 @@ SS3–SS5, where the 90° headings are outside the dev pool).
 | `sac` | 0.392 [0.369, 0.433] | 0.437 [0.406, 0.478] | 0.595 [0.562, 0.619] | 0.668 [0.590, 0.778] |
 | `pid_feedforward` | 0.219 | 0.226 | 0.262 | 0.264 |
 | `pid_feedforward_lowvz` (H1a reference) | 0.127 | 0.139 | 0.188 | 0.181 |
+| `pid_feedforward_lowvz_cut` | 0.127 | 0.139 | 0.188 | 0.181 |
+| `pid_track_descend` | 0.308 | 0.412 | 0.525 | 0.502 |
+| `gated` | 0.217 | 0.229 | 0.250 | 0.267 |
+| `oracle_gated` (privileged) | 0.220 | 0.236 | 0.252 | 0.254 |
+
+*Caveats added at the Gate 5 review (2026-09-30), from P5-D14.* The recorded closing speed
+understates impact speed by about 7 %. Up to 41 SAC successes (1 / 3 / 13 / 24 at SS3–SS6, per
+1 000 seed-episodes) may depend on tunnelling overlap. Both can only raise SAC's SS5/SS6
+success, by at most a few points. The same caveat is now a line in `success_vs_seastate.md`'s
+header.
 
 **Seed-to-seed spread (`seeds.csv`; sample SD, ddof = 1).**
 - `ppo`: success SD 0.0 points at SS3–SS5 and 0.3 at SS6; p95 SD 0.001–0.005 m/s.
@@ -2872,7 +2888,7 @@ cell's six fractions sum to 1; full per-seed tables in `success_vs_seastate.md`)
 | `aggregate.csv` (24 rows) | `ded3cdd53290d025f60c81a029d8545dcaf6d99babe204dd03d842acfa2874b9` |
 | `carried_summary_e01.csv` | `27da5b6f8db170cbcb0c794c039113018d82242b2beb9470a8149f8823b2d277` |
 | `carried_summary_e01_lowvz_cut.csv` | `39101ccbf2df946ac838bb635f3e295d58d1008ef175987d4301f25cdcda9594` |
-| `success_vs_seastate.md` | `6ae9bc3100539c0b3810071b9c731e9148074fa2b44c1d8893eb4c52aa9863f7` |
+| `success_vs_seastate.md` | `685c53c0c8635368d89b1059ff4be4c75d7a1069d0b840437a8c96f374c0c5d6` (Gate 5 caveat line added; as first committed: `6ae9bc3100539c0b3810071b9c731e9148074fa2b44c1d8893eb4c52aa9863f7`) |
 
 `run_info.json` holds the non-deterministic facts (host, timings, git state) and is not hashed
 here. No hypothesis is scored (Phase 7). P3-D1 is unchanged.
@@ -2900,7 +2916,9 @@ committed row exactly, 1 354 of 1 354.** Nothing was re-trained and nothing in `
   --workers 24`. The main thread re-ran it into scratch, and all 16 CSVs were byte-identical.
 - *Hashes.*
   - `verdicts.csv`: `36ec2fdcd9ce7c9553c74b157e09dd6b4d94b883f8323c11000008c9a55b832a`
-  - `README.md`: `e30e413db8845480d1a40888b4cc6395a94c03e2760b7c2aa91bf38622e2c2ed`
+  - `README.md`: `8abf25451a12993819354868215447f960fc22ba322054559bce81313f87487b`
+    (after the Gate 5 corrections; as first committed in `d3af59c`:
+    `e30e413db8845480d1a40888b4cc6395a94c03e2760b7c2aa91bf38622e2c2ed`)
   - `ppo.csv`: `47030581299b8f80898f734307a26372ded42bb9e7e47c72d6ec733a8ac49cbe`
   - `sac.csv`: `190dfb6e4769391d7b725bba86977cf118d4f9570d8e8756c0ea093ce1df5330`
 - *Thresholds.* They were pre-stated in `results/audit/README.md`, whose section says it was
@@ -2938,8 +2956,20 @@ committed row exactly, 1 354 of 1 354.** Nothing was re-trained and nothing in `
     at 0.6–0.7, 92 % at 0.8–0.9.
   - Maximum depth comes a median 38 ms after first contact, and the motors are at idle then in
     59 % of cases.
-- **No success depends on penetration.** Post hoc, 0 of PPO's 6 flagged episodes and 1 of SAC's
-  264 are plausibly outcome-changing, and that one is a bounce, which counts against the policy.
+- **Whether any success depends on penetration is not shown** (corrected at the Gate 5 review,
+  2026-09-30; the audit first wrote "no success depends on penetration").
+  - The audit's post-hoc argument was that no flagged success has an unloaded stretch longer
+    than the 50 ms grace. That does not settle it: without the overlap the drone would separate
+    during that stretch and have to close the gap again, so the counterfactual gap is at least
+    as long and plausibly longer. 20 of the 41 SAC stretches are ≥ 25 ms, and one is exactly
+    50 ms.
+  - **Bound:** up to 41 SAC successes (1 / 3 / 13 / 24 at SS3–SS6, per 1 000 seed-episodes)
+    and 2 PPO successes (SS6) may depend on the overlap.
+  - With the measurement-instant fact below, both biases can only raise SAC's SS5/SS6 success,
+    by at most a few points. SAC is already below `pid_feedforward` there, so no reading there
+    changes direction.
+  - Of the non-success flagged episodes, 1 of SAC's is plausibly outcome-changing, and it is a
+    bounce, which counts against the policy.
 - **P5-D3's idle-thrust explanation for `lowvz_cut` tunnelling is now verified.** PPO's 6 and
   lowvz_cut's 6 `id` episodes are all of that kind.
 - **PPO's fixed ~1.5 s touchdown is an active descent.** It descends at about −1.2 m/s, then holds

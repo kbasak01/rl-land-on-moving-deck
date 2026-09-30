@@ -4,7 +4,7 @@ Simulation only. Froude-scaled deck (lambda = 1/25); every time, length and spee
 **model scale** (1 s model = 5 s full scale, 1 m model = 25 m full scale). 3-DOF deck
 (heave, roll, pitch) from dmf, with its known roll/pitch-heave phase defect carried: the pad
 is the P3-D1 aft pad, where that defect matters; the pad-at-CG control is Phase 7.
-State-based observation with a noise stand-in, not vision.
+State-based observation; the perception-noise stand-in is disabled (`configs/env/noise.yaml: enabled: false`); not vision.
 
 ## Pre-stated thresholds (written 2026-09-30 08:49 EDT, before any audit number was computed)
 
@@ -265,6 +265,10 @@ byte-identical to the version saved at 08:49 EDT, before any audit number was co
 | `sac` depth p99 / max (mm) | 4.31 / 6.05 | 5.02 / 7.82 | 8.81 / 13.19 | 10.24 / 15.67 | 8.46 / 15.67 |
 | `lowvz_cut` tunnelled n / 200 | 0 | 0 | 1 | 5 | 6 (0.75 %) |
 | `pid_feedforward` tunnelled n / 200 | 0 | 0 | 0 | 0 | 0 |
+| `pid_feedforward_lowvz` tunnelled n / 200 | 0 | 0 | 0 | 0 | 0 |
+| `pid_track_descend` tunnelled n / 200 | 0 | 0 | 4 | 2 | 6 (0.75 %) |
+| `gated` tunnelled n / 200 | 0 | 0 | 0 | 0 | 0 |
+| `oracle_gated` (privileged) tunnelled n / 200 | 0 | 0 | 0 | 0 | 0 |
 
 - Per seed, `sac` tunnels 39 / 60 / 66 / 49 / 50 episodes, with max depth 9.1–15.7 mm.
 - `ppo` is under both references (0.75 %, 7.03 mm), so it is clean for 2a. It is still
@@ -342,6 +346,10 @@ byte-identical to the version saved at 08:49 EDT, before any audit number was co
   | `sac` | 0 | 0 | 3 | 2 |
   | `pid_feedforward_lowvz` | 0 | 4 | 9 | 21 |
   | `pid_feedforward_lowvz_cut` | 0 | 3 | 4 | 15 |
+  | `pid_feedforward` | 0 | 0 | 1 | 11 |
+  | `pid_track_descend` | 0 | 4 | 18 | 23 |
+  | `gated` | 0 | 0 | 0 | 4 |
+  | `oracle_gated` (privileged) | 0 | 0 | 1 | 0 |
 
   So `ppo` bounces at 0.3 % and `sac` at 0.2 % at SS6, against 10.5 % (`lowvz`) and 7.5 %
   (`lowvz_cut`). Both learned methods touch down faster than `lowvz` (P5-D1's route (b)),
@@ -453,7 +461,14 @@ acceleration and tilt at maximum depth.
   50 ms.
   - None of the 43 flagged successes has an unloaded stretch longer than 50 ms. For `sac` the
     median is 21 ms and the maximum is exactly 50 ms, which is not > 50 ms.
-  - So **no `success` depends on the penetration.**
+  - **Correction (Gate 5 review, 2026-09-30):** this does *not* show that no success depends
+    on the penetration. Without the overlap the drone would separate during the unloaded
+    stretch and then have to close the gap again, so the counterfactual gap is at least as long
+    as the unloaded stretch and plausibly longer; 20 of the 41 `sac` stretches are ≥ 25 ms and
+    one is exactly 50 ms. What holds: **up to 41 `sac` successes (1 / 3 / 13 / 24 at SS3–SS6,
+    per 1 000 seed-episodes) and 2 `ppo` successes (SS6) may depend on the overlap; this is
+    not shown either way.** The original sentence read "So no `success` depends on the
+    penetration" and is withdrawn.
 - **The two `deep_at_first_contact` episodes do not depend on it either.**
   - Both are tumbling drones (relative tilt 47° and 61°) arriving at 2.5–2.6 m/s.
   - One is `hard_landing` with a recorded 0.68 m/s (> 0.5 whatever the depth). The other is
@@ -483,8 +498,12 @@ acceleration and tilt at maximum depth.
    contact substep (`EpisodeRecord.tunnelled`), and in 262 / 264 of `sac`'s tunnelled
    episodes the maximum depth is reached after the first contact substep
    (`t_max_after_td_s` > 0). The committed counts use the code's definition.
-4. **Tunnelling decides no success** (2c). `sac`'s 6.6 % is a symptom of fast arrivals plus
-   the throttle cut. Its successes are not inflated by it.
+4. **Tunnelling may inflate `sac` success by a few points** (2c; corrected at the Gate 5
+   review, 2026-09-30, from "decides no success"). `sac`'s 6.6 % is a symptom of fast arrivals
+   plus the throttle cut. Up to 41 of its successes (13 at SS5, 24 at SS6 per 1 000) may depend
+   on the overlap; with the measurement-instant finding (item 1) both biases can only raise
+   `sac`'s SS5/SS6 success. `sac` is already below `pid_feedforward` in those cells, so no
+   reading there changes direction.
 5. **H1a confound (P5-D1 / D3) is live for both methods.**
    - `sac` cuts to idle after contact in every seed.
    - Three of the five `ppo` seeds do too. The pooled `ppo` verdict (clean by 0.008) should
