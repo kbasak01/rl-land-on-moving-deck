@@ -46,6 +46,7 @@ from rld.eval.metrics import CELL_METRIC_COLUMNS, CellMetrics, as_bool, as_float
 from rld.eval.stats import wilson_interval
 
 __all__ = [
+    "CAVEATS",
     "CELL_STATUS_COLUMNS",
     "QUIET_COLUMNS",
     "DEFAULT_PAD",
@@ -156,6 +157,10 @@ _CAVEATS: tuple[str, ...] = (
     "dmf's roll/pitch-heave phase defect (~90 deg) is carried, not fixed; this table is the "
     "aft pad, which is sensitive to it (P1-D2).",
 )
+
+
+#: Public name of the caveats, for other renderers (e.g. :mod:`rld.eval.learned`).
+CAVEATS: tuple[str, ...] = _CAVEATS
 
 
 def sha256_file(path: Path) -> str:

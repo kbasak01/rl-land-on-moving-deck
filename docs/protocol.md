@@ -2720,6 +2720,171 @@ P5-D9 rule. None was superseded or resumed.
 
 *Launch.* `make sweep CFG=configs/rl/sac.yaml SEEDS="0 1 2 3 4"`.
 
+### P5-D13 — PPO and SAC final checkpoints on the frozen id list (2026-09-30)
+
+*What was flown.* The `final/` checkpoint of each of the ten finished Phase 5 runs, on
+`results/episodes/id.parquet` (SS3–SS6, N = 200 per cell, aft pad): 10 runs × 800 = **8 000
+episodes**, none skipped.
+- *Runs.* `artifacts/runs/ppo/{0..4}` (`ppo`, 10 M steps, trained at `1d67488`; checkpoint at
+  10 010 624 steps) and `artifacts/runs/sac/{0..4}` (`sac`, 2 M steps, trained at `14d7f32`;
+  checkpoint at 2 000 000 steps). All ten are `done`, and `status.json` `resumed_from` is null
+  for every one.
+- *Policy path.* `rld.eval.runner.callable_spec(method, functools.partial(rld.rl.train.build_policy,
+  run_dir=<run>, ckpt="final"), run_seed=<training seed>)`: the batch-1 `LearnedPolicy`,
+  deterministic action, `VecNormalize` frozen (`training=False`, `norm_reward=False`), no
+  ship-motion feed, not privileged. The seed label is the run's training seed, read from
+  `provenance.json` and checked against `status.json`.
+- *Runner.* The same chunked, parallel `run_matrix` path as e01 (chunk 25, 24 workers,
+  `OMP_NUM_THREADS = MKL_NUM_THREADS = 1` in every worker); 150.0 s wall.
+- *Before the run.* `scripts/make_episodes.py --check`: 10/10 hashes OK, MANIFEST SHA-256
+  `e6f30e55…`. The `id` list is file `919be99d…`, content `ea38d8a5…`, as in P3-D1 §2.
+- *Command.* `python -m rld.eval.learned --learned ppo=artifacts/runs/ppo/0,…,4
+  sac=artifacts/runs/sac/0,…,4 --ckpt final --list id --out-dir results/e05 --workers 24`.
+  The entry point is a module because `scripts/` is outside the eval-auditor's write scope
+  (as for `rld.eval.paired_outcomes` in P5-D3); a thin `scripts/eval_learned.py` may call
+  `rld.eval.learned.main`.
+
+*Provenance.*
+- *Code state.* HEAD `00bff09`, `git_dirty = true`. The dirty paths are the user's two
+  `.claude/skills/*.md` files and this entry's eval-side files: the new
+  `src/rld/eval/learned.py` and `tests/test_eval_learned.py`, and `src/rld/eval/report.py`
+  (a public `CAVEATS` alias only). Nothing under `src/rld/` or `configs/` changed between
+  `14d7f32` and HEAD. Since `1d67488` the only such change is `configs/rl/sac.yaml` (P5-D12),
+  which the PPO runs do not read.
+- *Run digests* (all in `run_info.json`, and per row in `summary.csv`). Every PPO run's
+  `config.yaml` is `aa28e4f4…` and its `config_source.yaml` is `26b6c49f…` (=
+  `configs/rl/ppo.yaml`, P5-D11). Every SAC run's are `04af3f42…` and `a46f9415…` (=
+  `configs/rl/sac.yaml`, P5-D12). `final/model.zip` and `final/vecnormalize.pkl` were hashed
+  before and after the flight, and did not change:
+
+  | run | `model.zip` | `vecnormalize.pkl` |
+  |---|---|---|
+  | ppo 0 / 1 / 2 / 3 / 4 | `1a012394…` / `77e172f4…` / `785d0789…` / `ab715248…` / `0f6fa22d…` | `9ddb2a99…` / `a82172a5…` / `9a95795a…` / `97bb0f4a…` / `6e5d7599…` |
+  | sac 0 / 1 / 2 / 3 / 4 | `3401491e…` / `8f724505…` / `9688985a…` / `c5c2be8f…` / `45a54640…` | `145883fa…` / `eb9ea77c…` / `aa95499e…` / `6462c1c4…` / `5d0066db…` |
+
+- *Baselines carried, not re-flown.* Their `summary.csv` lines for the four `id` aft cells are
+  copied line for line into `carried_summary_e01.csv` (20 lines: `pid_track_descend`,
+  `pid_feedforward`, `pid_feedforward_lowvz`, `gated`, `oracle_gated`; source summary
+  `2e5a3400…`, episodes `c5852090…`) and `carried_summary_e01_lowvz_cut.csv` (4 lines:
+  `pid_feedforward_lowvz_cut`; source summary `180eeef9…`, episodes `8fe15278…`). Checked and
+  recorded in `run_info.json["carried"]`:
+  - every line is byte-identical to a source line (also re-checked with `grep -Fx`: 21/21 and
+    5/5 including headers);
+  - each source's run-wide provenance columns equal the live ones;
+  - each source flew exactly the 800 listed `id` episodes (regime, SS, index, realization,
+    episode seed, `t0`, initial position);
+  - re-summarising each source's `episodes.csv` reproduces its summary's metric columns as
+    text.
+- *Re-derivation.* `python -m rld.eval.learned --check` recomputes `summary.csv`, `seeds.csv`,
+  `aggregate.csv` and the markdown from `episodes.csv`: all four **byte-identical**. The markdown
+  was re-rendered once after the run (renderer text only: the penetration column shown as a
+  positive depth, and the note that a seed-bootstrap CI excludes episode sampling). No CSV
+  changed; `run_info.json["re_rendered"]` records both hashes.
+
+**Headline: `id`, aft pad, success per sea state.** Learned rows: rliable IQM across the 5
+seeds (%), stratified-bootstrap 95 % CI (P3-D1 §4: 2 000 replicates, seed 20260926, seeds
+resampled within the cell, one cell per task), then the per-seed range. Baselines: one
+deterministic run, % [Wilson 95 % CI] k/200. Success is not pooled across sea states. SS6 is
+outside every method's training distribution (`in_training_distribution` 0.000; 0.745–0.755 at
+SS3–SS5, where the 90° headings are outside the dev pool).
+
+| method | SS3 | SS4 | SS5 | SS6 (out of distribution) |
+|---|---|---|---|---|
+| `ppo` IQM [CI]; seed range | 100.0 [100.0, 100.0]; 100.0–100.0 | 100.0 [100.0, 100.0]; 100.0–100.0 | 100.0 [100.0, 100.0]; 100.0–100.0 | 98.2 [98.0, 98.5]; 98.0–98.5 |
+| `sac` IQM [CI]; seed range | 99.8 [98.8, 100.0]; 98.5–100.0 | 98.2 [96.3, 99.0]; 96.0–99.0 | 87.0 [81.7, 90.3]; 80.0–91.0 | 72.5 [60.2, 79.3]; 55.5–81.5 |
+| `pid_track_descend` | 100.0 [98.1, 100.0] 200 | 96.0 [92.3, 98.0] 192 | 85.0 [79.4, 89.3] 170 | 80.0 [73.9, 85.0] 160 |
+| `pid_feedforward` | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | 99.0 [96.4, 99.7] 198 | 90.5 [85.6, 93.8] 181 |
+| `pid_feedforward_lowvz` | 100.0 [98.1, 100.0] 200 | 98.0 [95.0, 99.2] 196 | 95.5 [91.7, 97.6] 191 | 85.0 [79.4, 89.3] 170 |
+| `pid_feedforward_lowvz_cut` | 100.0 [98.1, 100.0] 200 | 98.5 [95.7, 99.5] 197 | 98.0 [95.0, 99.2] 196 | 88.0 [82.8, 91.8] 176 |
+| `gated` | 100.0 [98.1, 100.0] 200 | 98.5 [95.7, 99.5] 197 | 89.5 [84.5, 93.0] 179 | 63.0 [56.1, 69.4] 126 |
+| `oracle_gated` (privileged; commit-timing oracle) | 100.0 [98.1, 100.0] 200 | 98.5 [95.7, 99.5] 197 | 89.0 [83.9, 92.6] 178 | 64.5 [57.7, 70.8] 129 |
+
+- *Per-seed Wilson CIs.* `ppo`: 200/200 [98.1, 100.0] for every seed at SS3–SS5; at SS6,
+  197, 196, 196, 197, 196 (seeds 0–4), e.g. 98.0 [95.0, 99.2]. `sac`: SS5 178, 160, 182, 174,
+  170, e.g. seed 1 80.0 [73.9, 85.0]; SS6 163, 111, 150, 146, 139, e.g. seed 1 55.5
+  [48.6, 62.2]. Every cell is in `summary.csv` and the rendered table.
+- *Optimality gap* (points, [CI]): `ppo` 0.0 at SS3–SS5, 1.8 [1.6, 2.0] at SS6; `sac` 0.4
+  [0.0, 1.0], 2.1 [1.1, 3.2], 13.6 [10.6, 17.0], 29.1 [22.4, 37.5].
+- *What the seed CI is.* It reflects seed-to-seed variation only. Where every `ppo` seed scores
+  200/200 it collapses to [100.0, 100.0]; the episode-level uncertainty is then each seed's
+  Wilson CI, [98.1, 100.0].
+- **Budget confound.** `ppo` had 10 M env steps per seed and `sac` 2 M (P3-D1 §5). Every
+  PPO-vs-SAC reading carries it. No method contrast is tested here, and none of the baseline
+  comparisons above is a paired test: they are unpaired readings of the tables.
+
+**Closing speed (p95 along the deck normal, m/s model scale; IQM of the per-seed p95s
+[stratified-bootstrap CI]).** Descriptive; it is not P3-D1 §4's pooled relative-p95 statistic.
+
+| method | SS3 | SS4 | SS5 | SS6 |
+|---|---|---|---|---|
+| `ppo` | 0.265 [0.263, 0.266] | 0.267 [0.264, 0.270] | 0.271 [0.267, 0.275] | 0.278 [0.274, 0.285] |
+| `sac` | 0.392 [0.369, 0.433] | 0.437 [0.406, 0.478] | 0.595 [0.562, 0.619] | 0.668 [0.590, 0.778] |
+| `pid_feedforward` | 0.219 | 0.226 | 0.262 | 0.264 |
+| `pid_feedforward_lowvz` (H1a reference) | 0.127 | 0.139 | 0.188 | 0.181 |
+
+**Seed-to-seed spread (`seeds.csv`; sample SD, ddof = 1).**
+- `ppo`: success SD 0.0 points at SS3–SS5 and 0.3 at SS6; p95 SD 0.001–0.005 m/s.
+- `sac`: success SD 0.7, 1.3, 4.2 and 9.7 points at SS3–SS6; p95 SD 0.028–0.091 m/s.
+
+**Outcome breakdown where the learned methods lose** (counts over 5 seeds × 200 per cell; every
+cell's six fractions sum to 1; full per-seed tables in `success_vs_seastate.md`).
+- `ppo` loses only at SS6: 15 `hard_landing` and 3 `bounce` in 1 000 seed-episodes (per seed
+  3/4/3/2/3 hard, 0/0/1/1/1 bounce). No `crash`, `off_pad` or `timeout` in any cell.
+- `sac`, summed over seeds:
+
+  | SS | crash | off_pad | hard_landing | bounce | timeout |
+  |---|---|---|---|---|---|
+  | SS3 | 0 | 0 | 4 | 0 | 0 |
+  | SS4 | 0 | 1 | 20 | 0 | 0 |
+  | SS5 | 2 | 8 | 122 | 3 | 1 |
+  | SS6 | 18 | 39 | 232 | 2 | 0 |
+
+  The 20 crashes are `tilt_gt_crash` 16, `off_plate_strike` 3 and `below_deck` 1; 17 of them
+  are seeds 2 and 4 at SS6. No baseline has a `crash` or an `off_pad` in any `id` cell
+  (P3-D1 §7).
+
+**Surprises and flags (reported, not acted on; the Step 2 audit owns the follow-up).**
+1. **`ppo` at `id` SS6 is above every baseline's single run (unpaired).** It scores 98.0–98.5 %
+   on a sea state it never trained on, against 90.5 % [85.6, 93.8] for `pid_feedforward`. This
+   is not a tested contrast, and it is not H1b, which is about `residual_ppo`.
+2. **`ppo` lands fast at a nearly fixed closing speed.** Its median time to touchdown is
+   1.51–1.59 s at every SS, against 4.4–4.6 s for `pid_feedforward`, 3.2–4.7 s for `gated` and
+   7.6–7.8 s for `lowvz`. Its p50 closing speed is 0.241–0.254 m/s in every cell, and its p95 is
+   above `pid_feedforward`'s and `lowvz`'s in every cell.
+3. **`sac` tunnels.** 264 of 4 000 episodes exceed the 5 mm threshold (3, 11, 72 and 178 at
+   SS3–SS6), with a maximum depth of 15.67 mm. Compare P5-D3's `lowvz_cut`: 31 over all 14
+   cells, max 7.03 mm. `ppo` tunnels 6 times (max 5.35 mm).
+4. **`sac` seed 1 at SS6** is 55.5 %, 14 points below the next-lowest seed (69.5 %). Its
+   losses are 80 `hard_landing`, 8 `off_pad` and 1 `crash`.
+5. **Timeouts are almost absent**: 1 of 8 000 (`sac` seed 2, SS5). Neither final policy shows
+   the P5-D9 hover trap on this list. `gated` times out on 35 % of `id` SS6.
+6. **Detector disagreement** is 2 / 8 000 (`sac` SS6, seeds 0 and 4); `ppo` has 0 / 4 000.
+7. **N and seeds.** Every one of the 40 learned cells has N = 200 and all 5 seeds; there is
+   no missing seed and no short cell.
+
+*Artifacts, all in `results/e05/` (SHA-256).*
+
+| file | SHA-256 |
+|---|---|
+| `episodes.csv` (8 000 rows) | `92419dfc49d854dae84836d1f3721fde4cd254363772a13e6ba980f606fb6169` |
+| `summary.csv` (40 rows) | `a2a0f50f77012a4488c6c28939a170725ed95453d2a9589f10612a7a1d6192f2` |
+| `seeds.csv` (8 rows) | `cf61ce010b08535fabe96996cd5e8259ac04578cbf4bc95c8fcfe6a7883c1613` |
+| `aggregate.csv` (24 rows) | `ded3cdd53290d025f60c81a029d8545dcaf6d99babe204dd03d842acfa2874b9` |
+| `carried_summary_e01.csv` | `27da5b6f8db170cbcb0c794c039113018d82242b2beb9470a8149f8823b2d277` |
+| `carried_summary_e01_lowvz_cut.csv` | `39101ccbf2df946ac838bb635f3e295d58d1008ef175987d4301f25cdcda9594` |
+| `success_vs_seastate.md` | `6ae9bc3100539c0b3810071b9c731e9148074fa2b44c1d8893eb4c52aa9863f7` |
+
+`run_info.json` holds the non-deterministic facts (host, timings, git state) and is not hashed
+here. No hypothesis is scored (Phase 7). P3-D1 is unchanged.
+
+*Code (eval side only).* `src/rld/eval/learned.py` (new): run inspection and seed labelling,
+the learned spec, the flight through `run_matrix`, per-seed summary, `seeds.csv`,
+`aggregate.csv`, the baseline carry and its checks, the renderer, and `--render-only` and
+`--check`. `tests/test_eval_learned.py` (new): two tiny SAC runs at training seeds 0 and 3 flown
+end to end through `main` on a temporary dev-pool list, never a committed one. It checks seed
+labels, worker independence, the carry checks, the privileged label and byte-identical
+re-rendering, plus known-value tests of the spread and IQM.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|
