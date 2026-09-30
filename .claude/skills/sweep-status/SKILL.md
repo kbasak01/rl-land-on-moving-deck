@@ -2,7 +2,7 @@
 name: sweep-status
 description: Summarise the state of all background training runs from their status files and logs.
 argument-hint: <method filter, optional>
-disable-model-invocation: true
+#disable-model-invocation: true
 allowed-tools: Read, Glob, Bash
 ---
 
