@@ -1,0 +1,3 @@
+method,run_seed,ss,index,outcome,termination_reason,td_t_episode_s,td_t_episode_analytic_s,closing_speed_normal_m_s,depth_i0_mm,depth_max_mm,mechanism
+sac,0,SS6,58,off_pad,release,1.3416666666666666,nan,0.5212321803969804,-0.9590575387752227,0.0,impact
+sac,4,SS6,175,crash,off_plate_strike,3.675,nan,1.0337122464975297,-1.5418923265856956,0.0,impact

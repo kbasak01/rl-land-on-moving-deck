@@ -1,0 +1,30 @@
+# pid_feedforward_lowvz_cut -- pid_feedforward_lowvz plus a post-contact throttle cut
+# (src/rld/control/lowvz_cut.py). NOT privileged, no ship-motion feed: the rule reads only the
+# committed observation's `in_contact` flag and `deck_normal` block.
+#
+# Rule fixed in docs/protocol.md P5-D2 (2026-09-23) BEFORE any episode of this controller was
+# flown. ZERO tuning budget: no sweep, no variant selected by success. User decision at the
+# end of P5-D1.
+#
+# Units: metres, metres per second and seconds are MODEL scale (lambda = 1/25).
+#
+# Gains: pid_feedforward_lowvz's, loaded BY REFERENCE (not copied), so this controller flies
+# exactly lowvz's gains and cannot drift from them.
+gains_from: pid_feedforward_lowvz.yaml
+
+# THE RULE (P5-D2):
+#   touchdown inference -- the observation's `in_contact` flag (the environment's
+#     contact-manifold detector, normal force > 1e-4 N, state at the last physics substep of
+#     the control step). No threshold beyond the flag itself.
+#   latch -- set on the first observation with in_contact = 1; held until reset(). It is
+#     never released: any contact gap longer than contact_loss_grace_s (0.05 s) ends the
+#     episode, and the shorter gaps are exactly when the down-force is needed.
+#   before the latch -- lowvz's setpoint, bit for bit.
+#   after the latch  -- lowvz's setpoint minus cut_speed_m_s along the observed deck normal,
+#     then the shared norm cap. This drives DSLPIDControl's collective to MIN_PWM on all four
+#     motors (thrust 0.1126 N = 42.6 % of weight, zero attitude torque): motors to idle.
+#
+# m/s, model scale. Equal to v_max_m_s (configs/env/landing.yaml): the full-scale descent of
+# the shared action space. Not compared against other values by flying. P5-D2 records the
+# static envelope in which it puts every motor at idle.
+cut_speed_m_s: 1.5

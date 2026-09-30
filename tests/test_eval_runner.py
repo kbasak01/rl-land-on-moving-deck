@@ -88,6 +88,7 @@ def test_registry_privilege_flags() -> None:
         "pid_track_descend": False,
         "pid_feedforward": False,
         "pid_feedforward_lowvz": False,
+        "pid_feedforward_lowvz_cut": False,
         "gated": False,
         "oracle_gated": True,
         "gated_forecast": False,

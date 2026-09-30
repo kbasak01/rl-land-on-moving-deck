@@ -1,0 +1,338 @@
+{
+  "started_utc": "2026-09-30T12:30:59+00:00",
+  "omp_num_threads": "1",
+  "cpu_count": "36",
+  "host": "DATTA-BASAK",
+  "timestamp_utc": "2026-09-30T12:33:50+00:00",
+  "mkl_num_threads": "1",
+  "workers": 24,
+  "chunk": 25,
+  "wall_s": 150.0,
+  "episodes": 8000,
+  "git_sha": "00bff091437cc665d81f05f5d1814a96403caf6f",
+  "git_dirty": true,
+  "git_dirty_paths": [
+    " M .claude/skills/new-controller/SKILL.md",
+    " M .claude/skills/sweep-status/SKILL.md",
+    " M src/rld/eval/report.py",
+    "?? src/rld/eval/learned.py",
+    "?? tests/test_eval_learned.py"
+  ],
+  "list": {
+    "name": "id",
+    "file": "results/episodes/id.parquet",
+    "rows": 800,
+    "per_cell": null,
+    "file_sha256": "919be99d2d25b2aea2200482dfc5de7840918845e1a8dc0b2bc4c2c1926dc64d",
+    "content_sha256": "ea38d8a50e59a84e3c3b62723a1a5e411af9786351e1e5f70359a8dde5769017",
+    "manifest_sha256": "e6f30e55e478d39061b94e38de33959ca99b16e8cac38a3bd99b34f6543ad4a2",
+    "manifest_check": "10/10 hashes OK"
+  },
+  "runs": [
+    {
+      "method": "ppo",
+      "seed": 0,
+      "run_dir": "artifacts/runs/ppo/0",
+      "ckpt": "final",
+      "ckpt_steps": 10010624,
+      "algo": "ppo",
+      "total_steps": 10000000,
+      "train_git_sha": "1d67488e2ec8c8522968511a772f65cfe3d8699d",
+      "train_git_dirty_paths": [
+        " M .claude/skills/new-controller/SKILL.md",
+        " M .claude/skills/sweep-status/SKILL.md"
+      ],
+      "resumed_from": null,
+      "run_config_sha256": "aa28e4f4fd67c42b54cc6e93b365289bca6512297f4b84c1784bb2fe48a6d1b3",
+      "run_config_source_sha256": "26b6c49f8552f5fa626c19bab5222205eb83d294854734a23c3b0b1b3d70e14a",
+      "run_model_sha256": "1a012394335c44d1e08d20f2199debaf3809d7bef96e04749817ae35b584fd49",
+      "run_vecnormalize_sha256": "9ddb2a992d4263426bc28033f8cd9f7f54daf7011ca67eb81f3099ecf289db6f",
+      "run_checkpoint_json_sha256": "2ea668e37f848fc3f7a50cfb21c64435de80f878bbef01ee165e3a8e5b0e00a0"
+    },
+    {
+      "method": "ppo",
+      "seed": 1,
+      "run_dir": "artifacts/runs/ppo/1",
+      "ckpt": "final",
+      "ckpt_steps": 10010624,
+      "algo": "ppo",
+      "total_steps": 10000000,
+      "train_git_sha": "1d67488e2ec8c8522968511a772f65cfe3d8699d",
+      "train_git_dirty_paths": [
+        " M .claude/skills/new-controller/SKILL.md",
+        " M .claude/skills/sweep-status/SKILL.md"
+      ],
+      "resumed_from": null,
+      "run_config_sha256": "aa28e4f4fd67c42b54cc6e93b365289bca6512297f4b84c1784bb2fe48a6d1b3",
+      "run_config_source_sha256": "26b6c49f8552f5fa626c19bab5222205eb83d294854734a23c3b0b1b3d70e14a",
+      "run_model_sha256": "77e172f4133c465b39c1f770f59e892666d3c9109a0d74da434e54a2c3a5294b",
+      "run_vecnormalize_sha256": "a82172a5d0cdab6b63ae362ee461ed3fa67d30136b83e87be42a72da47da455f",
+      "run_checkpoint_json_sha256": "8d1481982a00eb2ce0ff3666e34c32e7d7d1a5c92dbb3206d2b5c46f3255e70a"
+    },
+    {
+      "method": "ppo",
+      "seed": 2,
+      "run_dir": "artifacts/runs/ppo/2",
+      "ckpt": "final",
+      "ckpt_steps": 10010624,
+      "algo": "ppo",
+      "total_steps": 10000000,
+      "train_git_sha": "1d67488e2ec8c8522968511a772f65cfe3d8699d",
+      "train_git_dirty_paths": [
+        " M .claude/skills/new-controller/SKILL.md",
+        " M .claude/skills/sweep-status/SKILL.md"
+      ],
+      "resumed_from": null,
+      "run_config_sha256": "aa28e4f4fd67c42b54cc6e93b365289bca6512297f4b84c1784bb2fe48a6d1b3",
+      "run_config_source_sha256": "26b6c49f8552f5fa626c19bab5222205eb83d294854734a23c3b0b1b3d70e14a",
+      "run_model_sha256": "785d07894e5792c21be9101064cf625c2f21171047f56684d5a0e9b55a6aee91",
+      "run_vecnormalize_sha256": "9a95795a0e61c02e4389f547b94a9dd08c0912af60a5e2094e5cc314ffbfabc3",
+      "run_checkpoint_json_sha256": "02bd6e2fc9633ae4e89365c42d519dc4e8ef0c67d17be4050ff3a485b90047de"
+    },
+    {
+      "method": "ppo",
+      "seed": 3,
+      "run_dir": "artifacts/runs/ppo/3",
+      "ckpt": "final",
+      "ckpt_steps": 10010624,
+      "algo": "ppo",
+      "total_steps": 10000000,
+      "train_git_sha": "1d67488e2ec8c8522968511a772f65cfe3d8699d",
+      "train_git_dirty_paths": [
+        " M .claude/skills/new-controller/SKILL.md",
+        " M .claude/skills/sweep-status/SKILL.md",
+        "?? results/tune/sac_v2/selection.json",
+        "?? results/tune/sac_v2/trials.csv"
+      ],
+      "resumed_from": null,
+      "run_config_sha256": "aa28e4f4fd67c42b54cc6e93b365289bca6512297f4b84c1784bb2fe48a6d1b3",
+      "run_config_source_sha256": "26b6c49f8552f5fa626c19bab5222205eb83d294854734a23c3b0b1b3d70e14a",
+      "run_model_sha256": "ab7152483da4fd50de264a3f0daaffb37cb7febe316803c154b3ed5a494f4d8f",
+      "run_vecnormalize_sha256": "97bb0f4a9cea41eba346cbef16d10a8fd2e625280036dca49859e9d49d7d98f7",
+      "run_checkpoint_json_sha256": "e06fa8718729185b93b0874dab70fd01f0cf9fa14cf7de867d18c5555d8c8858"
+    },
+    {
+      "method": "ppo",
+      "seed": 4,
+      "run_dir": "artifacts/runs/ppo/4",
+      "ckpt": "final",
+      "ckpt_steps": 10010624,
+      "algo": "ppo",
+      "total_steps": 10000000,
+      "train_git_sha": "1d67488e2ec8c8522968511a772f65cfe3d8699d",
+      "train_git_dirty_paths": [
+        " M .claude/skills/new-controller/SKILL.md",
+        " M .claude/skills/sweep-status/SKILL.md",
+        "?? results/tune/sac_v2/selection.json",
+        "?? results/tune/sac_v2/trials.csv"
+      ],
+      "resumed_from": null,
+      "run_config_sha256": "aa28e4f4fd67c42b54cc6e93b365289bca6512297f4b84c1784bb2fe48a6d1b3",
+      "run_config_source_sha256": "26b6c49f8552f5fa626c19bab5222205eb83d294854734a23c3b0b1b3d70e14a",
+      "run_model_sha256": "0f6fa22d0d78ca95d6921cbffd3a3f33256b0b062e60450732bc5ff3d852289b",
+      "run_vecnormalize_sha256": "6e5d7599d8b22d2faeae0c29e77815969a718294a40510afc7a7f4c6eeba4d38",
+      "run_checkpoint_json_sha256": "25ca4106038d25702886c8826640f3a64cf21ce82006e4cae60c158511cd7d6e"
+    },
+    {
+      "method": "sac",
+      "seed": 0,
+      "run_dir": "artifacts/runs/sac/0",
+      "ckpt": "final",
+      "ckpt_steps": 2000000,
+      "algo": "sac",
+      "total_steps": 2000000,
+      "train_git_sha": "14d7f32bf25e34a16fe3677cdab869c107881536",
+      "train_git_dirty_paths": [
+        " M .claude/skills/new-controller/SKILL.md",
+        " M .claude/skills/sweep-status/SKILL.md"
+      ],
+      "resumed_from": null,
+      "run_config_sha256": "04af3f42a26542592ae4f363f65c6e5d7add8aeafb0ca57a9a91656a83c5623d",
+      "run_config_source_sha256": "a46f94152e99cd325ec30eb7de6c25c79be05c2294519eddee235e09b8bf5159",
+      "run_model_sha256": "3401491ed458d6d474879747c9951dcd51ee8cb8cc761762d78de5b8f4271222",
+      "run_vecnormalize_sha256": "145883fa0744dbaa9bdd35d50f7069f67ed4e6a269023e7d19c524825ca1755b",
+      "run_checkpoint_json_sha256": "93dce22b2e888e64cef832c51e9fd69a23b7240739883bba0d0b452edbd0e43a"
+    },
+    {
+      "method": "sac",
+      "seed": 1,
+      "run_dir": "artifacts/runs/sac/1",
+      "ckpt": "final",
+      "ckpt_steps": 2000000,
+      "algo": "sac",
+      "total_steps": 2000000,
+      "train_git_sha": "14d7f32bf25e34a16fe3677cdab869c107881536",
+      "train_git_dirty_paths": [
+        " M .claude/skills/new-controller/SKILL.md",
+        " M .claude/skills/sweep-status/SKILL.md"
+      ],
+      "resumed_from": null,
+      "run_config_sha256": "04af3f42a26542592ae4f363f65c6e5d7add8aeafb0ca57a9a91656a83c5623d",
+      "run_config_source_sha256": "a46f94152e99cd325ec30eb7de6c25c79be05c2294519eddee235e09b8bf5159",
+      "run_model_sha256": "8f72450570c886e5c0f75c9a89782a62f7e829fc0ed24e12b4a9994098d4373d",
+      "run_vecnormalize_sha256": "eb9ea77cfdce8e5e360e36f545085ddadcfffcdc64e04912ad9f5564870bcdea",
+      "run_checkpoint_json_sha256": "8880fffd9d5bee4a3fa40f00eb2613071bf8fbfc917c39d626b6df6054a06ac4"
+    },
+    {
+      "method": "sac",
+      "seed": 2,
+      "run_dir": "artifacts/runs/sac/2",
+      "ckpt": "final",
+      "ckpt_steps": 2000000,
+      "algo": "sac",
+      "total_steps": 2000000,
+      "train_git_sha": "14d7f32bf25e34a16fe3677cdab869c107881536",
+      "train_git_dirty_paths": [
+        " M .claude/skills/new-controller/SKILL.md",
+        " M .claude/skills/sweep-status/SKILL.md"
+      ],
+      "resumed_from": null,
+      "run_config_sha256": "04af3f42a26542592ae4f363f65c6e5d7add8aeafb0ca57a9a91656a83c5623d",
+      "run_config_source_sha256": "a46f94152e99cd325ec30eb7de6c25c79be05c2294519eddee235e09b8bf5159",
+      "run_model_sha256": "9688985a5ccf9054cc3ea10bb2397c3dc7666ffe045125f5757010ad8b83201c",
+      "run_vecnormalize_sha256": "aa95499ec91ebf4277770bc01b1ca798c570abfbb01f09a3d5835d001ed883ff",
+      "run_checkpoint_json_sha256": "22f5bdf89b8ca6f9f0945a492532b9996aef9ed5b0cba343cdcce1b2385836a2"
+    },
+    {
+      "method": "sac",
+      "seed": 3,
+      "run_dir": "artifacts/runs/sac/3",
+      "ckpt": "final",
+      "ckpt_steps": 2000000,
+      "algo": "sac",
+      "total_steps": 2000000,
+      "train_git_sha": "14d7f32bf25e34a16fe3677cdab869c107881536",
+      "train_git_dirty_paths": [
+        " M .claude/skills/new-controller/SKILL.md",
+        " M .claude/skills/sweep-status/SKILL.md"
+      ],
+      "resumed_from": null,
+      "run_config_sha256": "04af3f42a26542592ae4f363f65c6e5d7add8aeafb0ca57a9a91656a83c5623d",
+      "run_config_source_sha256": "a46f94152e99cd325ec30eb7de6c25c79be05c2294519eddee235e09b8bf5159",
+      "run_model_sha256": "c5c2be8fdedb97c8588fe22d1c0a493a9a395296b18aed38768fa6026c39e3b4",
+      "run_vecnormalize_sha256": "6462c1c4f6d72919a26059793a2c5fff3157af26f94456986f0c10c34354e44c",
+      "run_checkpoint_json_sha256": "01b9cb82053dd92cd012ffd4b1fe0eb1181007f99200c057e96d1f20bc8a8831"
+    },
+    {
+      "method": "sac",
+      "seed": 4,
+      "run_dir": "artifacts/runs/sac/4",
+      "ckpt": "final",
+      "ckpt_steps": 2000000,
+      "algo": "sac",
+      "total_steps": 2000000,
+      "train_git_sha": "14d7f32bf25e34a16fe3677cdab869c107881536",
+      "train_git_dirty_paths": [
+        " M .claude/skills/new-controller/SKILL.md",
+        " M .claude/skills/sweep-status/SKILL.md"
+      ],
+      "resumed_from": null,
+      "run_config_sha256": "04af3f42a26542592ae4f363f65c6e5d7add8aeafb0ca57a9a91656a83c5623d",
+      "run_config_source_sha256": "a46f94152e99cd325ec30eb7de6c25c79be05c2294519eddee235e09b8bf5159",
+      "run_model_sha256": "45a546406b2b9c9a546101424ac98a3ae5a0f312cdeb72fa4a81f368803d5380",
+      "run_vecnormalize_sha256": "5d0066dbcbd8fef89cf79185dc527dfa5c8c3b6e5686032aa02efa479dd858db",
+      "run_checkpoint_json_sha256": "ed71bb4c19fe01e28d412178b72ed75c03307f532389b6b201bbf656cc4bced5"
+    }
+  ],
+  "policy_path": "rld.eval.runner.callable_spec(method, functools.partial(rld.rl.train.build_policy, run_dir=<run>, ckpt=<ckpt>), run_seed=<training seed>)",
+  "carried": {
+    "e01": {
+      "file": "carried_summary_e01.csv",
+      "source_summary": "results/e01/summary.csv",
+      "source_summary_sha256": "2e5a34005dd0a98ab086e9968a5d3a6a882978277be4d9e0eeee2b1c7b77265d",
+      "source_episodes": "results/e01/episodes.csv",
+      "source_episodes_sha256": "c5852090822822fa822dd55d0cafb42c43f6c072b0e4365d223baa1f91e5ad7b",
+      "methods": [
+        "pid_track_descend",
+        "pid_feedforward",
+        "pid_feedforward_lowvz",
+        "gated",
+        "oracle_gated"
+      ],
+      "rows": 20,
+      "lines_byte_identical_to_source": true,
+      "provenance_equal_to_live": true,
+      "source_flew_identical_listed_episodes": {
+        "pid_track_descend": true,
+        "pid_feedforward": true,
+        "pid_feedforward_lowvz": true,
+        "gated": true,
+        "oracle_gated": true
+      },
+      "source_summary_reproduced_from_its_episodes": {
+        "pid_track_descend": true,
+        "pid_feedforward": true,
+        "pid_feedforward_lowvz": true,
+        "gated": true,
+        "oracle_gated": true
+      },
+      "note": "copied from the source run, not re-flown"
+    },
+    "e01_lowvz_cut": {
+      "file": "carried_summary_e01_lowvz_cut.csv",
+      "source_summary": "results/e01_lowvz_cut/summary.csv",
+      "source_summary_sha256": "180eeef909d12d71f36d2cfe00c370682cb3566b3ffe30eee51f52d2c81a6b44",
+      "source_episodes": "results/e01_lowvz_cut/episodes.csv",
+      "source_episodes_sha256": "8fe15278cfec1c892c3ddaec9c58b7648f89762b92c64bfebd4067cdb56ccc1b",
+      "methods": [
+        "pid_feedforward_lowvz_cut"
+      ],
+      "rows": 4,
+      "lines_byte_identical_to_source": true,
+      "provenance_equal_to_live": true,
+      "source_flew_identical_listed_episodes": {
+        "pid_feedforward_lowvz_cut": true
+      },
+      "source_summary_reproduced_from_its_episodes": {
+        "pid_feedforward_lowvz_cut": true
+      },
+      "note": "copied from the source run, not re-flown"
+    }
+  },
+  "rederived_byte_identical": {
+    "summary.csv": true,
+    "seeds.csv": true,
+    "aggregate.csv": true,
+    "success_vs_seastate.md": true
+  },
+  "files_sha256": {
+    "episodes.csv": "92419dfc49d854dae84836d1f3721fde4cd254363772a13e6ba980f606fb6169",
+    "summary.csv": "a2a0f50f77012a4488c6c28939a170725ed95453d2a9589f10612a7a1d6192f2",
+    "seeds.csv": "cf61ce010b08535fabe96996cd5e8259ac04578cbf4bc95c8fcfe6a7883c1613",
+    "aggregate.csv": "ded3cdd53290d025f60c81a029d8545dcaf6d99babe204dd03d842acfa2874b9",
+    "success_vs_seastate.md": "6ae9bc3100539c0b3810071b9c731e9148074fa2b44c1d8893eb4c52aa9863f7",
+    "carried_summary_e01.csv": "27da5b6f8db170cbcb0c794c039113018d82242b2beb9470a8149f8823b2d277",
+    "carried_summary_e01_lowvz_cut.csv": "39101ccbf2df946ac838bb635f3e295d58d1008ef175987d4301f25cdcda9594"
+  },
+  "bootstrap": {
+    "reps": 2000,
+    "seed": 20260926
+  },
+  "re_rendered": [
+    {
+      "timestamp_utc": "2026-09-30T12:35:11+00:00",
+      "git_sha": "00bff091437cc665d81f05f5d1814a96403caf6f",
+      "git_dirty": true,
+      "git_dirty_paths": [
+        " M .claude/skills/new-controller/SKILL.md",
+        " M .claude/skills/sweep-status/SKILL.md",
+        " M src/rld/eval/report.py",
+        "?? results/e05/aggregate.csv",
+        "?? results/e05/carried_summary_e01.csv",
+        "?? results/e05/carried_summary_e01_lowvz_cut.csv",
+        "?? results/e05/episodes.csv",
+        "?? results/e05/run_info.json",
+        "?? results/e05/seeds.csv",
+        "?? results/e05/success_vs_seastate.md",
+        "?? results/e05/summary.csv",
+        "?? src/rld/eval/learned.py",
+        "?? tests/test_eval_learned.py"
+      ],
+      "file": "success_vs_seastate.md",
+      "previous_sha256": "d78eddd56a1dc5cf3e00f949139a91060e78151419d0759f9008169ae5d44b44",
+      "sha256": "6ae9bc3100539c0b3810071b9c731e9148074fa2b44c1d8893eb4c52aa9863f7",
+      "reason": "renderer text only: max penetration shown as a positive depth in mm with its definition; note that the seed-bootstrap CI excludes episode sampling. No CSV changed; episodes_flown 0.",
+      "episodes_flown": 0
+    }
+  ]
+}

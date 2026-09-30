@@ -44,7 +44,7 @@ from dmf.config import SeaState, SimConfig
 from dmf.data.splits import RealizationKey, realization_key
 from dmf.sim.encounter import encounter_frequency, knots_to_m_s
 from dmf.sim.generate import VESSEL_CONFIG_DIR, RealizationSpec, realization_seed_sequence
-from dmf.sim.response import dof_transfer, synthesize_motion
+from dmf.sim.response import MotionRecord, dof_transfer, synthesize_motion
 from dmf.sim.spectra import WaveComponents, sample_components
 from dmf.sim.vessel import Vessel, load_vessel
 from dmf.typedefs import ComplexArray, FloatArray
@@ -64,6 +64,8 @@ __all__ = [
     "MotionChannels",
     "dof_phasors",
     "harmonic_sum",
+    "harmonic_sum_rows",
+    "MIN_SYNTHESIS_ROWS",
     "load_vessel_cached",
 ]
 
@@ -99,6 +101,13 @@ TIME_CHUNK: int = 8192
 #: Slack, seconds full scale, allowed when checking a requested time against the committed
 #: record. Covers float round-off in ``spinup_s + t_model/sqrt(lam)``, nothing more.
 TIME_BOUND_SLACK_S: float = 1e-9
+
+#: Fewest time rows :meth:`JonswapDeckMotion.deck_point_rows` hands dmf's
+#: ``synthesize_motion`` (P5-D5). A one-row ``(1, 299) @ (299, 7)`` product is dispatched by
+#: numpy to a matrix-vector BLAS routine whose summation order differs from the matrix-matrix
+#: one the full grid uses (P2-D8 measured exactly that); a one-row request is therefore
+#: widened by a neighbouring row and the extra row discarded.
+MIN_SYNTHESIS_ROWS: int = 2
 
 
 @dataclass(frozen=True)
@@ -284,6 +293,89 @@ def harmonic_sum(phasors: ComplexArray, w_e_rad_s: FloatArray, t_s: FloatArray) 
     return out
 
 
+def harmonic_sum_rows(
+    phasors: ComplexArray, w_e_rad_s: FloatArray, t_s: FloatArray, start: int, stop: int
+) -> FloatArray:
+    """Return rows ``[start, stop)`` of :func:`harmonic_sum`, bit for bit, evaluating only them.
+
+    Why this is not ``harmonic_sum(phasors, w_e_rad_s, t_s[start:stop])`` (P5-D5): the
+    trig is elementwise, but the reduction over wave components is a BLAS matrix product,
+    and OpenBLAS picks its kernel -- hence its summation order -- from the operand
+    **shape**. On this project's pinned stack (OpenBLAS 0.3.34, SkylakeX) a
+    ``(m, 299) @ (299, 2)`` product takes the small-matrix kernel while ``m * 2 * 299 <= 1e6``
+    and the blocked kernel above it, and the two differ in the last bits (<= 8e-14 of a
+    quantity of order 1). A slice of the 3 001-sample physics grid therefore does not
+    reproduce the full-grid rows.
+
+    So the cos/sin are evaluated for the requested rows only -- that is the whole cost --
+    and written into a block with **exactly the shape, and at exactly the row positions**,
+    that :func:`harmonic_sum` hands BLAS for the same rows of the same grid. The product
+    then runs the same kernel on the same shape; each output row depends only on its own
+    input row, so the block's other rows (zeros, or finite leftovers from an earlier call:
+    the block is a reused workspace) cannot change it. The equality is
+    asserted with ``np.array_equal`` by ``tests/test_lazy_trajectory.py``.
+
+    Args:
+        phasors: Complex phasors, shape ``(n_channels, n_components)``.
+        w_e_rad_s: Signed encounter frequencies, radians per second, shape
+            ``(n_components,)``.
+        t_s: The **whole** sample grid :func:`harmonic_sum` would be called on, seconds,
+            shape ``(n_samples,)``. Full scale here; the function is scale-agnostic.
+        start: First row, inclusive, in ``[0, n_samples]``.
+        stop: Last row, exclusive, in ``[start, n_samples]``.
+
+    Returns:
+        Real values, shape ``(stop - start, n_channels)``, in the units of ``phasors``.
+
+    Raises:
+        ValueError: If ``[start, stop)`` is not a valid row range of ``t_s``.
+    """
+    flat_t = np.asarray(t_s, dtype=np.float64).reshape(-1)
+    if not 0 <= start <= stop <= flat_t.size:
+        raise ValueError(f"rows [{start}, {stop}) outside a grid of {flat_t.size} samples")
+    real = np.ascontiguousarray(phasors.real.T)
+    imag = np.ascontiguousarray(phasors.imag.T)
+    out = np.empty((stop - start, real.shape[1]), dtype=np.float64)
+    # The same TIME_CHUNK blocks as harmonic_sum, visited only where they overlap the rows.
+    first_block = (start // TIME_CHUNK) * TIME_CHUNK
+    for block in range(first_block, stop, TIME_CHUNK):
+        block_stop = min(block + TIME_CHUNK, flat_t.size)
+        lo, hi = max(start, block), min(stop, block_stop)
+        theta = np.outer(flat_t[lo:hi], w_e_rad_s)
+        cos_block, sin_block = _rows_workspace(block_stop - block, w_e_rad_s.size)
+        cos_block[lo - block : hi - block] = np.cos(theta)
+        sin_block[lo - block : hi - block] = np.sin(theta)
+        product = cos_block @ real - sin_block @ imag
+        out[lo - start : hi - start] = product[lo - block : hi - block]
+    return out
+
+
+#: Reused ``(n_rows, n_components)`` cos/sin operands for :func:`harmonic_sum_rows`, keyed by
+#: shape. Allocating and zeroing two 7 MB blocks per chunk cost ~1.2 ms, a fifth of a
+#: chunk. Reuse is exact: rows outside the requested range hold whatever an earlier call
+#: left there (always finite cos/sin values or the initial zeros), and a matrix product's
+#: output row depends on its own input row only, so they cannot reach the rows returned.
+_ROWS_WORKSPACE: dict[tuple[int, int], tuple[FloatArray, FloatArray]] = {}
+
+
+def _rows_workspace(n_rows: int, n_components: int) -> tuple[FloatArray, FloatArray]:
+    """Return the cached cos and sin operands for one block shape, zero-filled on creation.
+
+    Args:
+        n_rows: Rows of the block, i.e. the time samples of the ``harmonic_sum`` block.
+        n_components: Wave components, dimensionless.
+
+    Returns:
+        ``(cos_block, sin_block)``, each ``(n_rows, n_components)`` float64, C-contiguous.
+    """
+    key = (int(n_rows), int(n_components))
+    cached = _ROWS_WORKSPACE.get(key)
+    if cached is None:
+        cached = (np.zeros(key, dtype=np.float64), np.zeros(key, dtype=np.float64))
+        _ROWS_WORKSPACE[key] = cached
+    return cached
+
+
 class JonswapDeckMotion:
     """JONSWAP deck motion for one dmf realization, as model-scale deck-point trajectories.
 
@@ -450,6 +542,68 @@ class JonswapDeckMotion:
         t_model = np.asarray(t_model_s, dtype=np.float64)
         return np.asarray(self.sim_cfg.spinup_s + self.scale.to_full_time(t_model))
 
+    def _check_record(self, t_full: FloatArray) -> None:
+        """Reject full-scale times outside the committed record.
+
+        Args:
+            t_full: Times, seconds, full scale, absolute.
+
+        Raises:
+            ValueError: If any time lies outside ``[spinup_s, spinup_s + duration_s]``
+                (plus :data:`TIME_BOUND_SLACK_S`).
+        """
+        lo = self.sim_cfg.spinup_s - TIME_BOUND_SLACK_S
+        hi = self.sim_cfg.spinup_s + self.sim_cfg.duration_s + TIME_BOUND_SLACK_S
+        if t_full.size and (float(t_full.min()) < lo or float(t_full.max()) > hi):
+            raise ValueError(
+                f"full-scale times [{float(t_full.min())}, {float(t_full.max())}] leave the "
+                f"committed record [{self.sim_cfg.spinup_s}, "
+                f"{self.sim_cfg.spinup_s + self.sim_cfg.duration_s}]"
+            )
+
+    def _angular_acc_phasors(self) -> ComplexArray:
+        """Return the roll and pitch **acceleration** phasors, ``-w_e**2 * z``, radians.
+
+        Returns:
+            Shape ``(2, n_components)``: roll, then pitch, radians per second squared per
+            component.
+        """
+        return np.stack(
+            [
+                -(self._phasors.w_e_rad_s**2) * self._phasors.roll,
+                -(self._phasors.w_e_rad_s**2) * self._phasors.pitch,
+            ]
+        )
+
+    @staticmethod
+    def _assemble_channels(
+        t_full: FloatArray, motion: MotionRecord, angular: FloatArray
+    ) -> MotionChannels:
+        """Pack dmf's record and the rebuilt angular accelerations into full-scale channels.
+
+        Args:
+            t_full: Times, seconds, full scale, absolute.
+            motion: dmf's :class:`~dmf.sim.response.MotionRecord` on ``t_full``.
+            angular: ``(n, 2)`` roll and pitch accelerations on ``t_full``, radians per
+                second squared.
+
+        Returns:
+            The :class:`MotionChannels`, full scale, angles in degrees.
+        """
+        to_deg = float(np.degrees(1.0))
+        return MotionChannels(
+            t_full_s=t_full,
+            roll_deg=motion.roll_deg,
+            pitch_deg=motion.pitch_deg,
+            heave_m=motion.heave_m,
+            roll_rate_dps=motion.roll_rate_dps,
+            pitch_rate_dps=motion.pitch_rate_dps,
+            heave_rate_m_s=motion.heave_rate_m_s,
+            heave_acc_m_s2=motion.heave_acc_m_s2,
+            roll_acc_dps2=angular[:, 0] * to_deg,
+            pitch_acc_dps2=angular[:, 1] * to_deg,
+        )
+
     def channels(self, t_full_s: FloatArray) -> MotionChannels:
         """Evaluate the motion channels at absolute full-scale times.
 
@@ -466,39 +620,47 @@ class JonswapDeckMotion:
             ValueError: If any requested time lies outside the committed record.
         """
         t_full = np.asarray(t_full_s, dtype=np.float64)
-        lo = self.sim_cfg.spinup_s - TIME_BOUND_SLACK_S
-        hi = self.sim_cfg.spinup_s + self.sim_cfg.duration_s + TIME_BOUND_SLACK_S
-        if t_full.size and (float(t_full.min()) < lo or float(t_full.max()) > hi):
-            raise ValueError(
-                f"full-scale times [{float(t_full.min())}, {float(t_full.max())}] leave the "
-                f"committed record [{self.sim_cfg.spinup_s}, "
-                f"{self.sim_cfg.spinup_s + self.sim_cfg.duration_s}]"
-            )
+        self._check_record(t_full)
         motion = synthesize_motion(
             self.components, self.vessel, self.spec.heading_deg, self.speed_m_s, t_full
         )
-        angular = harmonic_sum(
-            np.stack(
-                [
-                    -(self._phasors.w_e_rad_s**2) * self._phasors.roll,
-                    -(self._phasors.w_e_rad_s**2) * self._phasors.pitch,
-                ]
-            ),
-            self._phasors.w_e_rad_s,
-            t_full,
+        angular = harmonic_sum(self._angular_acc_phasors(), self._phasors.w_e_rad_s, t_full)
+        return self._assemble_channels(t_full, motion, angular)
+
+    def _pad_trajectory(
+        self, ch: MotionChannels, t_model: FloatArray, t_full: FloatArray, pad: str
+    ) -> DeckPointTrajectory:
+        """Turn full-scale channels into one pad's model-scale trajectory.
+
+        Args:
+            ch: Full-scale channels on ``t_full``.
+            t_model: The same samples, seconds model scale.
+            t_full: The same samples, seconds full scale, absolute.
+            pad: Pad name from ``configs/deck/pad.yaml``.
+
+        Returns:
+            The :class:`DeckPointTrajectory`, model scale, world frame.
+
+        Raises:
+            ValueError: If ``pad`` is unknown.
+        """
+        state_full = deck_point_state(
+            roll_deg=ch.roll_deg,
+            pitch_deg=ch.pitch_deg,
+            heave_m=ch.heave_m,
+            roll_rate_dps=ch.roll_rate_dps,
+            pitch_rate_dps=ch.pitch_rate_dps,
+            heave_rate_m_s=ch.heave_rate_m_s,
+            roll_acc_dps2=ch.roll_acc_dps2,
+            pitch_acc_dps2=ch.pitch_acc_dps2,
+            heave_acc_m_s2=ch.heave_acc_m_s2,
+            r_pad_m=self.pads.spec(pad).r_pad_full_m(self.vessel.length_m),
         )
-        to_deg = float(np.degrees(1.0))
-        return MotionChannels(
+        return DeckPointTrajectory(
+            pad=pad,
+            t_model_s=t_model,
             t_full_s=t_full,
-            roll_deg=motion.roll_deg,
-            pitch_deg=motion.pitch_deg,
-            heave_m=motion.heave_m,
-            roll_rate_dps=motion.roll_rate_dps,
-            pitch_rate_dps=motion.pitch_rate_dps,
-            heave_rate_m_s=motion.heave_rate_m_s,
-            heave_acc_m_s2=motion.heave_acc_m_s2,
-            roll_acc_dps2=angular[:, 0] * to_deg,
-            pitch_acc_dps2=angular[:, 1] * to_deg,
+            state=to_model_state(state_full, self.scale),
         )
 
     def deck_points(
@@ -524,27 +686,7 @@ class JonswapDeckMotion:
         t_model = np.asarray(t_model_s, dtype=np.float64)
         t_full = self.full_time_s(t_model)
         ch = self.channels(t_full)
-        out: dict[str, DeckPointTrajectory] = {}
-        for pad in pads:
-            state_full = deck_point_state(
-                roll_deg=ch.roll_deg,
-                pitch_deg=ch.pitch_deg,
-                heave_m=ch.heave_m,
-                roll_rate_dps=ch.roll_rate_dps,
-                pitch_rate_dps=ch.pitch_rate_dps,
-                heave_rate_m_s=ch.heave_rate_m_s,
-                roll_acc_dps2=ch.roll_acc_dps2,
-                pitch_acc_dps2=ch.pitch_acc_dps2,
-                heave_acc_m_s2=ch.heave_acc_m_s2,
-                r_pad_m=self.pads.spec(pad).r_pad_full_m(self.vessel.length_m),
-            )
-            out[pad] = DeckPointTrajectory(
-                pad=pad,
-                t_model_s=t_model,
-                t_full_s=t_full,
-                state=to_model_state(state_full, self.scale),
-            )
-        return out
+        return {pad: self._pad_trajectory(ch, t_model, t_full, pad) for pad in pads}
 
     def deck_point(self, t_model_s: FloatArray, pad: str) -> DeckPointTrajectory:
         """Evaluate one pad's world-frame trajectory at model-scale times.
@@ -566,3 +708,81 @@ class JonswapDeckMotion:
             ValueError: If ``pad`` is unknown or a time leaves the committed record.
         """
         return self.deck_points(t_model_s, (pad,))[pad]
+
+    def deck_point_rows(
+        self, t_model_s: FloatArray, pad: str, start: int, stop: int
+    ) -> DeckPointTrajectory:
+        """Evaluate rows ``[start, stop)`` of :meth:`deck_point` on a grid, bit for bit.
+
+        ``deck_point_rows(t, pad, a, b)`` equals ``deck_point(t, pad)`` restricted to rows
+        ``a:b`` in every array, exactly (``np.array_equal``, not a tolerance), while paying
+        the synthesis cost of ``b - a`` rows instead of ``len(t)``. This is what lets the
+        landing environment evaluate its 3 001-sample physics grid lazily, in chunks, as
+        the episode advances (P5-D5), without changing a bit of any episode.
+
+        How each stage stays exact:
+
+        * **Time mapping, kinematics, Froude scaling**: elementwise in the sample, so a
+          row's value does not depend on which other rows are evaluated with it.
+        * **dmf's seven channels**: :func:`dmf.sim.response.synthesize_motion`, called on
+          the row slice itself (dmf is read-only). Its ``(m, 299) @ (299, 7)`` reduction
+          is row-invariant on the pinned OpenBLAS for every ``m >= 2``; a one-row request
+          is widened to :data:`MIN_SYNTHESIS_ROWS` because numpy sends a one-row product to
+          a matrix-vector routine with a different summation order.
+        * **The two angular accelerations**: :func:`harmonic_sum_rows`, which feeds BLAS
+          the same-shaped operand as the full grid, because the ``(m, 299) @ (299, 2)``
+          product is **not** row-invariant (it switches kernel with ``m``).
+
+        The whole grid is checked against the committed record up front, so a grid that
+        :meth:`deck_point` would reject is rejected here on the first chunk, not
+        mid-episode.
+
+        Args:
+            t_model_s: The **whole** grid, seconds model scale, from the start of the
+                committed record.
+            pad: Pad name from ``configs/deck/pad.yaml``.
+            start: First row, inclusive.
+            stop: Last row, exclusive; ``start < stop <= len(t_model_s)``.
+
+        Returns:
+            The :class:`DeckPointTrajectory` for the ``stop - start`` rows, model scale,
+            world frame.
+
+        Raises:
+            ValueError: If the row range is empty or out of bounds, the pad is unknown, or
+                any time in the grid leaves the committed record.
+        """
+        t_model_grid = np.asarray(t_model_s, dtype=np.float64).reshape(-1)
+        n = t_model_grid.size
+        if not 0 <= start < stop <= n:
+            raise ValueError(f"rows [{start}, {stop}) outside a grid of {n} samples")
+        t_full_grid = self.full_time_s(t_model_grid)
+        self._check_record(t_full_grid)
+        lo, hi = start, stop
+        if hi - lo < MIN_SYNTHESIS_ROWS:
+            hi = min(n, lo + MIN_SYNTHESIS_ROWS)
+            lo = max(0, hi - MIN_SYNTHESIS_ROWS)
+        widened = synthesize_motion(
+            self.components,
+            self.vessel,
+            self.spec.heading_deg,
+            self.speed_m_s,
+            t_full_grid[lo:hi],
+        )
+        keep = slice(start - lo, stop - lo)
+        motion = MotionRecord(
+            t_s=widened.t_s[keep],
+            roll_deg=widened.roll_deg[keep],
+            pitch_deg=widened.pitch_deg[keep],
+            heave_m=widened.heave_m[keep],
+            roll_rate_dps=widened.roll_rate_dps[keep],
+            pitch_rate_dps=widened.pitch_rate_dps[keep],
+            heave_rate_m_s=widened.heave_rate_m_s[keep],
+            heave_acc_m_s2=widened.heave_acc_m_s2[keep],
+        )
+        angular = harmonic_sum_rows(
+            self._angular_acc_phasors(), self._phasors.w_e_rad_s, t_full_grid, start, stop
+        )
+        t_full = t_full_grid[start:stop]
+        ch = self._assemble_channels(t_full, motion, angular)
+        return self._pad_trajectory(ch, t_model_grid[start:stop], t_full, pad)

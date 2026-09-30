@@ -1667,6 +1667,1344 @@ the three PID baselines on the **same** frozen episodes, with the pad at the CG.
 because aft-pad v_z carries dmf's roll/pitch–heave phase defect (CLAUDE.md). It is a control, not
 a new evaluation list.
 
+## Phase 5
+
+### P5-D1 — lowvz bounces: not a contact-solver artifact; ~80 % are rim-first rocking that the 50 ms contact-loss grace scores as `bounce` (2026-09-23)
+
+*Question (P3-D4 carry-over, Phase 5 "Before you start" item a).* Are
+`pid_feedforward_lowvz`'s low-closing-speed bounces a contact-solver artifact that a pure or
+residual policy could exploit, or be unfairly penalised by? This is a diagnosis. **No environment
+code, config or success criterion was changed.**
+
+*What was flown.* The **P3-D2 tune pool only**; nothing from `results/episodes/`. Each arm flew:
+- the committed P3-D3 tune draw: 180 episodes, SS3–SS5;
+- plus 1 000 SS5 and 400 SS4 tune-pool episodes from a separate diagnostic seed (20260925);
+- 1 580 episodes in total, logged at every physics substep.
+
+The committed-physics arm reproduces `results/e01/tune_pool_final.csv` exactly on the tune draw.
+
+The diagnostic-only physics arms are 480, 960 and 1920 Hz, `contactERP` = 0 (no
+penetration-recovery push-off), and a 0.5 s contact-loss grace that measures contact gaps without
+ending the episode. Scripts: `scripts/p5_bounce_check.py`, `scripts/p5_bounce_check_report.py`
+and `scripts/p5_contact_probes.py`. Results and a short note: `results/p5_bounce_check/`.
+
+*n examined.* 242 bounces were logged substep by substep:
+- `lowvz`: 64 at 240 Hz, 86 at 480 Hz, 66 with `contactERP` = 0;
+- `pid_feedforward`, same arms: 10, 10 and 6.
+
+*Findings (lowvz, committed 240 Hz physics, 64/1 580 bounces).*
+1. **Not a solver artifact.**
+   - The solver leaves the contact point at a relative normal velocity of −0.3 mm/s (median),
+     4.2 mm/s (p95) and 10.1 mm/s (max) at the end of the last contact substep. Zero restitution
+     works as intended.
+   - Bullet's multibody contact *does* have a Baumgarte push-off, ≈ `contactERP`·overlap/dt
+     (18 mm/s per mm of overlap at 240 Hz; `contact_probes.csv`). Setting `contactERP` = 0
+     removes it (median per-episode max 18.6 → 0.4 mm/s) and **does not change the result**:
+     64 → 66 bounces, 60 of 64 unchanged pairwise, and 58 → 59 dwell gaps over 50 ms.
+   - Penetration is ≤ 1.3 mm. No episode was flagged for tunnelling.
+2. **Mechanism A, rim rocking: 51/64 (80 %).** 48 happen at impact and 3 later.
+   - The drone touches down on its rim at a median relative tilt of 6.9° (IQR 5.6–7.8°), with one
+     contact point.
+   - The rim impulse and the attitude loop rotate it flat at about 1.6 rad/s, faster than the CoM
+     falls. The rim lifts by at most a median 2.0 mm (max 3.9 mm).
+   - The **CoM keeps closing on the deck through every one of these gaps**.
+   - Contact is lost 8 ms after touchdown and the gap outlasts `contact_loss_grace_s` = 0.05 s, so
+     the episode is scored `release` → `bounce`. P3-D4's description ("lift-offs, not impacts") is
+     therefore wrong for these: they are post-impact rocking, not lift-offs.
+3. **Mechanism B, unloaded rim lift-off: 13/64 (20 %).** These happen 4–500 ms after touchdown.
+   - The deck accelerates down its normal at a median −2.1 m/s² (−1.7 to −3.7).
+   - The drone holds 76 % of hover thrust. The contact carries only 8.7 mN (median; 1–22 mN) out of
+     a 265 mN weight, and a small rotation lifts the rim.
+   - This is physical. A drone at near-hover thrust on a deck dropping at ~0.2 g is nearly
+     weightless on it.
+4. **Down-force decides it, not the solver.** In controller-free rim-first drops (`contact_probes.csv`):
+   - At thrust = weight, the contact gap is 229–325 ms at every rate from 240 to 1920 Hz, and also
+     with `contactERP` = 0.
+   - At 96 % of weight the gaps disappear. At 98 % one of 20 runs leaves a single 4 ms gap.
+   - `lowvz` holds 96 % of weight in the rocking gaps: after contact its setpoint is still the deck
+     feedforward minus 0.111 m/s, which barely unloads the rotors.
+5. **The bounce rate follows the rocking time**, τ = 0.06 m · sin(rel. tilt) / closing speed.
+   - Tune pool: 9/1 299 for τ ≤ 50 ms, then 7/136 (50–70 ms), 25/91 (70–100 ms) and 23/54 (> 100 ms).
+   - The committed e01 frozen-list rows, read and not flown, show the same pattern: 11/2 267, then
+     14/242, 43/138 and 42/152.
+   - This is why `lowvz` bounces more than `pid_feedforward` (64 vs 10 here, 111 vs 52 in e01):
+     halving the closing speed doubles τ.
+6. **Substep sensitivity, recorded and not fixed.** Dwell gaps over 50 ms number
+   58 / 78 / 112 / 116 at 240 / 480 / 960 / 1920 Hz, converging by about 960 Hz.
+   - The committed 240 Hz physics *under*-counts rocking gaps by about 2× relative to converged
+     physics. It does not create them: the mechanism and the CoM-closing signature are the same at
+     every rate.
+   - Individual episodes are not stable to the substep. Base → 480 Hz: 20 of 64 bounces stay
+     bounces, and 66 successes become bounces.
+   - Per-episode bounce labels are therefore sensitive to integration detail. Aggregate rates are
+     conservative at 240 Hz.
+7. **Detectors.** Every `release` is declared by the contact-manifold detector (normal force
+   > 1e-4 N, 50 ms grace).
+   - The analytic clearance agrees in 64/64: the lowest point was more than the 1 mm margin clear
+     of the plate during the gap. So this is not a false loss from the force filter.
+   - First-touchdown detector disagreement is 3/1 580.
+
+*RL relevance.*
+- **No solver exploit found.** The only energy-injecting term is Baumgarte push-off. It only ever
+  adds separating velocity, which causes bounces rather than preventing them. It needs penetration
+  that only harder impacts produce, and removing it changes nothing measurable.
+- **What policies will be rewarded for.** `bounce` (−10 against +50) penalises **slow, tilted**
+  touchdowns under a rule, not a physical lift-off. A policy can avoid it three ways:
+  - (a) touch down flatter relative to the deck;
+  - (b) touch down faster;
+  - (c) hold a few percent of net down-force after contact, by commanding a strong descent once
+    `in_contact` is set. This is the "throttle cut on touchdown" that `lowvz` lacks by design.
+
+  (a) and (c) are legitimate landing behaviour, and (c) is learnable from the observation. They
+  are not exploits.
+- **Two consequences for H1a.** Both are recorded here before any Phase 5/6 run and neither
+  changes P3-D1:
+  - Part of any success gain over `lowvz` (4–5 % bounce at SS5 on this pool) can come from
+    post-contact thrust behaviour rather than from the approach. H1a's non-inferiority margin is
+    therefore easier to meet than "equal approach quality" would suggest.
+  - (b) pushes against softer landings: a 15 % lower closing speed raises τ by ~18 % for the same
+    tilt. This biases H1a *against* support. The Phase 7 README reports bounce rates beside
+    closing speed for every method.
+- **Nothing is changed.** Success criteria, grace, physics rate and `lowvz` all stay as frozen. If
+  the user wants it, the options are:
+  - a dated deviation of `contact_loss_grace_s`. A 0.1 s grace would reclassify 51 of the 58
+    base-physics > 50 ms gaps;
+  - a pre-Phase-5 change to 960 Hz physics;
+  - a touchdown throttle-cut variant of `lowvz` as a separate baseline.
+
+  None is adopted here.
+
+*Decision (user, 2026-09-23, before any Phase 5 training run).*
+- **Criteria stay frozen.** `contact_loss_grace_s` stays at 0.05 s and physics stays at 240 Hz.
+  The rim-rocking mechanism, the physics-rate instability of individual `bounce` labels, and the
+  two H1a consequences above are carried as recorded findings.
+- **A throttle-cut baseline is added:** `pid_feedforward_lowvz_cut`, which is `lowvz` plus a
+  post-contact down-force rule. Its rule is fixed in P5-D2 before any episode of it is flown. It
+  gets no tuning budget, and it runs on the frozen lists before any RL run. It is printed beside
+  `pid_feedforward_lowvz` in every table. It does **not** replace `lowvz` as the H1a reference
+  (P3-D1 §8 is unchanged); it bounds how much of a success gain can come from post-contact thrust
+  alone.
+
+### P5-D2 — pid_feedforward_lowvz_cut: rule fixed before any episode (2026-09-23)
+
+*What this entry fixes.* This entry fixes the post-contact rule of the throttle-cut baseline
+that P5-D1's decision added. It was written at 19:30 local on 2026-09-23, on top of `b3fd2b5`,
+**before any episode of this controller was flown** on any list, pool or static pad. The only
+inputs were:
+- physical reasoning about `DSLPIDControl`, which is the shared action space's tracker;
+- the P5-D1 numbers already committed in `results/p5_bounce_check/`.
+
+The rule has **no tuning budget**. No parameter was swept and no variant was flown or selected
+by success. The rule below is the only one that was written.
+
+*Config.* `configs/control/pid_feedforward_lowvz_cut.yaml`, SHA-256
+`e5f19903a89165ecdc50218f2d626b7b41b03b566895f7be520f5d9a59e499bb`.
+- *Pre-flight correction.* The first draft of this entry recorded `8cbf2e61…`. A YAML comment
+  and the "why 1.5 m/s" paragraph below then claimed that any cut speed above 0.7 m/s gives the
+  same idle state. The static check of the tracker's arithmetic, described below, showed that
+  claim was false. Both texts were corrected **before any episode was flown**. The two keys and
+  their values did not change.
+- It holds two keys: `gains_from: pid_feedforward_lowvz.yaml` and `cut_speed_m_s: 1.5`.
+- The gains are **loaded by reference**, not copied, so they are lowvz's trial-10 gains and
+  cannot drift from them.
+- `pid_feedforward_lowvz.yaml` is untouched (SHA-256 still `373c2307…`, as in P3-D4).
+- Registered as `pid_feedforward_lowvz_cut` with `privileged=False` and `needs_motion_feed=False`.
+- Code: `src/rld/control/lowvz_cut.py`.
+
+**The rule.** All quantities are model scale.
+1. **Touchdown inference.** The observation's `in_contact` flag, read through `ObsView` (> 0.5).
+   This is the environment's contact-manifold detector: drone–deck normal force > 1e-4 N, taken
+   at the **last physics substep** of the control step. There is no other cue and no other
+   threshold.
+   - *Rejected: a height cue.* A rocking gap's clearance (median 2.0 mm, max 3.9 mm; P5-D1)
+     looks the same as the last pre-contact sample. At lowvz's 0.111 m/s descent that sample
+     is 0–3.7 mm above the deck. A height threshold would therefore fire *before* contact in
+     most episodes, which changes the approach and is not a post-contact rule.
+   - *Rejected: a body-rate or tilt-rate signature.* It would need a threshold that could only
+     be set by flying.
+2. **Latch.** The latch sets on the first observation with `in_contact` = 1 and holds until
+   `reset`. It is **never released**, for two reasons:
+   - any contact gap longer than `contact_loss_grace_s` = 0.05 s ends the episode;
+   - the shorter gaps are exactly the rim-rocking gaps in which down-force is needed.
+3. **Before the latch.** The controller returns `pid_feedforward_lowvz`'s setpoint, **bit for
+   bit**. The same code path computes it, and lowvz's clock, integrator and lateral gate advance
+   as they do in lowvz. It continues to do so after the latch.
+4. **After the latch.** The setpoint is `s_lowvz(o) − cut_speed_m_s · n̂(o)`, followed by the shared
+   norm cap. n̂ is the observed unit deck normal in the world frame, and `cut_speed_m_s` = 1.5 m/s
+   = `v_max_m_s`, the largest descent the shared action space can command.
+
+*Why this command, from the tracker's arithmetic.*
+- **How `DSLPIDControl` computes thrust.** The environment calls it with `target_pos` =
+  `cur_pos`. Its thrust vector is therefore `t = m g ẑ + D ∘ (v_sp − v)`, with D = (0.2, 0.2,
+  0.5) N/(m/s) and m g = 0.2646 N. The collective is `max(0, t · b_z)`. Each motor's PWM is the
+  collective plus a mixer term of at most 6 400 PWM (torques are clipped at ±3 200 PWM), and is
+  then clipped to `MIN_PWM` = 20 000.
+- **The idle state.** When `t · b_z` ≤ **0.0754 N**, every motor sits at `MIN_PWM`. Thrust is
+  then **0.1126 N = 42.6 % of weight** and the attitude torque is **zero**. That is "motors to
+  idle", the lowest thrust the tracker can produce.
+  - For a level drone this needs a velocity error of v_z ≤ −0.378 m/s.
+  - The collective reaches the `MIN_PWM` floor at −0.304 m/s.
+  - The target attitude flips at −0.529 m/s. This is harmless once every motor is at idle,
+    because no torque is applied.
+- **Why 1.5 m/s, and where it reaches idle.** 1.5 m/s is `v_max_m_s`, the full-scale descent of
+  the action space. It was **not compared against other values by flying**. A static grid
+  check, which evaluates the tracker's arithmetic after the norm cap and flies no episode,
+  covers these post-contact states:
+  - the setpoint is lowvz's, with the lateral PI command anywhere up to its 0.5 m/s cap and the
+    gate open or closed;
+  - |v_pad,z| ≤ 0.7 m/s (the grid's worst aft-pad `vz_p99` is 0.700 m/s) and |v_pad,x|,
+    |v_pad,y| ≤ 0.3 m/s;
+  - drone-vs-pad velocity ≤ 0.1 m/s along each axis. P5-D1's in-gap CoM closing speed is about
+    0.08–0.10 m/s;
+  - deck tilt ≤ 15°, and the drone's body axis within 15° of the deck normal.
+
+  Results:
+  - Over that grid, `t · b_z` ≤ **0.040 N**, so every motor is at idle.
+  - At 1.0 m/s it is ≤ 0.065 N, so every motor is still at idle.
+  - At 0.7 m/s it reaches 0.088 N. The collective is at the floor, but not every motor is at
+    idle.
+  - With a drone-vs-pad velocity up to 0.2 m/s at 1.5 m/s, it reaches 0.090 N, again with the
+    collective at the floor but not every motor at idle.
+  - The idle state is **not** unconditional. The norm cap shortens the vertical component when
+    the pad falls fast and the lateral command is large. In unphysical corners (drone tilted 30°
+    from the deck, falling 0.3 m/s faster than a pad at −0.7 m/s) one motor sits slightly above
+    idle.
+
+  `tests/test_control_pid_feedforward_lowvz_cut.py` checks the envelope through
+  `DSLPIDControl.computeControl` itself: all four motors are at `MIN_PWM`. It also checks that
+  post-latch RPMs in the environment are idle.
+- **Why idle and not a partial cut.** A partial cut such as 80–90 % of weight would need a
+  magnitude that depends on the drone's velocity, and that magnitude could only be chosen by
+  flying. Idle is the saturating end of the tracker. It is also what "throttle cut on touchdown"
+  means physically.
+- **What idle buys.** At idle the drone's free acceleration along its body axis is −5.63 m/s².
+  - The largest aft-pad deck acceleration p99 over the whole grid is 3.06 m/s²
+    (`results/deck_stats.csv`), so a latched drone stays loaded against every cell's p99 deck
+    acceleration.
+  - P5-D1's unloaded lift-offs (mechanism B, deck at −2.1 m/s² median and −3.7 m/s² at most)
+    are therefore within its authority.
+  - With zero torque, the attitude loop stops fighting a tilted deck. A rim-first drone is laid
+    flat by gravity about the loaded rim.
+- **Why along the deck normal (the user's wording).** Because D is anisotropic, a setpoint along
+  −n̂ tilts the tracker's *target* attitude slightly away from n̂. At idle no torque is applied,
+  so this has no effect.
+
+*Pre-registered expectations (written before any flight).*
+1. **Pre-contact identity.** On any list, every first-contact quantity is identical per episode
+   to `pid_feedforward_lowvz`:
+   - touchdown time, closing speed, relative tilt, lateral offset, and both detectors' records;
+   - every outcome decided at or before first contact: `crash` before contact, `off_pad`,
+     `hard_landing` and `timeout`.
+
+   Only `bounce`, `success` and post-contact `crash` can differ. Any other difference is a bug.
+2. **Reach is limited by what the observation shows.** The flag reports only the last substep
+   of each 1/30 s control step. In P5-D1's 48 at-impact rocking bounces, the gap opens 4.2 ms
+   (6 cases) or 8.3 ms (42 cases) after touchdown, and release is scored 50 ms later. The flag
+   therefore reads 1 at a control boundary before the gap only when touchdown falls in the last
+   1–2 substeps of a step, which is about 1/8 or 2/8 of cases.
+   - **Expected reach:** of lowvz's 64 committed-physics tune-pool bounces, about **25 (≈ 40 %)**
+     are within the rule's reach:
+     - 11.25 expected of the 48 at-impact bounces;
+     - 1.75 of the 4 bounces whose gap opens 12.5–20.8 ms after touchdown;
+     - all 12 whose gap opens ≥ 125 ms after touchdown.
+   - The other ≈ 60 % open and are scored before the flag can read 1, and **no post-contact rule
+     on this observation can reach them**.
+   - *Prediction:* `lowvz_cut`'s bounce count is **about 0.6×** lowvz's, and not below about
+     0.5×, on the same episodes.
+3. **What this means for RL.** An MLP policy sees the same flag. Its purely post-contact gain is
+   therefore bounded the same way. A policy that removes the remaining rocking bounces must do
+   so **before** contact, by touching down flatter or faster, or by cutting thrust in
+   anticipation. That is approach behaviour, which is what H1a scores.
+4. **Side effects, expected and not failures:**
+   - control effort and action jerk rise, because the action jumps at the latch;
+   - post-contact lateral hold is by friction only, about 0.25 × 0.152 N ≈ 38 mN, compared with
+     about 2–10 mN under lowvz's near-hover thrust;
+   - no new `crash` is expected.
+
+*What may happen next, and what may not.*
+- **Allowed:**
+  - one sanity check on the **P3-D3 tune pool only**: the committed 180-episode tune draw from
+    `dev_pool(cfg)[1]`, seed 20260923, flown by both `lowvz` and `lowvz_cut`;
+  - a per-episode check of pre-contact identity and of the latch.
+- **Not allowed:**
+  - changing the rule because of the check's numbers;
+  - running any episode from `results/episodes/`. Those are the `eval-auditor`'s, after commit.
+- **Bugs.** If an outright bug appears, such as a latch that never fires, the fix and its reason
+  are recorded below this line, and nothing is tuned.
+
+*Provenance.* `resolved_gains_sha256` (`rld.eval.controller_config`) for
+`pid_feedforward_lowvz_cut` is `123b890f…`. It carries lowvz's gains, `gains_from` and
+`cut_speed_m_s`. lowvz's own resolved hash is unchanged at `19b1f9c8…`, the value in
+`results/e01/summary.csv`.
+
+*Tune-pool sanity check (run 19:39–19:40 local, after the entry above was written; not an
+evaluation).*
+- **What was flown.** The committed P3-D3 tune draw: `dev_pool(cfg)[1]`, `tuning_seed`
+  20260923, 60 episodes each at SS3–SS5, 180 in total. Both controllers flew every episode in
+  the same environment.
+  - The script is in the session scratchpad and is not committed.
+  - No other episode was flown, and nothing came from `results/episodes/`.
+- **lowvz** reproduces `results/e01/tune_pool_final.csv`: 59/60, 60/60 and 59/60. Its two
+  losses are `bounce`, at SS3 #10 and SS5 #35.
+- **`lowvz_cut`** also scores 59/60, 60/60 and 59/60, and **no episode changes outcome**. The
+  same two episodes bounce.
+  - The latch **never fired** in either of them. Both are P5-D1 at-impact rocking bounces
+    whose gap opens 8.3 ms after touchdown (`bounce_triggers.csv`).
+  - In both, the flag never read 1 at a control boundary before release was scored. This is
+    the out-of-reach case of expectation 2, not a bug.
+  - With n = 2 bounces this check says nothing about the ≈ 0.6× prediction. The frozen lists
+    will test it.
+- **Pre-contact identity.** Actions before the latch are bit-identical to lowvz's in
+  **180/180** episodes. All 13 first-contact columns of `EpisodeRecord.as_row` are identical in
+  **180/180**: touchdown times from both detectors, closing speed, relative and absolute tilt,
+  lateral offset, deck tilt and contact count.
+- **Latch timing.** The latch fired in 178/180 episodes: every success.
+  - Median delay after touchdown: 20.8 ms.
+  - 124 latched at the first control boundary after touchdown.
+  - 54 latched at the second or third boundary (up to 95.8 ms). In these, a contact gap
+    shorter than the grace hid the flag at the first boundary.
+- **Idle.** All four motors were at idle RPM (9 440.3) in **2 610/2 610** post-latch control
+  steps.
+- **Side effects** (median per-episode ratio to lowvz): control effort **+55 %** and action jerk
+  **+41 %**.
+- **Rule unchanged.** No part of the rule was changed after the check.
+
+### P5-D3 — pid_feedforward_lowvz_cut on the frozen lists (2026-09-23)
+
+*What was flown.* `pid_feedforward_lowvz_cut` (registry name) through the e01 runner, exactly as
+e01 flew its five controllers.
+- *Lists and N.* Every frozen list, aft pad: static and `id`, `unseen_seastate`, `unseen_heading`
+  and `unseen_vessel` at every listed SS. That is 14 cells × N = 200 = 2 800 episodes, with none
+  skipped.
+- *Timing.* Flown after P5-D2 and before any Phase 5 training run, per the P5-D1 decision.
+- *Before the run.* `scripts/make_episodes.py --check` passed 10/10 (MANIFEST SHA-256
+  `e6f30e55…`). Config SHA-256 was `e5f19903…` and the resolved hash `123b890f…`, both as
+  recorded in P5-D2.
+- *Command.*
+  `scripts/eval_baselines.py --out-dir results/e01_lowvz_cut --controllers pid_feedforward_lowvz_cut --carry-from results/e02 --carry-methods pid_track_descend pid_feedforward pid_feedforward_lowvz gated oracle_gated --pad aft --workers 24`.
+  It ran at `140d55c` in 133.5 s.
+
+*Provenance notes.*
+- **The five baselines were carried, not re-flown.** They were carried from `results/e02`, not
+  from `results/e01`. `--carry-from results/e01` fails, because e01's `summary.csv` predates the
+  Phase 4 `forecaster_files_sha256` column.
+  - That first attempt did fly all 2 800 `lowvz_cut` episodes. It then raised in the carry step
+    **before writing anything**, so no number from it was seen.
+  - The run above is its only re-run, with nothing changed except the carry source.
+  - The script's reference check compared every carried aft row with `results/e01/episodes.csv`
+    (`c5852090…`): **14 000/14 000 byte-identical** (`run_info.json["reference_check"]`).
+  - All paired statistics below read lowvz and `pid_feedforward` directly from
+    `results/e01/episodes.csv`. `results/e01/` and the `make baselines` pin are untouched.
+- **Dirty tree at run start.** `run_info.json` records `git_dirty = true`. The dirty paths are:
+  - the user's two `.claude/skills/*.md` files;
+  - this entry's uncommitted eval-side files: `src/rld/eval/report.py` (a display label only),
+    `tests/test_eval_report.py` and the new `src/rld/eval/paired_outcomes.py`.
+
+  Nothing under `src/rld/control/`, `src/rld/envs/` or `configs/` was dirty, and none of the
+  dirty files is on the flight path.
+- **Re-rendering.** The markdown was re-rendered with `--render-only` after the display label
+  was added. Both it and every CSV re-render or re-score **byte-identically**.
+
+*Artifacts, all in `results/e01_lowvz_cut/`.*
+
+| file | SHA-256 |
+|---|---|
+| `episodes.csv` | `8fe15278…` |
+| `summary.csv` | `180eeef9…` |
+| `success_vs_seastate.md` | `e59f5008…` |
+| `paired_vs_lowvz.csv` | `87cd0433…` |
+| `p5d2_predictions.csv` | `da593380…` |
+| `paired_vs_pid_feedforward.csv` | `e1234e05…` |
+
+- *Tables.* `success_vs_seastate.md` prints all six controllers per cell, with the full outcome
+  breakdown and touchdown audit. `oracle_gated` is marked privileged there.
+- *Scoring.* The paired statistics come from `python -m rld.eval.paired_outcomes`. They use
+  P3-D1 §4's paired bootstrap: 10 000 replicates, seed 20260926, one "seed" per deterministic
+  controller, with episodes resampled and shared by both methods.
+
+**Headline: success per cell (%, Wilson 95 % CI, k/200).** The paired difference is
+`lowvz_cut − lowvz`, in points, with its paired-bootstrap 95 % CI. Success is never pooled
+across sea states.
+
+| cell | `lowvz_cut` | `lowvz` | `pid_feedforward` | cut − lowvz |
+|---|---|---|---|---|
+| static | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | +0.0 [+0.0, +0.0] |
+| id SS3 | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | +0.0 [+0.0, +0.0] |
+| id SS4 | 98.5 [95.7, 99.5] 197 | 98.0 [95.0, 99.2] 196 | 100.0 [98.1, 100.0] 200 | +0.5 [+0.0, +1.5] |
+| id SS5 | 98.0 [95.0, 99.2] 196 | 95.5 [91.7, 97.6] 191 | 99.0 [96.4, 99.7] 198 | **+2.5 [+0.5, +5.0]** |
+| id SS6 | 88.0 [82.8, 91.8] 176 | 85.0 [79.4, 89.3] 170 | 90.5 [85.6, 93.8] 181 | **+3.0 [+1.0, +5.5]** |
+| unseen_seastate SS6 | 89.5 [84.5, 93.0] 179 | 86.0 [80.5, 90.1] 172 | 90.0 [85.1, 93.4] 180 | **+3.5 [+1.0, +6.0]** |
+| unseen_heading SS3 | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | +0.0 [+0.0, +0.0] |
+| unseen_heading SS4 | 99.0 [96.4, 99.7] 198 | 99.0 [96.4, 99.7] 198 | 100.0 [98.1, 100.0] 200 | +0.0 [+0.0, +0.0] |
+| unseen_heading SS5 | 97.0 [93.6, 98.6] 194 | 96.5 [93.0, 98.3] 193 | 99.5 [97.2, 99.9] 199 | +0.5 [+0.0, +1.5] |
+| unseen_heading SS6 | 83.0 [77.2, 87.6] 166 | 70.0 [63.3, 75.9] 140 | 77.0 [70.7, 82.3] 154 | **+13.0 [+8.5, +18.0]** |
+| unseen_vessel SS3 | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | +0.0 [+0.0, +0.0] |
+| unseen_vessel SS4 | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | +0.0 [+0.0, +0.0] |
+| unseen_vessel SS5 | 99.5 [97.2, 99.9] 199 | 99.5 [97.2, 99.9] 199 | 99.5 [97.2, 99.9] 199 | +0.0 [+0.0, +0.0] |
+| unseen_vessel SS6 | 97.0 [93.6, 98.6] 194 | 95.0 [91.0, 97.3] 190 | 98.5 [95.7, 99.5] 197 | **+2.0 [+0.5, +4.0]** |
+
+- *Where the difference separates.* It separates from 0 (bold) in 5 of 14 cells. Where it does
+  not, the CI touches 0 or the cell has no losses to remove.
+- *Outcome breakdown.* Only `hard_landing` and `bounce` occur, for both controllers. There is no
+  `crash`, `off_pad` or `timeout` in any cell. Counts, `lowvz_cut` / `lowvz`:
+
+  | cell | `hard_landing` | `bounce` |
+  |---|---|---|
+  | id SS4 | 0 / 0 | 3 / 4 |
+  | id SS5 | 0 / 0 | 4 / 9 |
+  | id SS6 | 9 / 9 | 15 / 21 |
+  | unseen_seastate SS6 | 7 / 7 | 14 / 21 |
+  | unseen_heading SS4 | 0 / 0 | 2 / 2 |
+  | unseen_heading SS5 | 0 / 0 | 6 / 7 |
+  | unseen_heading SS6 | 24 / 24 | 10 / 36 |
+  | unseen_vessel SS5 | 0 / 0 | 1 / 1 |
+  | unseen_vessel SS6 | 0 / 0 | 6 / 10 |
+
+  Every other cell is 200/200 success for both.
+- *Which way outcomes changed.* Every one of the 50 changed outcomes is `bounce → success`.
+  None goes `success → bounce`, and there is no new `crash`.
+- *Closing speed.* p95 closing speed is identical to lowvz in every cell, by prediction 1: for
+  example 0.188 m/s at `id` SS5.
+
+**P5-D2 predictions, scored per episode on the identical lists** (`p5d2_predictions.csv`).
+1. **Pre-contact identity: HELD.**
+   - All 16 first-contact columns are text-identical (hence float64-identical) to lowvz in
+     **2 800/2 800** episodes:
+     - the 12 first-contact fields of `EpisodeRecord.as_row`;
+     - `detectors_disagree`, `closing_speed_world_z_m_s`, `time_to_touchdown_s` and
+       `td_in_quiescent_window`.
+   - The 40 episodes whose outcome is decided at or before first contact (all `hard_landing`)
+     have the identical outcome in **40/40**.
+   - *Not pre-registered; reported, not scored.* `termination_reason` also agrees in 35/40. In
+     5 SS6 `hard_landing` episodes (relative tilt 15.2–22.3° at contact), lowvz rocked off
+     (`release`) and `lowvz_cut` stayed down until `dwell_complete`. The class is decided at
+     contact, and only how the episode ended changed. That is post-contact behaviour, not a
+     pre-contact difference, and not a bug.
+   - *A check made stricter, then reverted.* My first scoring code also required
+     `termination_reason` to match. I reverted to P5-D2's wording ("outcome") after seeing the
+     5, and both numbers are in the CSV.
+2. **Bounce ratio ≈ 0.6×, not below ≈ 0.5×: HELD.**
+   - `lowvz_cut` bounces **61** times where lowvz bounces **111**. The ratio is **0.550**, with
+     a paired stratified-bootstrap 95 % CI of **[0.458, 0.640]**. Episodes are resampled within
+     each cell and shared by both methods, 10 000 replicates, seed 20260926.
+   - *The decision rule.* The rule "point ≥ 0.5 and the CI contains 0.6" was written into
+     `rld.eval.paired_outcomes` before the scoring was first run. The point is 0.050 above the
+     floor, and the CI's lower end (0.458) lies below it.
+   - *The removed fraction.* The cut removed 50/111 = 45 % of bounces, against P5-D2's expected
+     reach of ≈ 40 %.
+   - *Heterogeneity (post hoc, descriptive).* The per-cell ratio is 0.28 at `unseen_heading`
+     SS6 (10/36) and 0.44–1.0 in every other cell with bounces. That one cell supplies 26 of the
+     50 removed bounces, and without it the pooled ratio is 51/75 = 0.68.
+   - *A candidate explanation, not verified.* At 90° heading the deck is roll-dominated, and
+     P5-D1's mechanism B (a later, unloaded lift-off) is within the rule's reach. No
+     substep-level log was taken on the frozen lists.
+3. **Control effort and action jerk rise: HELD.**
+   - The paired mean difference (cut − lowvz) has a 95 % CI above 0 in **13/13** moving-deck
+     cells for both metrics, and also on the static pad.
+   - *Operationalisation.* P5-D2 gave only a direction. The rule "CI above 0 in every
+     moving-deck cell" was written before the scoring was first run.
+   - *Size.*
+     - `effort_mean_sq`, the committed per-cell metric (mean ‖a‖²): median per-episode ratio
+       3.9–7.1× by cell.
+     - `action_jerk_mean`: 1.32–2.40×.
+     - The per-episode sums `control_effort` and `action_jerk` give median ratios of 1.55× and
+       1.53× over all 2 800. That matches P5-D2's tune-pool "+55 %" if that figure used the
+       sum; P5-D2 does not name the column.
+
+**Not predicted by P5-D2.**
+- **Tunnelling.** 31 `lowvz_cut` episodes exceed the 5 mm `tunnelling_penetration_m` threshold;
+  lowvz has **0**. The maximum penetration is 7.03 mm, against 3.91 mm for lowvz.
+  - *Where.* `id` SS5 1, `id` SS6 5, `unseen_seastate` SS6 7 and `unseen_heading` SS6 18.
+  - *Outcomes.* 17 are `hard_landing`, 13 `success` and 1 `bounce`. Tunnelling does not enter
+    the outcome classification, and no outcome is attributed to it.
+  - *Likely cause, not verified.* A drone at idle thrust on a deck accelerating up into it
+    loads the contact harder than lowvz's near-hover thrust does.
+  - *Comparison.* It is of the same size as `pid_track_descend`'s e01 tunnelling (14, max
+    6.5 mm).
+  - *Consequence for RL.* It matters for Phase 5/6: a policy that cuts thrust after contact
+    will show tunnelling counts that lowvz does not. The Phase 7 tables must report
+    `tunnelling_n` beside success for every method, as P3-D1 §3 already requires.
+- **Detector disagreement.** It is 1/2 800, at `unseen_seastate` SS6, the same episode as
+  lowvz's, since first contact is identical.
+
+**Post hoc, not part of any prediction: `lowvz_cut` vs `pid_feedforward`**
+(`paired_vs_pid_feedforward.csv`, same bootstrap).
+- It separates in **no** cell. The largest difference is `unseen_heading` SS6, +6.0 points
+  [−1.0, +13.0]; `id` SS6 is −2.5 [−7.5, +2.5].
+- A post-contact rule on lowvz's approach therefore does not demonstrably beat the
+  success-tuned `pid_feedforward` anywhere on these lists.
+
+**What this means for H1 (P3-D1 §8 and P3-D4 are unchanged).**
+- **lowvz stays the H1a reference.** `lowvz_cut` is printed beside it.
+- **The P5-D1 consequence is now quantified.** A purely post-contact thrust rule, with lowvz's
+  approach bit for bit and no tuning, gains **+2.5 points [+0.5, +5.0]** of success over lowvz
+  at `id` SS5 (H1a's cell), at the identical p95 closing speed. So a `residual_ppo` that
+  matched lowvz's approach and learned only this cut would clear H1a's −2-point non-inferiority
+  bound by a margin, but would show r = 0 on closing speed.
+- **H1b's reference is untouched.** At `id` SS6, `lowvz_cut` (88.0 %) is below
+  `pid_feedforward` (90.5 %), −2.5 [−7.5, +2.5] paired.
+
+*Code (eval side only).*
+- `src/rld/eval/paired_outcomes.py` is new: episode pairing, first-contact identity, the paired
+  stratified ratio bootstrap, the per-cell paired table, and the `python -m` entry point.
+  `scripts/` is outside the eval-auditor's write scope; the main thread may move the entry
+  point there.
+- `tests/test_eval_paired_outcomes.py` is new.
+- `METHOD_LABELS` in `src/rld/eval/report.py` gains the `pid_feedforward_lowvz_cut` label.
+
+### P5-D4 — PPO smoke run: exploration noise at the SB3 default flips the drone; the smoke run counts as one tuning trial (2026-09-23)
+
+*Run.* `make train-bg CFG=configs/rl/ppo_smoke.yaml SEED=0`, commit `51bee6f`. The only dirty
+paths were the user's two `.claude/skills` files. Budget 200 k steps, done at 212 992, 739 s wall,
+0.57 CPU-hours. It trained on the P3-D2 train pool and was evaluated every 20 k steps on the P3-D3
+tune draw (180 episodes, SS3–SS5). No frozen-list episode was read. The curriculum stayed at SS3.
+
+*Plumbing: healthy.*
+- `status.json` reached `done` with no NaN.
+- Each checkpoint holds both `model.zip` and `vecnormalize.pkl`, and `load_policy(run_dir,
+  "final")` reloads the policy.
+- All six outcome classes occurred across the evaluations.
+
+*Learning: not healthy.*
+- The PPO base config left `log_std_init` at SB3's default of 0, i.e. an initial action std of 1.0
+  on a Box(−1, 1) action. The training policy was therefore close to the P2-D9 random policy,
+  which crashes in 100 % of episodes.
+- In the smoke run, 4 152 of 4 157 training episodes (99.9 %) ended in `crash` after about 50
+  control steps. 4 088 of those crashes were `tilt_gt_crash`. Only 5 training episodes touched
+  down.
+- The deterministic evaluation policy did reach the deck. Its success peaked at 0.133 at 60 k
+  steps and ended at 0.006, and its p95 closing speed rose from 0.40 to 0.98 m/s.
+- Binned training return rose only from about −42 to −37, all of it on crash episodes.
+
+*Throughput.* 288 steps/s overall and 467 excluding evaluation. The host was about 91 % idle, so
+the run was stalled, not compute-bound. This goes to engineering; it is not a protocol matter.
+
+*Decision (user, 2026-09-23).*
+- The PPO base config sets `log_std_init = −1.0` (std ≈ 0.37).
+- `tune_ppo.yaml` searches `log_std_init` uniformly in [−2.3, −0.7] (std ≈ 0.10–0.50).
+- The base config was changed after a tune-pool training run was seen, so **the smoke run counts
+  as one of PPO's 20 trials**. The PPO search draws at most 19 trials, trial 0 being the new base.
+- SAC is unchanged: it keeps SB3's `log_std_init = −3` with automatic entropy tuning, and all 20
+  of its trials.
+- A second 200 k smoke run with the new setting must show touchdowns in training episodes before
+  any tuning trial launches. That second smoke run is a check of the change, not a trial.
+
+### P5-D5 — Reset speed-up, bit-identical (2026-09-23)
+
+*Why.* User-approved (2026-09-23) as engineering before Phase 5 tuning. P5-D4's smoke run was
+stalled, not compute-bound: 467 steps/s excluding evaluation on a host that was ~91 % idle. A
+step costs 1.6 ms but a reset cost ~95 ms. With early-training episodes at ~50–70 control steps,
+SubprocVecEnv lockstep made training reset-bound. P2-D8 set aside the fix, a lazily evaluated
+deck, "unless Phase 5 wants it, with its own numerical-equivalence entry". This is that entry.
+**No evaluation result, config, success criterion or episode changes.**
+
+*Change 1: the deck trajectory is synthesised lazily, in chunks.*
+- `rld.envs.platform.LazyDeckTrajectory` replaces the eager 3 001-sample `build_trajectory`
+  call in `DeckLandingAviary._prepare_episode`.
+- The grid is the same one as before. It is cut into chunks of 240, 240, 480, 960 and 1 081
+  samples. A chunk is synthesised the first time any of its samples is read, then cached.
+- A reset therefore synthesises only the chunk that holds sample 0.
+- Any consumer can still read any sample at any time. `build_trajectory` itself is unchanged;
+  it stays the eager reference, and `PrivilegedContext.from_env` still calls it.
+
+*Why a plain slice would have changed bits, and what was done instead.* A plain slice of the
+grid is **not** bit-identical to the full grid (measured):
+- The two bridge angular accelerations reduce over the 299 wave components with a
+  `(m, 299) @ (299, 2)` product. On the pinned OpenBLAS 0.3.34 (SkylakeX kernel), that product
+  uses the small-matrix kernel while `m·2·299 ≤ 10⁶` (m ≤ 1 672) and the blocked kernel above
+  that, and the two kernels differ by up to 8e-14.
+- Evaluating 240-sample chunks directly changed 13 of 13 aft chunks.
+
+What was done instead:
+- **`rld.deck.bridge.harmonic_sum_rows`** (an additive, narrow bridge edit). It evaluates
+  cos/sin only for the requested rows, then writes them into a reused operand with the **same
+  shape and the same row positions** as the full-grid call. BLAS therefore runs the same
+  kernel on the same shape, and each output row depends only on its own input row.
+- **dmf's seven channels.** `synthesize_motion` is still called unmodified, on the row slice.
+  Its `(m, 299) @ (299, 7)` product was measured row-invariant for every m ≥ 2 and not for
+  m = 1 (a matrix-vector path; this is P2-D8's observation). `JonswapDeckMotion.deck_point_rows`
+  therefore widens a one-row request to two rows.
+- Time mapping, kinematics, Froude scaling and quaternions are per-sample.
+- Sinusoid and static sources are elementwise in time. Any other source is evaluated eagerly as
+  one full-grid chunk.
+- **This equality depends on BLAS.** It is proven for the pinned stack and asserted by tests,
+  not argued for any BLAS. A different OpenBLAS or CPU kernel would fail
+  `tests/test_lazy_trajectory.py` instead of drifting silently.
+
+*Change 2: the drone's visual mesh is not loaded in DIRECT mode.*
+- ~21 of the ~23 ms of URDF loading per reset was PyBullet parsing `cf2.dae`, the drone's
+  visual mesh.
+- `DeckLandingAviary._housekeeping` now mirrors upstream `BaseAviary._housekeeping` line for
+  line. The only difference is that the drone is loaded with
+  `URDF_IGNORE_VISUAL_SHAPES | URDF_USE_INERTIA_FROM_FILE`. PyBullet then shows the collision
+  cylinder as a proxy visual.
+- The mirror applies only when `visual_shapes` is False. That is the default in DIRECT mode;
+  with `gui=True` or `visual_shapes=True` the environment calls upstream's own method.
+- A test pins the SHA-256 of upstream's method source at gym-pybullet-drones `7ebad1e`, so a
+  submodule bump forces a re-review.
+- `saveState`/`restoreState` and keeping bodies across resets were rejected. Both skip
+  `resetSimulation`, so the broadphase and contact caches would carry a history that a fresh
+  world does not have, and bit-identity could not be argued.
+
+*Evidence that no bit changed.*
+
+| check | result |
+|---|---|
+| Lazy vs eager trajectory, `np.array_equal`, every array (t, position, quaternion, and every `DeckPointState` field including accelerations), whole grid | Equal. `tests/test_lazy_trajectory.py`: 6 JONSWAP realizations (both vessels, SS3–SS6, headings 0/45/90/135/180) × aft/CG × t0 ∈ {bottom, top, random} of the start window × 3 chunk layouts (default; first chunk of 1 sample; a one-row tail), plus scrambled-order `sample(i)` reads. Sinusoid and static likewise. Scratch sweeps of 2 × 384 further grids: 0 mismatches. |
+| `harmonic_sum_rows` vs `harmonic_sum` rows | Equal, including one-row ranges, both sides of the 1 672-row kernel switch, and ranges straddling a `TIME_CHUNK` block. |
+| DIRECT world vs upstream world | Every body id, `getBodyInfo`, `getDynamicsInfo` per link, `getCollisionShapeData`, `getJointInfo`, base pose, base velocity and engine parameter is identical. |
+| Episodes, new env vs pre-P5-D5 env (eager deck **and** visual mesh), SS5 moving deck, aft and CG | Observations, rewards, flags, driven deck states and whole episode rows are identical. Covers 3 scripted descents that touch down and 2 Gaussian (std 0.37) policies. |
+| Determinism and `check_env` | Pass: the existing static-deck tests, plus a new moving-deck same-seed test. |
+| `make env-sanity` → scratch dir vs `results/e00_env_sanity*.csv` | 4 + 800 rows. Every column is byte-identical except `steps_per_s`, `wall_s` and `timestamp_utc`, which are per-run by construction. |
+| `make baselines` → scratch dir vs `results/e01/` | `episodes.csv` is **byte-identical** (`cmp`; 14 000/14 000 rows; the runner's own reference check reports `all_identical=True`). `summary.csv`: every metric column is identical. The committed file predates the Phase 4 schema, and `oracle_gated`'s `controller_config_sha256` is the P4-D5 relabel hash. All 70 re-run summary rows are byte-identical to the same rows of the post-relabel `results/e02/summary.csv`. The markdown differs only in its title, which is chosen by output directory name. |
+
+*Speed* (one process, `OMP_NUM_THREADS=1`, 36-core host otherwise idle; frigate SS6 180° 12 kn
+aft, the `rld.bench.throughput` landing factory; Gaussian policy std 0.37, i.e. P5-D4's initial
+exploration; both runs 292 episodes × 68.5 steps, identical as bit-identity requires):
+
+| | before (`HEAD` = `cbdb7cf`) | after |
+|---|---|---|
+| reset, mean / p99 | 95.5 / 104.3 ms | **11.9 / 13.3 ms** |
+| reset, lazy deck only / URDF change only | — | 32.3 / 72.3 ms (mean) |
+| single env, steps/s incl. resets | 330 | **466** |
+| 16-worker SubprocVecEnv, steps/s | 685 | **1 754** (2.6×) |
+| full-length hover episode (360 steps), ms | 665 | 666 |
+
+- The per-step cost rises from 1.61 to 1.95 ms because later chunks are now paid for inside
+  steps.
+- A full-length episode breaks even: five chunk overheads (~20 ms) against the ~21 ms URDF
+  saving. No regime got slower.
+- This resolves P2-D9's open concern that reset cost dominates short episodes, without
+  interpolating the corpus: the deck is still evaluated analytically on the physics grid.
+- Not changed: `PrivilegedContext.from_env` (in `rld.control`) still does one eager full-grid
+  build, which the eval runner pays once per episode for `td_in_quiescent_window`. That is
+  evaluation-side cost, not training.
+- Also not changed: the docstrings of `rld.bench.throughput` and `scripts/env_throughput.py`,
+  which still say "bridge evaluated once per reset".
+
+### P5-D6 — Training-pipeline speed-up: reset prefetch and independent eval workers, bit-identical (2026-09-24)
+
+*What changed (src/rld/rl/ only).*
+- **Reset prefetch.** `prefetch_reset: true` is the default. While the current episode runs, each
+  training worker prepares its next episode on a second env instance in a background thread.
+  - A prefetched episode drawn at an old curriculum stage, or overtaken by an explicit
+    `reset(seed=...)`, is discarded. The sampler's RNG state is then restored to what it was
+    before the draw.
+  - *Tests.* `tests/test_rl_prefetch.py` flies a 1 500-step script on the real env, serial and
+    prefetched. Across the whole run it has about 20 resets, 2 explicit seeds, mid-episode stage
+    changes including SS5 → SS4, and a switch into queue mode. Every observation, reward, flag
+    and info field is equal (`np.array_equal`). The counters show 14 prefetched episodes used and
+    5 discarded.
+  - The same test also passes through 2 `SubprocVecEnv` workers with an `env_method` stage
+    broadcast.
+- **Independent eval workers.** Each eval worker flies its share of the fixed P3-D3 tune draw on
+  its own; the evaluation no longer runs in lockstep.
+  - Worker *i* forwards *n* copies of its observation and takes row *i*. This keeps the float32
+    MLP's batch-shape-dependent arithmetic exactly as it was in the lockstep batch.
+  - *Verified.* On the four smoke-run checkpoints (180 episodes each), 0 of 24 480 fields differ
+    from the lockstep evaluator. That holds with the P5-D5 env changes and without them, and
+    with prefetch on and off.
+  - The lockstep path is kept as `evaluate_lockstep` and tested against.
+- **Forkserver preload** of the heavy imports. Worker PSS falls from 479 to 141 MB, the 16-worker
+  pool from 7.7 to 2.4 GB, and start-up from 4.2 to 3.2 s.
+- **Slot cost.** It is now `ceil(0.4 × busiest pool) + 1`: 8 per PPO run, down from 17, and 5 per
+  SAC run (SAC not measured). The measured time-averaged use of a PPO run is about 6.4 cores. So
+  `MAX_WORKERS = 34` fits four PPO runs, about 26 busy cores. When two runs' eval bursts coincide,
+  those evaluations slow down; nothing else changes.
+- **Bug fixed.** In `eval_episodes.csv`, each episode's own `steps` overwrote the training step.
+  The training step is now `train_steps`.
+  - `ppo_smoke/0/eval_episodes.csv` keeps the old column. Its training step is recoverable
+    through `eval_index` → `evals.csv`.
+  - `eval_env_steps` now counts steps actually flown, excluding idle replays.
+- **Legacy config shim.** `load_policy` fills `ppo.log_std_init = 0.0` into a saved run's config
+  when the key is absent. Those runs trained at SB3's default before P5-D4, and a loaded model's
+  `log_std` comes from `model.zip` in any case.
+  - The shim runs only at load; training configs must state the key.
+  - `ppo_smoke/0` loads again; it was broken by `cbdb7cf`. A test checks that the weights are
+    identical with and without the key.
+
+*Throughput* (36-core host, measured with the host otherwise quiet, 16 workers, train pool SS3,
+std 0.37 random policy):
+
+| setup | steps/s |
+|---|---|
+| before (HEAD `cbdb7cf`) | 662–685 |
+| P5-D5 env changes, prefetch off | 1 768 |
+| P5-D5 env changes, prefetch on | 2 057 |
+
+- With a PPO learner in the loop, P5-D5 plus prefetch runs at 1 861 steps/s rollout-only and 1 597
+  including updates. The smoke run did 467 excluding eval.
+- A 180-episode tune evaluation takes about 5 s, down from 22–33 s.
+
+*A known numerical non-comparability (recorded, not changed).* The float32 MLP is not
+batch-invariant: batch 1 and batch 16 differ by up to 3.6e-7.
+- `LearnedPolicy.act`, the frozen-list evaluation path, runs at batch 1. The in-training tune
+  evaluator uses the batch shape above.
+- So a checkpoint's tune-pool numbers and its `make eval` numbers are not bit-comparable at the
+  last float32 bit.
+- They are never compared directly: tune-pool numbers select hyperparameters, and frozen-list
+  numbers are the results.
+
+### P5-D7 — Second smoke run still unhealthy; the 30 Hz loop tolerates exploration std ≲ 0.15; PPO base std 0.10 (2026-09-24)
+
+*Run.* `make train-bg CFG=configs/rl/ppo_smoke_p5d4.yaml SEED=0` at commit `e075c51`. It uses
+`log_std_init` −1.0 (std 0.37) and the P5-D5/D6 speed-ups, and is otherwise identical to the first
+smoke run. It finished `done` at 212 992 steps in 309 s, at 1 430 steps/s excluding eval (the first
+run: 467).
+
+*Learning: still not healthy.*
+- 1 928 of 1 952 training episodes (98.8 %) crashed, 1 824 of them by `tilt_gt_crash`. Only 24
+  episodes ended in a touchdown class.
+- Episodes did get longer: 69 control steps on average in the first quarter of training, 172 in
+  the last, with 11.7 % timeouts in that last quarter.
+- Deterministic tune-pool success peaked at 0.044 (140 k) and ended at 0.000.
+
+*Diagnosis.* A scratch probe, not a trial, run on train-pool realizations only (frigate SS3,
+180/135°, 6 kn, seeds 0–7, 48 episodes per cell). It flew zero-mean Gaussian action noise, with
+and without a constant descent command of −0.2 (0.3 m/s).
+
+| noise std | i.i.d., hover | AR(1) ρ = 0.9, hover | i.i.d. + descent |
+|---|---|---|---|
+| 0.05 | 100 % timeout | 100 % timeout | 25 % crash, 60 % off_pad, 15 % success |
+| 0.10 | 100 % timeout | 94 % timeout | 29 % crash, 62 % off_pad, 8 % success |
+| 0.20 | 54 % crash | 31 % crash | 42 % crash |
+| 0.37 | 100 % crash | 98 % crash | 90 % crash |
+
+- A second scratch probe held each command for 1/30 s, but ran `DSLPIDControl` at 240 Hz instead
+  of the frozen 30 Hz.
+  - At std 0.2 (hover) crashes fell from 54 % to 0 %.
+  - At std 0.37 they fell only from 100 % to 85 %.
+  - With the descent command and std 0.05 they went from 25 % to 19 %.
+- **Reading.**
+  - The frozen 30 Hz control loop (the attitude loop runs once per policy step) makes the drone
+    lose attitude under white-noise velocity commands above about std 0.15 (≈ 0.2 m/s).
+  - A std of 0.37 is too large even with a fast inner loop.
+  - The crashes under a plain descent with little noise happen around contact. That is landing
+    difficulty for the policy to learn, not exploration.
+
+*Decision (user, 2026-09-24).*
+- **The environment stays frozen:** 30 Hz control rate, P2-D2 action space.
+- **The PPO base is `log_std_init = −2.3` (std 0.10).** The search range is [−3.0, −1.6]
+  (std 0.05–0.20). This supersedes P5-D4's −1.0 and [−2.3, −0.7].
+- **The second smoke run also led to a change of the base config, so it too is charged as a
+  trial.** PPO: 2 charged + 18 drawn = 20 (`trials_used_before_search: 2`, `trials: 18`). SAC
+  stays at 20 drawn: SB3's `log_std_init` is −3 (std 0.05), and the automatic entropy target
+  −dim(A) = −3 corresponds to a pre-tanh std of about 0.09, inside the tolerated band.
+- **The smoke configs keep the values their runs actually flew with.** `ppo_smoke.yaml` records
+  0.0 and `ppo_smoke_p5d4.yaml` records −1.0. A third smoke run, `ppo_smoke_p5d7.yaml` at −2.3,
+  must show touchdowns in training episodes before tuning launches.
+- **Rejected by the user:** running `DSLPIDControl` at the 240 Hz physics rate. It would need a
+  dated P3-D1 deviation and a re-run of every committed baseline.
+
+### P5-D8 — Third smoke run learns; one update after the SS3→SS4 promotion collapses it (2026-09-24)
+
+*Run.* `make train-bg CFG=configs/rl/ppo_smoke_p5d7.yaml SEED=0` at `ed5d7ca`, with
+`log_std_init` −2.3. It finished `done` at 212 992 steps in 291 s, at 1 556 steps/s excluding
+eval.
+
+*Learning: healthy up to the promotion.*
+- In training episodes, crashes fell to about 0 (5 `off_plate_strike`), and 560 of 753 episodes
+  ended in a touchdown class. By training quarter, success went 0.011 → 0.043 → 0.181 → 0.234
+  and mean return −2.4 → +8.5.
+- Deterministic tune-pool success, SS3–SS5, rose monotonically from 20 k to 200 k: 0, 0, .011,
+  .106, .206, .267, .322, .411, .567, .744. At 200 k, SS3 was .983, SS4 .767 and SS5 .483.
+- The curriculum promoted SS3 → SS4 at 200 k, mid-rollout.
+
+*The collapse.*
+- At the final evaluation (212 992), one PPO update later, success was 0.000 at every SS:
+  timeout .661, bounce .339.
+- *Confirmed outside the training pipeline.* Flying the SS3 tune draw serially through
+  `load_policy`:
+  - the 200 k checkpoint scores 58/60;
+  - the `final` checkpoint scores 0/60 (46 timeout, 13 bounce, 1 off_pad).
+- *Swap test.*
+  - final weights + 200 k VecNormalize stats → 0/60;
+  - 200 k weights + final stats → 57/60.
+
+  So the weights carry the collapse, not the normalisation.
+- *What moved.* The update's logged learning rate was 5.09e-6 (the linear schedule; it is not
+  negative). The largest weight change was about 1.5e-3. SB3 initialises the action head with
+  gain 0.01, and its largest weight here is 9.5e-3, so a change of that size moves the
+  deterministic mean action by an amount that matters at this action scale.
+- *Not established.* Whether the SS3/SS4 mix in the update's rollout caused the collapse, or it
+  is ordinary PPO instability, is not known.
+
+*Why it matters.* P3-D1 §5 scores tuning trials on their **final** checkpoint. If collapses like
+this recur, the scores are noisy.
+
+*Decision (user, 2026-09-24).* Before tuning, run a 1 M-step diagnostic with the same config:
+`configs/rl/ppo_diag_p5d7.yaml`, which differs only in budget, evaluation interval (25 k),
+checkpoint interval and name. It is not a trial. Any config change that follows from it will be
+charged as one, as in P5-D4 and P5-D7.
+
+### P5-D9 — 1 M diagnostic: the collapse is hovering, not the curriculum; SAC device; tuning pre-registered (2026-09-24)
+
+*Diagnostic run.* `make train-bg CFG=configs/rl/ppo_diag_p5d7.yaml SEED=0` at `73f7ea3`. It
+finished `done` at 1 015 808 steps in 1 049 s (2.20 CPU-hours) and was evaluated every 25 k on
+the P3-D3 tune draw.
+- **Learning, then hovering.** Tune-pool success peaked at 0.27 (150 k). It then fell to 0.00 at
+  200 k **with no promotion** (still SS3), with 83 % timeout.
+- **The same shift in training.** By 25 k-step bins, the timeout share of training episodes went
+  0.27 → 0.48 → 0.58 → 0.75 → 0.85 from 150 k to 250 k, while training return rose.
+- **Reward economics that make hovering the better bet**, mean training return by outcome:
+  - success +53.4;
+  - bounce, off_pad and hard_landing −6.0 to −7.1;
+  - timeout +1.05 (p10 −3.5, p90 +3.8).
+
+  Attempting a landing therefore beats hovering only if p(success) exceeds about 12 %. The
+  stochastic policy (std ≈ 0.10) converted only 26 of 489 touchdowns (5 %).
+- **Recovery.** The policy climbed out of hovering on its own:
+  - success 0.34 (400 k), 0.61 (450 k), 0.79 (475 k);
+  - promoted SS3 → SS4 at 525 k (0.88) with **no collapse**, and SS4 → SS5 at 575 k (0.97);
+  - then 0.96–1.00 at every evaluation from 600 k to 1 015 808 (final 0.994).
+- **Final checkpoint, tune draw.**
+  - 179/180 successes and 1 bounce;
+  - p95 closing speed 0.340 m/s (p50 0.227);
+  - median time to touchdown 2.0 s;
+  - 0 tunnelling, 0 detector disagreement, 0 timeout.
+  - For reference, P3-D4 table on the same draw: `pid_feedforward` 1.000 / 1.000 / 1.000 at p95
+    0.22–0.25 m/s and 4.5 s; `pid_feedforward_lowvz` p95 0.13–0.17 m/s and 7.7 s. These are
+    tune-pool numbers, not results.
+- **Reading.**
+  - P5-D8's post-promotion collapse was the same hover trap, which occurs with or without a
+    promotion. A 2 M-step trial ends well after the recovery point observed here.
+  - The reward-weight search (w_time up to 0.03, r_fail 5–30) spans both hover-favouring and
+    landing-favouring settings, so the hover incentive is a hyperparameter property that the
+    pre-registered search can select against.
+  - The Phase 5 hacking audit must report the timeout fraction of training episodes, not only
+    of evaluation episodes.
+
+*SAC device (measured once, as the rl-trainer rule requires).* `scripts/p5_sac_device_bench.py`,
+committed `configs/rl/sac.yaml`, 30 000 steps per device into scratch run directories:
+- CPU 86.3 steps/s excluding eval, CUDA 87.0 steps/s. The two are equal because the run is
+  bound by one gradient step per transition collected (UTD = 1), not by device compute.
+- **Fixed: `device: cpu`** (unchanged), which leaves the GPU free.
+- Expected SAC trial wall time is about 1.6 h (0.5 M steps). SAC tuning is the long pole.
+
+*Tuning, pre-registered here before trial 1 (user decision, 2026-09-24: launch as registered).*
+
+| method | config (SHA-256) | trials drawn | charged before | per-trial budget | Sobol seed | trial seed |
+|---|---|---|---|---|---|---|
+| PPO | `configs/rl/tune_ppo.yaml` (`77aaa7f11a6690f2b5806900c3e3917a3385d04a55f1f2e2faee9316f9fad95d`) | 18 | 2 (P5-D4, P5-D7) | 2 M | 20260927 | 0 |
+| SAC | `configs/rl/tune_sac.yaml` (`3eded2be9a6ed7bed7981498dd5d9c93b52eb82ad627d64d81d651fa5d60abfe`) | 20 | 0 | 0.5 M | 20260928 | 0 |
+
+- **Base configs.**
+  - `configs/rl/ppo.yaml`: `08974a77077ffb342ce2cf9aa0593c12a09b65a10200ceaa844c2034a922fca9`.
+  - `configs/rl/sac.yaml`: `d07803ca1c9ae6f9bb1ec3c7812183f2e075ba29eeb4cae7b80425ae34e385da`.
+  - `configs/env/reward.yaml`: `d6bdb515f37b7253d60ba8eaf2cebfb5ccf8d59411006d58b7978a387e2481ec`, which fixes the reward's structure; only its
+    weights are searched.
+  - The evaluation draw is `configs/control/tuning.yaml` (`c7d099d2f8f85b34903d33860240f687481d5a1568d9f57dc85195168fcb43d7`), the P3-D3 tune
+    draw: 60 episodes per SS, SS3–SS5, aft.
+- **Search spaces**, as in the two YAML files:
+  - PPO: learning rate, n_steps, batch, epochs, entropy coefficient, width, `log_std_init`
+    [−3.0, −1.6], plus the reward weights;
+  - SAC: learning rate, batch, tau, learning_starts, width, plus the same reward-weight ranges.
+- **Score.**
+  - Each trial is scored on its **final checkpoint**, on the tune draw: mean success over SS3–SS5.
+  - Ties go to the lower pooled p95 touchdown closing speed, then the lower trial index.
+  - A failed trial is listed and cannot win.
+- **Nothing in tuning touches `results/episodes/`.** Trials train on the P3-D2 train pool with the
+  curriculum, exactly as a final run would.
+- **Commands.** Both use `MAX_WORKERS = 34` slots, counted globally; a slot costs 8 per PPO run and
+  5 per SAC run (P5-D6).
+  ```
+  make tune CFG=configs/rl/tune_ppo.yaml
+  make tune CFG=configs/rl/tune_sac.yaml
+  ```
+- **Outputs.** `results/tune/{ppo,sac}/trials.csv` and `selection.json`. The winners are written
+  to `configs/rl/{ppo,sac}.yaml` in a dated entry before any final 5-seed run starts.
+
+### P5-D10 — VM terminated mid-tuning; reconcile and resume added; SAC search re-run at 4 torch threads (2026-09-28)
+
+*Incident.*
+- The WSL VM was terminated at about 12:15 EDT on 2026-09-24. `last -x` shows no clean shutdown
+  between the 2026-09-23 18:12 boot and the 2026-09-24 16:24 boot.
+- Every live training process and both P5-D9 tuning schedulers died. The runs' logs end in
+  normal training output, with no error.
+- The cause on the Windows side (sleep, update restart, `wsl --shutdown`) is not known.
+- *State at termination.*
+  - **PPO:** trials 00–15 done; 16–17 never started. They were waiting for slots held by SAC,
+    because the two schedulers were not FIFO across each other.
+  - **SAC:** trials 00, 02, 03 and 06 done; 01, 04, 05, 07, 08 and 09 dead part-way
+    (127 k–484 k of 500 k steps); 10–19 never started.
+
+*Recovery code* (commit `f272cc5`; `make test` 438 passed, 1 skipped by design; `make lint`
+clean).
+- **Reconcile** (`scripts/reconcile_runs.py`). A run whose status says `running`, whose writing
+  process is gone, and whose status is older than 3 × max(eval interval ÷ fps, heartbeat) is
+  marked `failed`, with the reason and `reconciled_at`. Nothing else in the record changes.
+  - Applied 2026-09-28T11:46:12Z: the six dead SAC trials became `failed` ("host terminated; pid
+    dead since 2026-09-24T16:14:45–16:15:27Z"), and both sweeps became `interrupted`.
+  - No run directory was deleted or moved. The pre-change JSONs are kept in scratch.
+- **Checkpoint resume.** Periodic checkpoints now hold the resume state as well:
+  - curriculum stage and window, counters, per-worker sampler RNGs, learner RNGs;
+  - for SAC, the replay buffer.
+
+  A `failed` run can be resumed in place, with `make train-bg … RESUME=<run_dir>` or a scheduler
+  job, and the resume is recorded in `status.json` and `provenance.json`.
+  - *Not bit-exact:* in-flight episodes are dropped, VecNormalize gets one extra update, PPO
+    loses its partial rollout, and SAC loses the checkpoint step's own transitions. This is
+    documented in `rld.rl.resume`.
+  - Replaced CSV rows are first copied to `*.before_resume<k>.csv`.
+  - Identical tiny PPO and SAC runs before and after this change give identical weights, evals
+    and monitor rows, so the new checkpoint code does not change training.
+- **Search resume.**
+  - Re-invoking `make tune` skips `done` trials, starts never-run ones, and re-runs `failed` ones:
+    fresh into `<seed>_r<k>` by default, or resumed if a search sets `resume_failed: true`. It
+    refuses while any trial is live or unreconciled.
+  - `--collect` scores each trial from its latest `done` attempt and lists superseded runs.
+- **Scheduling.** All schedulers share one global FIFO by enqueue time, so the 2026-09-24
+  starvation cannot recur. The slot cost is now `ceil(0.4 × busiest pool) + torch_threads`.
+- **Bug fixed.** `collect_trials` would have crashed when scoring PPO trial 0, whose base config
+  holds no reward weights (`float(None)`). Automatic scoring would have ended as
+  `done_with_errors` with no `trials.csv`. Trial 0's row now reports the committed `reward.yaml`
+  weights it actually trains with.
+
+*SAC throughput* (`scripts/p5_sac_throughput_bench.py`; scratch run dirs, train pool only, no
+score read; 15 k timed steps after a 2 k warm-up, one measurement per cell; steps/s run alone):
+
+| width | CPU, 1 / 2 / 4 threads | CUDA, 1 / 2 / 4 threads |
+|---|---|---|
+| 256 | 80.0 / 96.1 / 103.3 | 71.8 / 71.7 / 75.0 |
+| 512 | 32.3 / 47.7 / 64.4 | 67.0 / 75.6 / 72.5 |
+
+- **Concurrent**, steps/s per run:
+  - 4 × CPU at 4 threads: 41.6 at width 512, 73.6 at width 256;
+  - 6 × CPU at 1 thread, width 512: 26.0;
+  - CUDA totals are capped at about 190–200 steps/s summed over all concurrent SAC runs,
+    whatever the width.
+- **Why tuning ran slower.** The 14–58 steps/s seen during tuning is most plausibly contention
+  with 4 concurrent PPO runs on 18 physical cores (36 logical). That mix was not reproduced.
+- **P5-D9's CPU = GPU reading** was measured at width 256 and 1 thread only. At width 512 or
+  with more threads it does not hold.
+
+*Decision (user, 2026-09-28: follow the recommendations).*
+- **Every SAC run, tuning and final, uses `device: cpu`, `torch_threads: 4`** (slot cost 8).
+  - It is the fastest per run on CPU: 1.3× at width 256 and 2× at width 512.
+  - The device is unchanged from P5-D9; only the thread count changes.
+  - `configs/rl/sac.yaml` is now `c8eda091453c9ab020e9c3f24348061ffe9732d167d5c6e46158d5b28f08ae85`
+    (superseding P5-D9's hash).
+- **The SAC search is re-run in full as `configs/rl/tune_sac_v2.yaml`**
+  (`4c2b6d7f8133e5386bde1274eab2711720ffce0f552dde7503bf89e7f41036d8`).
+  - It has the same 20 Sobol points, checked by comparing the `--dry-run` output byte for byte
+    with `tune_sac.yaml`'s.
+  - It has the same budgets, seeds and scoring rule. Only `run_group` (`tune_sac_v2`) and
+    `results_dir` (`results/tune/sac_v2`) differ, plus the base config's thread count.
+  - Every SAC trial therefore runs under one runtime setting.
+  - The `tune_sac` runs, 4 done and 6 failed, are kept on disk, **never scored**, and superseded
+    by `tune_sac_v2`.
+  - Failed trials re-run fresh (`resume_failed` defaults to false), so every trial is one
+    uninterrupted run.
+- **The PPO search completes in place.** `tune_ppo.yaml` is unchanged: trials 00–15 are skipped
+  as done, and 16–17 run fresh. The code change was verified not to alter PPO training.
+- **Launch order**, PPO first so the FIFO serves its two trials first:
+  ```
+  make tune CFG=configs/rl/tune_ppo.yaml
+  make tune CFG=configs/rl/tune_sac_v2.yaml
+  ```
+- **Recommended to the user:** make sure the host does not sleep or restart during runs.
+  Checkpoint resume limits a future loss to one checkpoint interval (PPO 1 M, SAC 250 k env
+  steps). It does not prevent the loss.
+
+### P5-D11 — PPO search scored; trial 14 becomes the PPO final config; PPO sweep queued (2026-09-28)
+
+*Scoring.* The scheduler's `on_complete` hook ran `collect_trials` automatically when trial 17
+finished. It wrote `results/tune/ppo/trials.csv` and `selection.json` under the P5-D9 rule: mean
+tune-pool success over SS3–SS5 on the final checkpoint, then lower pooled p95 closing speed, then
+lower trial index.
+- Hashes (SHA-256):
+  - `results/tune/ppo/trials.csv`: `2ead58510a7a8699858dbcf14068d6cb8d12501c8c94841c801e202fab38edf9`
+  - `results/tune/ppo/selection.json`:
+    `93a4d045080f897453cb2ea8caee167cd90ac01f89ff71e41f7ca56b91357188`
+  - the resulting `configs/rl/ppo.yaml`:
+    `26b6c49f8552f5fa626c19bab5222205eb83d294854734a23c3b0b1b3d70e14a`
+- All 18 trials are `done`; none was superseded or resumed.
+- **14 of 18 trials scored 180/180** (mean success 1.000), so the tie-break decided.
+- Trials 6 and 4 scored 0.994 and trial 8 0.978.
+- **Trial 15 hovers:** success 0.011, SS5 mean time to touchdown 8.35 s, bounce 0.333 of its
+  few touchdowns. This is the P5-D9 hover trap, inside the search space.
+
+*Winner: trial 14.*
+- Mean success 1.000 and pooled p95 closing speed **0.233 m/s**. The next lowest among the 1.000
+  trials were 0.315, 0.318 and 0.318 (trials 3, 5 and 9).
+- At SS5: p95 0.241 m/s, mean time to touchdown 2.17 s, bounce 0.000.
+- Hyperparameters:
+  - learning rate 5.941708698045433e-4 (linear decay), n_steps 1024, batch 1024, 5 epochs;
+  - entropy coefficient 0.009895217847079038;
+  - width 512 (depth 2, tanh);
+  - `log_std_init` −2.7972111202776433 (std 0.061).
+- Reward weights:
+  - w_progress 13.580398401245475, w_vz 5.847430455465423, w_smooth 0.04575471046550012,
+    w_time 0.0007295555155724287;
+  - r_success 29.54699269030243;
+  - r_hard_landing = r_off_pad = r_bounce 6.8282349687069654;
+  - r_crash 42.44193982332945.
+- For reference only, P3-D4 table, same tune draw, SS5 p95: `pid_feedforward` 0.252 m/s,
+  `pid_feedforward_lowvz` 0.169 m/s. Tune-pool numbers are not results.
+
+*Final config.*
+- `configs/rl/ppo.yaml` now carries trial 14's values, copied at full precision from
+  `results/tune/ppo/configs/trial_14.yaml`.
+- The two parsed configs are equal in every field except `method`, `run_group` and
+  `total_steps` (10 M vs 2 M). `tests/test_rl_config.py::test_ppo_config_is_the_tuning_winner`
+  pins this.
+- **Carried difference.** Because the learning-rate schedule is linear to the budget, the final
+  runs decay it over 10 M steps instead of 2 M. This is inherent in tuning at a smaller budget
+  (P3-D1 §5) and is stated, not changed.
+- **Every Phase 6 PPO-family method inherits these hyperparameters and reward weights**, as
+  P3-D1 §5 requires.
+
+*Launch.*
+- `make sweep CFG=configs/rl/ppo.yaml SEEDS="0 1 2 3 4"`: 10 M steps per seed, slot cost 8.
+- It runs behind the 16 SAC trials already queued (global FIFO, P5-D10), so it starts as the SAC
+  search drains.
+- P3-D1 §5's budget rule applies: the first PPO seed's wall clock is reported, and any budget cut
+  is made before any evaluation result is read.
+
+*Test fix, owned by the main thread.* `5376f2f` changed `sac.yaml` to 4 threads without
+re-running the tests. `test_slot_cost_counts_torch_threads` then failed, because it assumed the
+committed file had 1 thread. The test now sets both thread counts explicitly and checks the
+committed value. `test_collect_scores_latest_done_and_lists_superseded` now expects trial 0's
+effective weights: the committed `reward.yaml` overlaid with the base config's overrides.
+
+### P5-D12 — PPO budget rule: no cut; SAC search scored; trial 10 becomes the SAC final config (2026-09-29)
+
+*PPO budget rule (P3-D1 §5), applied before any evaluation result is read.*
+- The first final PPO seed, `artifacts/runs/ppo/0` at `1d67488`, took **3.17 h** wall clock for
+  10 010 624 steps (15.3 CPU-hours). Seeds 1–3 took 3.22, 3.13 and 3.07 h. Seed 4 was at 9.24 M
+  steps and 2.42 h when this entry was written.
+- **Projection for the PPO family** (25 runs × 10 M, P3-D1 §5): about 25 × 3.2 h = 80 h as a
+  single stream, or about 20 h at the four concurrent runs the slot cap allows. That is far
+  below the 5-day threshold. **No budget cut is made.**
+- **Provenance note.** `git_dirty` is true on all five runs. For seeds 0–2 the dirty paths are
+  only the user's two `.claude/skills` files. Seeds 3–4 also list the untracked
+  `results/tune/sac_v2/{selection.json,trials.csv}`: SAC scoring wrote those files while those
+  runs were queued. They are outputs, not code or config, and do not affect training.
+
+*SAC scoring.* The scheduler's `on_complete` hook scored all 20 `tune_sac_v2` trials under the
+P5-D9 rule. None was superseded or resumed.
+- Hashes (SHA-256):
+  - `results/tune/sac_v2/trials.csv`: `884b285511a4ec8217cda748c812b64449380149c34b500aa6f72f70c2faf57f`
+  - `results/tune/sac_v2/selection.json`:
+    `90d1e19faae45340a26b7f956dba7adadbedd36e0a52fbf4fd65462406d500b4`
+- **Winner: trial 10.**
+  - Mean tune-pool success **0.978**, pooled p95 closing speed 0.472 m/s.
+  - At SS5: success 0.933, p95 0.503 m/s, mean time to touchdown 1.28 s, timeout 0.
+  - Runners-up: trial 14 and trial 7 (0.950), trial 6 (0.944), trial 17 (0.939).
+- **No SAC trial scored 180/180.** Six scored 0.000:
+  - trials 2, 5, 12, 19 and 4 are **timeout-dominated** (0.83–0.97 at SS5); trial 4 has a
+    mean time to touchdown of 8.1 s. That is the same hover trap as PPO trial 15.
+  - trial 13 touched down (SS5 mean time to touchdown 4.5 s, timeout 0.05) but had no success.
+- **Single-seed trial scores are noisy** (added at the Gate 5 review, 2026-09-30). The superseded
+  `tune_sac` v1 run of trial 03 (same Sobol point, width 256, 1 torch thread) ended at 0.000 tune
+  success after hovering (`artifacts/runs/tune_sac/trial_03/0/evals.csv`). Its v2 re-run scored
+  0.872. The v1 runs of trials 00, 02 and 06 reproduced their v2 scores. Thread count alone
+  changes the arithmetic, so the two runs are not bit-comparable, but the swing shows how much
+  one seed can move a trial's score. v1 was never used for selection.
+- **SAC lands harder than PPO on the tune draw.** The SAC winner's pooled p95 is 0.472 m/s,
+  against 0.233 for the PPO winner. Tune-pool numbers are not results, and SAC's 2 M budget
+  against PPO's 10 M is a confound (P3-D1 §5).
+- Winner hyperparameters:
+  - learning rate 2.8376762147927807e-4, batch 256, tau 0.01665660378704859;
+  - learning_starts 10 000, width 512 (depth 2, ReLU);
+  - `device: cpu`, `torch_threads: 4` (P5-D10).
+- Winner reward weights:
+  - w_progress 19.067129995673895, w_vz 2.5956556352380216, w_smooth 0.04927539336297006,
+    w_time 0.010835396256297826;
+  - r_success 93.97084654774517;
+  - r_hard_landing = r_off_pad = r_bounce 16.795000918209553;
+  - r_crash 13.287172988057137.
+
+*Final config.*
+- `configs/rl/sac.yaml` (`a46f94152e99cd325ec30eb7de6c25c79be05c2294519eddee235e09b8bf5159`)
+  carries trial 10's values at full precision.
+- Its parsed config equals `results/tune/sac_v2/configs/trial_10.yaml` except `method`,
+  `run_group` and `total_steps` (2 M vs 0.5 M). This is pinned by
+  `test_final_config_is_the_tuning_winner`, parametrised over PPO and SAC.
+- **Expected wall clock:** at the 40–70 steps/s seen for width 512 under contention, each 2 M-step
+  seed takes roughly 8–14 h. The five seeds share the 34 slots at a cost of 8 each.
+
+*Launch.* `make sweep CFG=configs/rl/sac.yaml SEEDS="0 1 2 3 4"`.
+
+### P5-D13 — PPO and SAC final checkpoints on the frozen id list (2026-09-30)
+
+*What was flown.* The `final/` checkpoint of each of the ten finished Phase 5 runs, on
+`results/episodes/id.parquet` (SS3–SS6, N = 200 per cell, aft pad): 10 runs × 800 = **8 000
+episodes**, none skipped.
+- *Runs.* `artifacts/runs/ppo/{0..4}` (`ppo`, 10 M steps, trained at `1d67488`; checkpoint at
+  10 010 624 steps) and `artifacts/runs/sac/{0..4}` (`sac`, 2 M steps, trained at `14d7f32`;
+  checkpoint at 2 000 000 steps). All ten are `done`, and `status.json` `resumed_from` is null
+  for every one.
+- *Policy path.* `rld.eval.runner.callable_spec(method, functools.partial(rld.rl.train.build_policy,
+  run_dir=<run>, ckpt="final"), run_seed=<training seed>)`: the batch-1 `LearnedPolicy`,
+  deterministic action, `VecNormalize` frozen (`training=False`, `norm_reward=False`), no
+  ship-motion feed, not privileged. The seed label is the run's training seed, read from
+  `provenance.json` and checked against `status.json`.
+- *Runner.* The same chunked, parallel `run_matrix` path as e01 (chunk 25, 24 workers,
+  `OMP_NUM_THREADS = MKL_NUM_THREADS = 1` in every worker); 150.0 s wall.
+- *Before the run.* `scripts/make_episodes.py --check`: 10/10 hashes OK, MANIFEST SHA-256
+  `e6f30e55…`. The `id` list is file `919be99d…`, content `ea38d8a5…`, as in P3-D1 §2.
+- *Command.* `python -m rld.eval.learned --learned ppo=artifacts/runs/ppo/0,…,4
+  sac=artifacts/runs/sac/0,…,4 --ckpt final --list id --out-dir results/e05 --workers 24`.
+  The entry point is a module because `scripts/` is outside the eval-auditor's write scope
+  (as for `rld.eval.paired_outcomes` in P5-D3); a thin `scripts/eval_learned.py` may call
+  `rld.eval.learned.main`.
+
+*Provenance.*
+- *Code state.* HEAD `00bff09`, `git_dirty = true`. The dirty paths are the user's two
+  `.claude/skills/*.md` files and this entry's eval-side files: the new
+  `src/rld/eval/learned.py` and `tests/test_eval_learned.py`, and `src/rld/eval/report.py`
+  (a public `CAVEATS` alias only). Nothing under `src/rld/` or `configs/` changed between
+  `14d7f32` and HEAD. Since `1d67488` the only such change is `configs/rl/sac.yaml` (P5-D12),
+  which the PPO runs do not read.
+- *Run digests* (all in `run_info.json`, and per row in `summary.csv`). Every PPO run's
+  `config.yaml` is `aa28e4f4…` and its `config_source.yaml` is `26b6c49f…` (=
+  `configs/rl/ppo.yaml`, P5-D11). Every SAC run's are `04af3f42…` and `a46f9415…` (=
+  `configs/rl/sac.yaml`, P5-D12). `final/model.zip` and `final/vecnormalize.pkl` were hashed
+  before and after the flight, and did not change:
+
+  | run | `model.zip` | `vecnormalize.pkl` |
+  |---|---|---|
+  | ppo 0 / 1 / 2 / 3 / 4 | `1a012394…` / `77e172f4…` / `785d0789…` / `ab715248…` / `0f6fa22d…` | `9ddb2a99…` / `a82172a5…` / `9a95795a…` / `97bb0f4a…` / `6e5d7599…` |
+  | sac 0 / 1 / 2 / 3 / 4 | `3401491e…` / `8f724505…` / `9688985a…` / `c5c2be8f…` / `45a54640…` | `145883fa…` / `eb9ea77c…` / `aa95499e…` / `6462c1c4…` / `5d0066db…` |
+
+- *Baselines carried, not re-flown.* Their `summary.csv` lines for the four `id` aft cells are
+  copied line for line into `carried_summary_e01.csv` (20 lines: `pid_track_descend`,
+  `pid_feedforward`, `pid_feedforward_lowvz`, `gated`, `oracle_gated`; source summary
+  `2e5a3400…`, episodes `c5852090…`) and `carried_summary_e01_lowvz_cut.csv` (4 lines:
+  `pid_feedforward_lowvz_cut`; source summary `180eeef9…`, episodes `8fe15278…`). Checked and
+  recorded in `run_info.json["carried"]`:
+  - every line is byte-identical to a source line (also re-checked with `grep -Fx`: 21/21 and
+    5/5 including headers);
+  - each source's run-wide provenance columns equal the live ones;
+  - each source flew exactly the 800 listed `id` episodes (regime, SS, index, realization,
+    episode seed, `t0`, initial position);
+  - re-summarising each source's `episodes.csv` reproduces its summary's metric columns as
+    text.
+- *Re-derivation.* `python -m rld.eval.learned --check` recomputes `summary.csv`, `seeds.csv`,
+  `aggregate.csv` and the markdown from `episodes.csv`: all four **byte-identical**. The markdown
+  was re-rendered once after the run (renderer text only: the penetration column shown as a
+  positive depth, and the note that a seed-bootstrap CI excludes episode sampling). No CSV
+  changed; `run_info.json["re_rendered"]` records both hashes.
+
+**Headline: `id`, aft pad, success per sea state.** Learned rows: rliable IQM across the 5
+seeds (%), stratified-bootstrap 95 % CI (P3-D1 §4: 2 000 replicates, seed 20260926, seeds
+resampled within the cell, one cell per task), then the per-seed range. Baselines: one
+deterministic run, % [Wilson 95 % CI] k/200. Success is not pooled across sea states. SS6 is
+outside every method's training distribution (`in_training_distribution` 0.000; 0.745–0.755 at
+SS3–SS5, where the 90° headings are outside the dev pool).
+
+| method | SS3 | SS4 | SS5 | SS6 (out of distribution) |
+|---|---|---|---|---|
+| `ppo` IQM [CI]; seed range | 100.0 [100.0, 100.0]; 100.0–100.0 | 100.0 [100.0, 100.0]; 100.0–100.0 | 100.0 [100.0, 100.0]; 100.0–100.0 | 98.2 [98.0, 98.5]; 98.0–98.5 |
+| `sac` IQM [CI]; seed range | 99.8 [98.8, 100.0]; 98.5–100.0 | 98.2 [96.3, 99.0]; 96.0–99.0 | 87.0 [81.7, 90.3]; 80.0–91.0 | 72.5 [60.2, 79.3]; 55.5–81.5 |
+| `pid_track_descend` | 100.0 [98.1, 100.0] 200 | 96.0 [92.3, 98.0] 192 | 85.0 [79.4, 89.3] 170 | 80.0 [73.9, 85.0] 160 |
+| `pid_feedforward` | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | 99.0 [96.4, 99.7] 198 | 90.5 [85.6, 93.8] 181 |
+| `pid_feedforward_lowvz` | 100.0 [98.1, 100.0] 200 | 98.0 [95.0, 99.2] 196 | 95.5 [91.7, 97.6] 191 | 85.0 [79.4, 89.3] 170 |
+| `pid_feedforward_lowvz_cut` | 100.0 [98.1, 100.0] 200 | 98.5 [95.7, 99.5] 197 | 98.0 [95.0, 99.2] 196 | 88.0 [82.8, 91.8] 176 |
+| `gated` | 100.0 [98.1, 100.0] 200 | 98.5 [95.7, 99.5] 197 | 89.5 [84.5, 93.0] 179 | 63.0 [56.1, 69.4] 126 |
+| `oracle_gated` (privileged; commit-timing oracle) | 100.0 [98.1, 100.0] 200 | 98.5 [95.7, 99.5] 197 | 89.0 [83.9, 92.6] 178 | 64.5 [57.7, 70.8] 129 |
+
+- *Per-seed Wilson CIs.* `ppo`: 200/200 [98.1, 100.0] for every seed at SS3–SS5; at SS6,
+  197, 196, 196, 197, 196 (seeds 0–4), e.g. 98.0 [95.0, 99.2]. `sac`: SS5 178, 160, 182, 174,
+  170, e.g. seed 1 80.0 [73.9, 85.0]; SS6 163, 111, 150, 146, 139, e.g. seed 1 55.5
+  [48.6, 62.2]. Every cell is in `summary.csv` and the rendered table.
+- *Optimality gap* (points, [CI]): `ppo` 0.0 at SS3–SS5, 1.8 [1.6, 2.0] at SS6; `sac` 0.4
+  [0.0, 1.0], 2.1 [1.1, 3.2], 13.6 [10.6, 17.0], 29.1 [22.4, 37.5].
+- *What the seed CI is.* It reflects seed-to-seed variation only. Where every `ppo` seed scores
+  200/200 it collapses to [100.0, 100.0]; the episode-level uncertainty is then each seed's
+  Wilson CI, [98.1, 100.0].
+- **Budget confound.** `ppo` had 10 M env steps per seed and `sac` 2 M (P3-D1 §5). Every
+  PPO-vs-SAC reading carries it. No method contrast is tested here, and none of the baseline
+  comparisons above is a paired test: they are unpaired readings of the tables.
+
+**Closing speed (p95 along the deck normal, m/s model scale; IQM of the per-seed p95s
+[stratified-bootstrap CI]).** Descriptive; it is not P3-D1 §4's pooled relative-p95 statistic.
+
+| method | SS3 | SS4 | SS5 | SS6 |
+|---|---|---|---|---|
+| `ppo` | 0.265 [0.263, 0.266] | 0.267 [0.264, 0.270] | 0.271 [0.267, 0.275] | 0.278 [0.274, 0.285] |
+| `sac` | 0.392 [0.369, 0.433] | 0.437 [0.406, 0.478] | 0.595 [0.562, 0.619] | 0.668 [0.590, 0.778] |
+| `pid_feedforward` | 0.219 | 0.226 | 0.262 | 0.264 |
+| `pid_feedforward_lowvz` (H1a reference) | 0.127 | 0.139 | 0.188 | 0.181 |
+| `pid_feedforward_lowvz_cut` | 0.127 | 0.139 | 0.188 | 0.181 |
+| `pid_track_descend` | 0.308 | 0.412 | 0.525 | 0.502 |
+| `gated` | 0.217 | 0.229 | 0.250 | 0.267 |
+| `oracle_gated` (privileged) | 0.220 | 0.236 | 0.252 | 0.254 |
+
+*Caveats added at the Gate 5 review (2026-09-30), from P5-D14.* The recorded closing speed
+understates impact speed by about 7 %. Up to 41 SAC successes (1 / 3 / 13 / 24 at SS3–SS6, per
+1 000 seed-episodes), 2 PPO successes (SS6) and 1 `pid_feedforward_lowvz_cut` success (SS6)
+may depend on tunnelling overlap. Both can only raise SAC's SS5/SS6
+success, by at most a few points. The same caveat is now a line in `success_vs_seastate.md`'s
+header.
+
+**Seed-to-seed spread (`seeds.csv`; sample SD, ddof = 1).**
+- `ppo`: success SD 0.0 points at SS3–SS5 and 0.3 at SS6; p95 SD 0.001–0.005 m/s.
+- `sac`: success SD 0.7, 1.3, 4.2 and 9.7 points at SS3–SS6; p95 SD 0.028–0.091 m/s.
+
+**Outcome breakdown where the learned methods lose** (counts over 5 seeds × 200 per cell; every
+cell's six fractions sum to 1; full per-seed tables in `success_vs_seastate.md`).
+- `ppo` loses only at SS6: 15 `hard_landing` and 3 `bounce` in 1 000 seed-episodes (per seed
+  3/4/3/2/3 hard, 0/0/1/1/1 bounce). No `crash`, `off_pad` or `timeout` in any cell.
+- `sac`, summed over seeds:
+
+  | SS | crash | off_pad | hard_landing | bounce | timeout |
+  |---|---|---|---|---|---|
+  | SS3 | 0 | 0 | 4 | 0 | 0 |
+  | SS4 | 0 | 1 | 20 | 0 | 0 |
+  | SS5 | 2 | 8 | 122 | 3 | 1 |
+  | SS6 | 18 | 39 | 232 | 2 | 0 |
+
+  The 20 crashes are `tilt_gt_crash` 16, `off_plate_strike` 3 and `below_deck` 1; 17 of them
+  are seeds 2 and 4 at SS6. No baseline has a `crash` or an `off_pad` in any `id` cell
+  (P3-D1 §7).
+
+**Surprises and flags (reported, not acted on; the Step 2 audit owns the follow-up).**
+1. **`ppo` at `id` SS6 is above every baseline's single run (unpaired).** It scores 98.0–98.5 %
+   on a sea state it never trained on, against 90.5 % [85.6, 93.8] for `pid_feedforward`. This
+   is not a tested contrast, and it is not H1b, which is about `residual_ppo`.
+2. **`ppo` lands fast at a nearly fixed closing speed.** Its median time to touchdown is
+   1.51–1.59 s at every SS, against 4.4–4.6 s for `pid_feedforward`, 3.2–4.7 s for `gated` and
+   7.6–7.8 s for `lowvz`. Its p50 closing speed is 0.241–0.254 m/s in every cell, and its p95 is
+   above `pid_feedforward`'s and `lowvz`'s in every cell.
+3. **`sac` tunnels.** 264 of 4 000 episodes exceed the 5 mm threshold (3, 11, 72 and 178 at
+   SS3–SS6), with a maximum depth of 15.67 mm. Compare P5-D3's `lowvz_cut`: 31 over all 14
+   cells, max 7.03 mm. `ppo` tunnels 6 times (max 5.35 mm).
+4. **`sac` seed 1 at SS6** is 55.5 %, 14 points below the next-lowest seed (69.5 %). Its
+   losses are 80 `hard_landing`, 8 `off_pad` and 1 `crash`.
+5. **Timeouts are almost absent**: 1 of 8 000 (`sac` seed 2, SS5). Neither final policy shows
+   the P5-D9 hover trap on this list. `gated` times out on 35 % of `id` SS6.
+6. **Detector disagreement** is 2 / 8 000 (`sac` SS6, seeds 0 and 4); `ppo` has 0 / 4 000.
+7. **N and seeds.** Every one of the 40 learned cells has N = 200 and all 5 seeds; there is
+   no missing seed and no short cell.
+
+*Artifacts, all in `results/e05/` (SHA-256).*
+
+| file | SHA-256 |
+|---|---|
+| `episodes.csv` (8 000 rows) | `92419dfc49d854dae84836d1f3721fde4cd254363772a13e6ba980f606fb6169` |
+| `summary.csv` (40 rows) | `a2a0f50f77012a4488c6c28939a170725ed95453d2a9589f10612a7a1d6192f2` |
+| `seeds.csv` (8 rows) | `cf61ce010b08535fabe96996cd5e8259ac04578cbf4bc95c8fcfe6a7883c1613` |
+| `aggregate.csv` (24 rows) | `ded3cdd53290d025f60c81a029d8545dcaf6d99babe204dd03d842acfa2874b9` |
+| `carried_summary_e01.csv` | `27da5b6f8db170cbcb0c794c039113018d82242b2beb9470a8149f8823b2d277` |
+| `carried_summary_e01_lowvz_cut.csv` | `39101ccbf2df946ac838bb635f3e295d58d1008ef175987d4301f25cdcda9594` |
+| `success_vs_seastate.md` | `d8a30a0f62d485806fbb2a0f72470ef72a984b80ef03f886cf4df6c8e957cb3b` (Gate 5 caveat line added and corrected at the re-review; as first committed: `6ae9bc3100539c0b3810071b9c731e9148074fa2b44c1d8893eb4c52aa9863f7`) |
+
+`run_info.json` holds the non-deterministic facts (host, timings, git state) and is not hashed
+here. No hypothesis is scored (Phase 7). P3-D1 is unchanged.
+
+*Code (eval side only).* `src/rld/eval/learned.py` (new): run inspection and seed labelling,
+the learned spec, the flight through `run_matrix`, per-seed summary, `seeds.csv`,
+`aggregate.csv`, the baseline carry and its checks, the renderer, and `--render-only` and
+`--check`. `tests/test_eval_learned.py` (new): two tiny SAC runs at training seeds 0 and 3 flown
+end to end through `main` on a temporary dev-pool list, never a committed one. It checks seed
+labels, worker independence, the carry checks, the privileged label and byte-identical
+re-rendering, plus known-value tests of the spread and IQM.
+
+### P5-D14 — Reward-hacking audit of the ten final Phase 5 runs (2026-09-30)
+
+*Scope.* The audit covered:
+- every training episode in the monitors (PPO 681 073, SAC 161 527);
+- all 8 000 e05 rows;
+- the e01 and e01_lowvz_cut `id` rows as baselines.
+
+1 354 scratch re-flights (a 25-per-SS sample, plus every e05 tunnelled or disagreement episode)
+added per-step logs through the committed env and `build_policy`. **Each re-flight reproduced its
+committed row exactly, 1 354 of 1 354.** Nothing was re-trained and nothing in `results/e05` or
+`results/e01*` changed.
+- *Command.* `python scripts/reward_hacking_audit.py --out-dir results/audit --scratch-dir <dir>
+  --workers 24`. The main thread re-ran it into scratch, and all 16 CSVs were byte-identical.
+- *Hashes.*
+  - `verdicts.csv`: `36ec2fdcd9ce7c9553c74b157e09dd6b4d94b883f8323c11000008c9a55b832a`
+  - `README.md`: `cd04d8f387efe05b8039a896bdf7a581813a9032f99a4133b0497416ac5fa8fc`
+    (after the Gate 5 corrections and the re-review fixes; as first committed in `d3af59c`:
+    `e30e413db8845480d1a40888b4cc6395a94c03e2760b7c2aa91bf38622e2c2ed`)
+  - `ppo.csv`: `47030581299b8f80898f734307a26372ded42bb9e7e47c72d6ec733a8ac49cbe`
+  - `sac.csv`: `190dfb6e4769391d7b725bba86977cf118d4f9570d8e8756c0ea093ce1df5330`
+- *Thresholds.* They were pre-stated in `results/audit/README.md`, whose section says it was
+  written at 2026-09-30 08:49 EDT before any audit number. That timestamp is the agent's own
+  record: the section was not committed separately before computation. No threshold was moved,
+  and post-hoc readings are labelled as such beside the pre-stated verdicts.
+
+*Verdicts*, PPO / SAC (`verdicts.csv`):
+
+| check | PPO | SAC |
+|---|---|---|
+| 1a training timeouts, final 10 % of steps | clean (0.000) | clean (0.000) |
+| 1b training timeouts, 10 bins | clean (max 0.040) | clean (max 0.269) |
+| 1c e05 timeouts vs `gated` | clean (0 / 4 000) | clean (1 / 4 000) |
+| 2a tunnelling (limit: `lowvz_cut` 0.75 %, 7.03 mm) | clean (0.15 %, 5.35 mm) | **finding** (6.6 %, 15.67 mm) |
+| 2b tunnelling mechanism | finding: post-contact idle, 6 of 6 | inconclusive: impact 103, idle 119, other 42 of 264 |
+| 2c outcome depends on tunnelling (pre-stated flag) | finding (2 of 6) | finding (44 of 264) |
+| 3 detector disagreement | clean (0) | clean (0.2 % at SS6) |
+| 4 success concentrated in easy start states | clean | clean |
+| 5 pre-contact norm-cap saturation | clean (0.8 %) | **finding** (12.2 %; 86 % of it in the first 0.5 s) |
+| 6 post-contact down-force (H1a confound) | clean by 0.008 (idle fraction 0.492), **3 of 5 seeds idle** | **finding** (0.871, all seeds) |
+| 7 passive, deck-driven landings | clean (3.6 %) | clean (0 %) |
+| 8 seed outliers | minor metrics only | SAC seed 1 (SS6 55.5 %) is not singled out by any check |
+
+*Readings.*
+- **Hover trap.** Neither final policy hovers.
+  - Post hoc, at 1 % bins, four of five SAC seeds hovered between 20 k and 160 k steps (timeout
+    0.93–1.00) and recovered within 40–60 k steps.
+  - PPO's early timeouts (≤ 100 k steps) are most likely the untrained initial policy; this is
+    not proven.
+  - The pre-stated 10-bin check was too coarse to see either.
+- **SAC tunnelling is driven mainly by impact speed, with the post-contact throttle cut adding to
+  it.**
+  - The tunnelling rate rises with closing speed: 1.5 % at 0.2–0.3 m/s, 24.6 % at 0.5–0.6, 61 %
+    at 0.6–0.7, 92 % at 0.8–0.9.
+  - Maximum depth comes a median 38 ms after first contact, and the motors are at idle then in
+    59 % of cases.
+- **Whether any success depends on penetration is not shown** (corrected at the Gate 5 review,
+  2026-09-30; the audit first wrote "no success depends on penetration").
+  - The audit's post-hoc argument was that no flagged success has an unloaded stretch longer
+    than the 50 ms grace. That does not settle it: without the overlap the drone would separate
+    during that stretch and have to close the gap again, so the counterfactual gap is at least
+    as long and plausibly longer. 18 of the 41 SAC stretches are ≥ 25 ms, and one is exactly
+    50 ms.
+  - **Bound:** up to 41 SAC successes (1 / 3 / 13 / 24 at SS3–SS6, per 1 000 seed-episodes)
+    and 2 PPO successes (SS6) may depend on the overlap; so may 1 `pid_feedforward_lowvz_cut`
+    success (SS6), under the same frozen definition.
+  - With the measurement-instant fact below, both biases can only raise SAC's SS5/SS6 success,
+    by at most a few points. SAC is already below `pid_feedforward` there, so no reading there
+    changes direction.
+  - Of the non-success flagged episodes, 1 of SAC's is plausibly outcome-changing, and it is a
+    bounce, which counts against the policy.
+- **P5-D3's idle-thrust explanation for `lowvz_cut` tunnelling is now verified.** PPO's 6 and
+  lowvz_cut's 6 `id` episodes are all of that kind.
+- **PPO's fixed ~1.5 s touchdown is an active descent.** It descends at about −1.2 m/s, then holds
+  −0.26 m/s relative to the deck for the last ~0.9 s. Closing speed does not depend on the deck's
+  vertical velocity (R² ≤ 0.021), and it lands on a rising deck 48–54 % of the time, close to
+  `pid_feedforward`.
+- **H1a confound, carried to Phase 7.** A post-contact throttle cut is present in every SAC seed
+  and in three of the five PPO seeds. Both methods bounce 0.2–0.3 % at SS6, against 7.5–10.5 % for
+  lowvz and lowvz_cut. `pid_feedforward_lowvz_cut` (P5-D2) is the control for it.
+
+*Two measurement facts, recorded and not changed. Both are frozen definitions applied to every
+method alike.*
+1. **The recorded touchdown closing speed understates impact speed.** It is read after the first
+   contact substep's solver impulse, about 7 % below the value one substep earlier (median ratio
+   0.92–0.94 for every method).
+   - In the re-flight sample, 15 of 445 SAC successes (3.4 %) arrived above 0.5 m/s one substep
+     before contact; PPO had 0 of 500 and `pid_feedforward` 0 of 99.
+   - SAC's SS5/SS6 success therefore depends on the measurement instant by a few points.
+   - This is P2-D5/P2-D6's frozen definition.
+2. **`success.yaml`'s comment says penetration is flagged "at first contact", but the code flags
+   it at any contact substep.**
+   - The committed tunnelling counts, e01 and e05 alike, follow the code.
+   - In 262 of 264 SAC cases the maximum depth comes after first contact.
+   - The comment is wrong, not the counts. Both readings are carried; neither is changed here.
+
+*Code.*
+- `src/rld/rl/audit.py` (new) and `scripts/reward_hacking_audit.py` (new).
+- `tests/test_rl_audit.py` (new): 17 tests, including an end-to-end re-flight that reproduces a
+  committed e01 row.
+- `tests/test_rl_leakage.py` forbids `rld.rl` from referencing the frozen lists, and it is kept
+  unchanged. The script (evaluation-side) checks MANIFEST, reads `id.parquet`, and passes the rows
+  into `rld.rl.audit`, which never opens a list.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|
@@ -1675,3 +3013,4 @@ a new evaluation list.
 | 2 | 2026-09-22 | PASSED | `make test lint` green (118 passed, 1 skipped, 107 s; ruff + ruff-format + mypy --strict clean). The 1 skip is by design: `tests/test_platform.py` gates only the configured driver and *measures* the other, and `test_constraint_driver_fails_the_tracking_gate` asserts the rejected one fails. Platform tracking, `kinematic` driver, 10 s model at frigate SS6 180 deg 12 kn aft: body-origin 0.000 mm and plate-corner 2.2e-16 m against the 1 mm gate, orientation 3.0e-8 rad, `getBaseVelocity` linear and angular ratio 0.0 % against the 2 % gate; `constraint` fails every one of those by an order of magnitude and cannot be tuned into passing (24-point sweep, four identical digits) -- P2-D1. `gymnasium.utils.env_checker.check_env` passes; reset determinism bit-identical as the env's 1st and 3rd reset; drop on a static pad registers exactly one touchdown; scripted 0.3 m/s descent on a static pad 100/100 `success`. `results/e00_env_sanity.csv` (4 rows) + `results/e00_env_sanity_episodes.csv` (800 rows) written from the `id` split's val partition, draw seed 20260922: hover 1.000 `timeout` at SS3 and SS5, random 1.000 `crash` at both, no successes under either -- outcome fractions sum to 1.000000 per row. **PyBullet-vs-analytic touchdown disagreement 0/800 = 0.0000** against the < 1 % gate, plus 0/100 on scripted static descents and 0/30 on a moving SS5 deck. `results/env_throughput_landing.csv` (8 rows) records the deck-in-the-loop throughput P3-D1 must size from (P2-D8); `results/env_throughput.csv` untouched. Two flags carried forward, both recorded rather than fixed: one of 800 sanity episodes tunnelled (7.86 mm penetration vs the 5 mm threshold) and it was the only random episode that ever reached contact, so the random arm exercises the touchdown path barely at all -- the scripted tests carry that load; and the plan's "dropped from rest" is not expressible in a velocity-setpoint action space, so the drop test uses the maximum commanded descent (P2-D9). |
 | 3 | 2026-09-22 | PASSED (2nd attempt) | First attempt FAILED on the `results-skeptic` review (BLOCKING B1: the restated H1 was beatable by a slower PID; MAJOR M1-M3), before any RL run; remediated with user decisions (P3-D1 revision 1 §9, P3-D3 amendments). Second attempt: `make test lint` green (233 passed, 1 skipped by design, 162 s; ruff + ruff-format + mypy --strict clean). `pid_feedforward` 200/200 on the static pad and 200/200 at `id` SS3 (Wilson [98.1, 100.0] each) against the >= 95 % gate, from `results/e01/episodes.csv` at `d35f224`. Success-vs-sea-state table `results/e01/success_vs_seastate.md` committed: 5 controllers x 14 cells x N = 200, re-renders byte-identically from `summary.csv`; no crash or off_pad anywhere; detector disagreement 5/14000; tunnelling 14 (all `pid_track_descend`, max 6.5 mm). Frozen lists `results/episodes/` committed at `0780aaa`, MANIFEST SHA-256 `e6f30e55e478d39061b94e38de33959ca99b16e8cac38a3bd99b34f6543ad4a2`, `--check` 10/10 OK. P3-D1 FROZEN revision 1, block SHA-256 **`21465588610e65f1d1253bd26e5ce5db1da938889c6042338e1de8d4d99f5ed2`** (from `### P3-D1 — FROZEN` to the line before `### P3-D2`, UTF-8). Second `results-skeptic` review: no BLOCKING; MAJOR-1 (H1 scope) and MINOR 1-9 folded in by P3-D4 errata without touching the frozen block; three items carried to Phase 4 (P3-D4). |
 | 4 | 2026-09-23 | PASSED | Criteria checked against committed artifacts at `eeb87d5` plus the Gate 4 wording fixes. `make test lint` green: 320 passed, 1 skipped by design (P2-D1), 313 s; ruff, ruff-format and mypy --strict clean. `tests/test_deck_forecast.py` and `tests/test_control_gated_forecast.py` 56/56 with **0 skips**, artifacts present (a fresh clone without `artifacts/dmf/` would skip parity, so this run is the evidence). **Parity:** `results/forecast/parity.csv`, 18 gated checks over 6 model dirs, all pass at `1e-4·max(1,|y|)`, worst 0.041× tolerance; bridge-fed parity needs dmf's float32 cast (P4-D3). **Causality:** the feed-clock spy and the future-perturbation bit-identity tests pass. **Leakage:** 729 train / 135 tune forecaster keys vs 1 273 frozen-list realizations, overlap 0 (recomputed independently from `fit_keys.json`). **Frozen-list results:** `gated_forecast` and `gated_forecast_tcn` committed in `results/e02/` beside `gated`, `oracle_gated` and the three PID baselines, 26 cells × 200 each at aft and CG, with `td_in_quiescent_window`, quiet landings per listed episode and Wilson CIs; the static list is not run for feed controllers, reason recorded. Phase 3 aft rows byte-identical to e01 (14 000/14 000). Secondary seed arms in `results/e02_tcn_seeds/` (`12fd9f5`, clean). Oracle relabel done; P4-D5 records the hash. MANIFEST 10/10; P3-D1 block SHA-256 unchanged. **Results-skeptic:** first review MAJOR M1–M5 remediated (P4-D3 wording, P4-D4a erratum, P4-D5, M1 columns, seed arms); second review no BLOCKING and no MAJOR, 6 MINOR wording and provenance errors fixed in P4-D4/P4-D4a. Headline (P4-D4): pre-registered expectation 1 held, 2 600/2 600 aft `gated_forecast` timeouts; forecast gating lowers success against `gated` in 19 (DLinear) and 9 (TCN) of 26 cells, and improves it in none. |
+| 5 | 2026-09-30 | PASSED | Criteria checked against committed artifacts at `b54493d`. `make test lint` green: 462 passed, 1 skipped by design (P2-D1), 368 s; ruff, ruff-format and mypy --strict clean. P3-D1 block SHA-256 unchanged (`21465588…`); MANIFEST `--check` 10/10. **Learning curves** (5 seeds, mean ± SD; `00bff09`): `results/e05/learning_curves_ppo.{png,csv}` (`500e795d0686d04507d452ed07ccd033d908d037c2f3bbc139ddb1d2216c3a45`, `a84124dd35eca77899e26822b3ff7a3b67bcbfea79d7d91199e45245a676ce9c`) and `learning_curves_sac.{png,csv}` (`e9c416e5be4c17eee23fc0d0e7d7dbd7332fd62632ffdb07bb6223e8d1365506`, `cc61fde31be366c14085794ac649097a90aa853e43eeed75295d115d443d394e`); the SD band is not clipped to [0, 1]. **`id` results** (P5-D13, `9707642`): 10 final checkpoints × 800 frozen `id` episodes, aft; IQM success SS3–SS6 PPO 100.0 / 100.0 / 100.0 / 98.2, SAC 99.8 / 98.2 / 87.0 / 72.5, six baselines carried byte-identically beside them; `--check` 4/4 byte-identical. e05 was flown with `src/rld/eval/learned.py` untracked (recorded in `run_info.json`); the audit's 1 248 learned re-flights through committed code reproduce their e05 rows exactly, which covers that provenance gap. **Hacking audit** (P5-D14, `d3af59c`, corrected `b54493d`): findings recorded, not clean — SAC tunnelling 6.6 % (max 15.7 mm, impact-speed driven), SAC pre-contact saturation, post-contact throttle cut in all SAC and 3/5 PPO seeds (H1a confound), and up to 41 SAC / 2 PPO successes that may depend on tunnelling overlap plus a ~7 % closing-speed measurement-instant understatement, both caveated in the e05 table; clean on final-policy hovering, detector disagreement, easy-start exploitation and passive landings; regenerates byte-identically. **Seed spread** (`results/e05/seeds.csv`): PPO success SD 0.0 points at SS3–SS5 and 0.3 at SS6; SAC 0.7 / 1.3 / 4.2 / 9.7 at SS3–SS6 (seed 1 at SS6 55.5 %). No run dropped or resumed; PPO budget rule applied with no cut (P5-D12). **Results-skeptic:** no BLOCKING; MAJOR M1 (overclaim that no success depends on penetration) remediated in `b54493d`; MINOR 1–3 fixed there, 4 and 7 recorded in this row, 5 carried to Phase 6's "Before you start", 6 needs no change. `/phase-gate 5` re-run at `1833810`: `results-skeptic` re-review confirms M1 and minors 1–5, 7 remediated, no BLOCKING or MAJOR; two new MINOR slips fixed in the next commit ("20 of the 41" corrected to 18 SAC unloaded stretches ≥ 25 ms; the overlap bound now also names 1 `pid_feedforward_lowvz_cut` SS6 success). |

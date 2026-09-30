@@ -1,0 +1,62 @@
+# Trial 5 of configs/rl/tune_ppo.yaml (generated; do not edit).
+# Base: configs/rl/ppo.yaml; Sobol seed 20260927.
+method: tune_ppo_t05
+run_group: tune_ppo/trial_05
+algo: ppo
+total_steps: 2000000
+n_envs: 16
+vec_env: subproc
+device: cpu
+torch_threads: 1
+pad: aft
+policy:
+  width: 128
+  depth: 2
+  activation: tanh
+ppo:
+  learning_rate: 0.00025916361531330706
+  lr_schedule: linear
+  n_steps: 512
+  batch_size: 2048
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.009096444388851524
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  target_kl: null
+  log_std_init: -2.221575414761901
+sac: null
+normalize:
+  norm_obs: true
+  norm_reward: true
+  clip_obs: 10.0
+  clip_reward: 10.0
+eval:
+  interval_steps: 200000
+  n_envs: 16
+  tuning_config: configs/control/tuning.yaml
+  episodes_per_ss: null
+  deterministic: true
+curriculum:
+  enabled: true
+  stages:
+  - SS3
+  - SS4
+  - SS5
+  promote_success: 0.8
+  window_episodes: 100
+checkpoint_interval_steps: 1000000
+status_interval_s: 60.0
+log_interval: 1
+reward:
+  w_progress: 17.021728726103902
+  w_vz: 3.096729086666651
+  w_smooth: 0.014608915815879727
+  w_time: 0.005438146311789751
+  r_success: 94.16680335998535
+  r_hard_landing: 15.792678920552135
+  r_off_pad: 15.792678920552135
+  r_bounce: 15.792678920552135
+  r_crash: 30.31522274017334

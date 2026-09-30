@@ -1,0 +1,58 @@
+# Trial 12 of configs/rl/tune_sac_v2.yaml (generated; do not edit).
+# Base: configs/rl/sac.yaml; Sobol seed 20260928.
+method: tune_sac_t12
+run_group: tune_sac_v2/trial_12
+algo: sac
+total_steps: 500000
+n_envs: 8
+vec_env: subproc
+device: cpu
+torch_threads: 4
+pad: aft
+policy:
+  width: 256
+  depth: 2
+  activation: relu
+ppo: null
+sac:
+  learning_rate: 0.0006005617179033486
+  buffer_size: 1000000
+  batch_size: 256
+  tau: 0.010955485257331327
+  gamma: 0.99
+  learning_starts: 25000
+  train_freq: 1
+  gradient_steps: -1
+  ent_coef: auto
+normalize:
+  norm_obs: true
+  norm_reward: false
+  clip_obs: 10.0
+  clip_reward: 10.0
+eval:
+  interval_steps: 50000
+  n_envs: 8
+  tuning_config: configs/control/tuning.yaml
+  episodes_per_ss: null
+  deterministic: true
+curriculum:
+  enabled: true
+  stages:
+  - SS3
+  - SS4
+  - SS5
+  promote_success: 0.8
+  window_episodes: 100
+checkpoint_interval_steps: 250000
+status_interval_s: 60.0
+log_interval: 200
+reward:
+  w_progress: 5.403602006845176
+  w_vz: 5.392142818804134
+  w_smooth: 0.025508640896261453
+  w_time: 0.021705192374065516
+  r_success: 48.324827244505286
+  r_hard_landing: 18.89867104589939
+  r_off_pad: 18.89867104589939
+  r_bounce: 18.89867104589939
+  r_crash: 47.009676806628704

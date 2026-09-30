@@ -46,6 +46,7 @@ from rld.eval.metrics import CELL_METRIC_COLUMNS, CellMetrics, as_bool, as_float
 from rld.eval.stats import wilson_interval
 
 __all__ = [
+    "CAVEATS",
     "CELL_STATUS_COLUMNS",
     "QUIET_COLUMNS",
     "DEFAULT_PAD",
@@ -110,6 +111,10 @@ METHOD_LABELS: dict[str, str] = {
         "future deck motion"
     ),
     "pid_feedforward_lowvz": "pid_feedforward_lowvz (H1a closing-speed reference (P3-D1 §8))",
+    "pid_feedforward_lowvz_cut": (
+        "pid_feedforward_lowvz_cut (lowvz + latched post-contact throttle cut (P5-D2); "
+        "not the H1a reference)"
+    ),
     "gated_forecast": (
         "gated_forecast (not privileged: past-only ship-motion feed + dmf residual_interval band)"
     ),
@@ -152,6 +157,10 @@ _CAVEATS: tuple[str, ...] = (
     "dmf's roll/pitch-heave phase defect (~90 deg) is carried, not fixed; this table is the "
     "aft pad, which is sensitive to it (P1-D2).",
 )
+
+
+#: Public name of the caveats, for other renderers (e.g. :mod:`rld.eval.learned`).
+CAVEATS: tuple[str, ...] = _CAVEATS
 
 
 def sha256_file(path: Path) -> str:

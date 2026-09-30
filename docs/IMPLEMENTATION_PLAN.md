@@ -488,6 +488,45 @@ list for PPO and SAC; hacking audit clean or findings recorded; seed-to-seed spr
 
 ### Phase 6 — Residual RL and forecast-conditioned RL (1.5 days + ~1 day compute) · owner: `rl-trainer`
 
+**Before you start (added after Gate 5, 2026-09-30).**
+
+(a) **Inherited settings.**
+- Every Phase 6 PPO-family method inherits `configs/rl/ppo.yaml` unchanged (P5-D11: trial 14's
+  hyperparameters and reward weights, `log_std_init` −2.80).
+- Budget: 10 M steps, seeds 0–4. No budget cut (P5-D12). A run takes about 3.2 h, so 20 runs take
+  roughly 16–20 h at 4 concurrent.
+- Tuning trials used: PPO 20 of 20 (P5-D4, P5-D7, P5-D11). Phase 6 methods get no search of their
+  own (P3-D1 §5).
+
+(b) **H1a confound (P5-D1, P5-D3, P5-D14).**
+- Pure PPO already cuts to idle after contact in 3 of 5 seeds. A residual policy can learn the
+  same thing, and `pid_feedforward_lowvz_cut` is the control for it.
+- Run audit check 6 (post-contact down-force) on every residual seed. Report it beside H1a.
+
+(c) **When comparing PPO with the PID baselines** (results-skeptic minor 5):
+- PPO lands with a two-phase descent: about −1.2 m/s, then −0.26 m/s relative to the deck. The
+  PID tuning space (constant descent 0.08–0.60 m/s) cannot express that.
+- 11 of `pid_feedforward`'s 19 SS6 losses are `bounce`. P5-D1 showed that class is driven by the
+  50 ms grace rule and is unstable at 240 Hz.
+- Carry both facts wherever an RL-vs-PID gap is stated.
+
+(d) **Measurement caveats (P5-D14).**
+- The recorded closing speed understates impact speed by about 7 %.
+- Tunnelling is counted at any contact substep, whatever `success.yaml`'s comment says.
+- Keep both caveats beside any closing-speed or success number near the limits.
+
+(e) **Hover trap (P5-D9, P5-D14).** Report training timeouts at 1 % step resolution for every
+Phase 6 run: the 10-bin view missed SAC's early hovering.
+
+(f) **Infrastructure.**
+- Keep the host awake. Runs resume from checkpoints (P5-D10), but a VM kill still loses up to
+  1 M steps.
+- Commit before launching, so each run records a clean `git_sha`.
+
+**First task:** the `residual_ppo` wrapper. Its action is `pid_feedforward` + 0.3·π(o) through the
+env's norm cap, with the last layer zero-initialised (P3-D1 §6). Its gate test: a zeroed residual
+reproduces `pid_feedforward` exactly on a frozen-list sample.
+
 Methods (all 5 seeds, same budget as PPO):
 1. `residual_ppo`: action = `pid_feedforward` setpoint + α·π(o), α pre-registered (default 0.3·v_max);
    policy initialised so that α·π ≈ 0 at start (zero-initialised last layer).

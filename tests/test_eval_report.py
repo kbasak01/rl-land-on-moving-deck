@@ -137,6 +137,15 @@ def test_labels_mark_privilege_and_the_h1a_reference() -> None:
     )
 
 
+def test_lowvz_cut_label_is_not_the_h1a_reference() -> None:
+    """P5-D1 decision: ``lowvz_cut`` is printed beside lowvz and does not replace it for H1a."""
+    label = method_label("pid_feedforward_lowvz_cut", False)
+    assert label == METHOD_LABELS["pid_feedforward_lowvz_cut"]
+    assert label.startswith("pid_feedforward_lowvz_cut (")
+    assert "P5-D2" in label and "not the H1a reference" in label
+    assert "privileged" not in label
+
+
 def test_committed_e01_is_consistent() -> None:
     episodes = read_rows(E01 / "episodes.csv")
     assert tuple(episodes[0]) == EPISODE_COLUMNS

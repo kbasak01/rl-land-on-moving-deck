@@ -9,8 +9,20 @@ RUFF   ?= $(shell [ -x .venv/bin/ruff ]   && echo .venv/bin/ruff   || echo ruff)
 MYPY   ?= $(shell [ -x .venv/bin/mypy ]   && echo .venv/bin/mypy   || echo mypy)
 PYTEST ?= $(shell [ -x .venv/bin/pytest ] && echo .venv/bin/pytest || echo pytest)
 
-# Training config for `make train-bg CFG=configs/rl/ppo.yaml` (Phase 5).
+# Training config for `make train-bg CFG=configs/rl/ppo.yaml SEED=0` and `make sweep`
+# (Phase 5); for `make tune` CFG is a search config, e.g. configs/rl/tune_ppo.yaml.
 CFG ?= configs/rl/ppo.yaml
+SEED ?= 0
+# `make train-bg CFG=... SEED=... RESUME=<run_dir or checkpoint dir>` continues a FAILED run in
+# place from its latest resumable checkpoint (rld.rl.resume); CFG and SEED must be the run's.
+RESUME ?=
+SEEDS ?= 0 1 2 3 4
+# Global cap on concurrently busy CPU worker slots across every run and sweep (36 logical
+# CPUs minus 2). A run's cost is its measured average core use, ceil(0.4 * max(n_envs,
+# eval.n_envs)) + torch_threads (rld.rl.config.ENV_WORKER_CORES): 8 for a 16-worker PPO
+# run with one torch thread, 8 for an 8-worker SAC run with four.
+# Several schedulers share the cap as ONE first-in first-out queue by enqueue time.
+MAX_WORKERS ?= 34
 # Throughput measurement (Phase 0). STEPS is per (vec_cls, n_envs, act) row.
 STEPS ?= 6000
 # Worker processes for the Phase 1 deck-statistics sweep (split over the 96 grid cells).
@@ -21,7 +33,8 @@ THROUGHPUT_CSV ?= results/env_throughput.csv
 THROUGHPUT_LANDING_CSV ?= results/env_throughput_landing.csv
 
 .PHONY: test lint format throughput throughput-landing env-sanity \
-        deck-stats baselines dmf-forecasters forecast-report train-bg eval bench report all
+        deck-stats baselines dmf-forecasters forecast-report train-bg sweep tune eval bench \
+        report all
 
 # --- implemented ------------------------------------------------------------------
 
@@ -78,8 +91,30 @@ $(DMF_CORPUS)/manifest.parquet:
 forecast-report: ; RLD_WRITE_RESULTS=1 $(PYTEST) tests/test_deck_forecast.py -rs
 dmf-forecasters: $(DMF_CORPUS)/manifest.parquet
 	$(PY) scripts/fit_dmf_forecasters.py --corpus $(DMF_CORPUS) --out artifacts/dmf --models $(DMF_MODELS) --seeds $(DMF_SEEDS) --device $(DMF_DEVICE)
-# Phase 5 -- rl-trainer: background training run; status in artifacts/runs/*/status.json
-train-bg:        ; @echo "not implemented: phase 5 (CFG=$(CFG))"
+# Phase 5 -- rl-trainer: ONE background training run. `--prepare` reserves a fresh run
+# directory artifacts/runs/<run_group>/<seed>[_r<k>]/ and prints it as its LAST stdout line
+# (importing pybullet prints a banner first); it refuses, exit 3, if that group and seed
+# already finished; the run then goes to nohup with stdout+stderr in
+# <run_dir>/train.log, and status.json beside it. Never tee (see dmf-forecasters above).
+# With RESUME=<failed run dir | its latest checkpoint dir>, --prepare validates the resume
+# instead (exit 3 with the reason if refused) and the run continues in that directory,
+# appending to its train.log.
+train-bg:
+	@if [ -n "$(RESUME)" ]; then RES="--resume $(RESUME)"; else RES=""; fi; \
+	OUT=$$($(PY) scripts/train.py --config $(CFG) --seed $(SEED) --prepare $$RES) || exit $$?; \
+	RUN_DIR=$$(printf '%s\n' "$$OUT" | tail -n 1); \
+	[ -d "$$RUN_DIR" ] || { echo "train-bg: no run directory from --prepare: $$OUT" >&2; exit 1; }; \
+	PYTHONUNBUFFERED=1 OMP_NUM_THREADS=$${OMP_NUM_THREADS:-1} MKL_NUM_THREADS=$${MKL_NUM_THREADS:-1} \
+		nohup $(PY) scripts/train.py --config $(CFG) --seed $(SEED) --run-dir "$$RUN_DIR" $$RES \
+		>> "$$RUN_DIR/train.log" 2>&1 < /dev/null & \
+	echo "pid $$!"; echo "run_dir $$RUN_DIR"; echo "log $$RUN_DIR/train.log"; \
+	echo "status $$RUN_DIR/status.json"
+# Phase 5 -- rl-trainer: several seeds of one config behind the MAX_WORKERS cap. Returns at
+# once; a detached scheduler (log + artifacts/runs/_sweeps/<id>.json) starts runs as slots free.
+sweep: ; $(PY) scripts/sweep.py --config $(CFG) --seeds $(SEEDS) --max-workers $(MAX_WORKERS)
+# Phase 5 -- rl-trainer: the pre-registered search CFG=configs/rl/tune_<method>.yaml on the
+# same scheduler; trials.csv + selection.json land in the search's results_dir when done.
+tune:  ; $(PY) scripts/tune.py --config $(CFG) --max-workers $(MAX_WORKERS)
 # Phase 7 -- eval-auditor: full evaluation matrix on the frozen episode lists -> results/
 eval:            ; @echo "not implemented: phase 7"
 # Phase 8 -- deploy-benchmarker: ONNX export, parity, latency -> results/latency*
@@ -88,5 +123,6 @@ bench:           ; @echo "not implemented: phase 8"
 report:          ; @echo "not implemented: phase 7"
 
 # The whole project in the order the methodology requires. Stubs today; each phase
-# replaces its own line's target.
+# replaces its own line's target. Training (train-bg / sweep / tune) is deliberately not in
+# `all`: it runs detached for hours and is launched by hand under the P3-D1 budget.
 all: deck-stats env-sanity baselines dmf-forecasters eval bench report

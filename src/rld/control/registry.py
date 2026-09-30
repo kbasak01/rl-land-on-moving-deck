@@ -16,6 +16,8 @@ pre-registered rule did not select (P4-D2): a **secondary** seed-sensitivity arm
 
 ``pid_feedforward_lowvz`` is ``pid_feedforward``'s class and law with a second gain set,
 selected from the existing tuning log (P3-D3 amendment); it is not a new control law.
+``pid_feedforward_lowvz_cut`` is lowvz (its gains by reference) plus a latched post-contact
+throttle cut whose rule was fixed in P5-D2 before any episode; not privileged, no feed.
 
 ``oracle_gated`` is the only privileged entry. It is a commit-timing oracle (privileged), not
 a bound on success or on landing quality, and must be marked as such in every table; it is
@@ -36,6 +38,7 @@ from rld.control.gated_forecast import (
     make_gated_forecast_tcn_seed0,
     make_gated_forecast_tcn_seed2,
 )
+from rld.control.lowvz_cut import make_pid_feedforward_lowvz_cut
 from rld.control.oracle import make_oracle_gated
 from rld.control.pid import make_pid_track_descend
 
@@ -98,6 +101,16 @@ REGISTRY: dict[str, RegistryEntry] = {
             description=(
                 "pid_feedforward's law with the lowest-p95-closing-speed gains within 0.02 of "
                 "the best tune success (trial 10 of its log); H1 closing-speed reference"
+            ),
+        ),
+        RegistryEntry(
+            name="pid_feedforward_lowvz_cut",
+            factory=make_pid_feedforward_lowvz_cut,
+            config_path=CONTROL_CONFIG_DIR / "pid_feedforward_lowvz_cut.yaml",
+            privileged=False,
+            description=(
+                "pid_feedforward_lowvz + latched post-contact throttle cut (motors to idle once "
+                "in_contact is observed; rule fixed in P5-D2, no tuning)"
             ),
         ),
         RegistryEntry(

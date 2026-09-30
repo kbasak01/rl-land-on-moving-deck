@@ -127,7 +127,8 @@ def test_privileged_context_is_the_driven_trajectory(landing_env, deck_source):
     env = landing_env(deck_source(SS5_135))
     env.reset(seed=11)
     ctx = PrivilegedContext.from_env(env)
-    traj = env._trajectory  # noqa: SLF001
+    # The env evaluates its deck lazily (P5-D5); .full() materialises every chunk.
+    traj = env._trajectory.full()  # noqa: SLF001
     assert len(ctx) == len(traj) == env.cfg.n_physics_samples
     np.testing.assert_array_equal(ctx.position_m, traj.position_m)
     np.testing.assert_array_equal(ctx.velocity_m_s, traj.state.velocity_m_s)
@@ -168,6 +169,7 @@ def test_registry_marks_exactly_the_oracle_privileged():
         "pid_track_descend",
         "pid_feedforward",
         "pid_feedforward_lowvz",
+        "pid_feedforward_lowvz_cut",
         "gated",
         "oracle_gated",
         "gated_forecast",

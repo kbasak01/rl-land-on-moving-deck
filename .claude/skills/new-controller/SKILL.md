@@ -2,7 +2,7 @@
 name: new-controller
 description: Scaffold a new landing controller (classical or learned wrapper) with its file, YAML config, registry entry and tests.
 argument-hint: <controller_name> <one-line description>
-disable-model-invocation: true
+#disable-model-invocation: true
 allowed-tools: Read, Write, Edit, Bash, Grep, Glob
 ---
 
