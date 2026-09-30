@@ -3098,6 +3098,49 @@ unchanged; its block SHA-256 is still `21465588…`.
   forecast worker uses about 70 % more CPU per step. Process-tree CPU is measured on the smoke
   runs before the final forecast runs are queued.
 
+### P6-D2 — Smoke runs: pipeline checks pass; final sweeps queued (2026-09-30)
+
+*What ran.* Four smoke runs, all launched together with `make train-bg CFG=configs/rl/<m>_smoke.yaml
+SEED=0`:
+- seed 0 each, trained at `8736876` with `git_dirty` false;
+- 114 688 steps each (7 rollouts);
+- all `done`, none resumed.
+
+Each `final/` holds `model.zip` and `vecnormalize.pkl`, and `load_policy` returns the expected
+class:
+
+| run | policy class | obs | feed | wall | CPU-h (avg cores) | tune-pool success, 6 evals (20 k … 114 688) | final stage |
+|---|---|---|---|---|---|---|---|
+| `residual_ppo_smoke` | `ResidualPolicy` | 25 | no | 315 s | 0.52 (5.9) | 1.000, 0.994, 0.994, 1.000, 1.000, 1.000 | SS5 |
+| `ppo_forecast_smoke` | `ForecastPolicy` | 31 | yes | 413 s | 1.13 (9.8) | 0.000, 0.000, 0.000, 0.022, 0.089, 0.000 | SS3 |
+| `residual_ppo_forecast_smoke` | `ResidualForecastPolicy` | 31 | yes | 407 s | 0.74 (6.5) | 1.000, 1.000, 0.994, 1.000, 1.000, 0.994 | SS5 |
+| `ppo_sinusoid_smoke` | `LearnedPolicy` | 25 | no | 309 s | 0.76 (8.9) | 0.000, 0.000, 0.000, 0.000, 0.000, 0.006 | SS3 |
+
+*Readings. These are pipeline facts, not results; tune-pool numbers are never results.*
+- **The residual runs start where they should.** They begin at `pid_feedforward`'s level on the
+  tune draw and promote SS3 → SS5 within the smoke budget, consistent with the zero-initialised
+  residual.
+- **The pure-PPO runs have not learned yet at 115 k steps.**
+  - `ppo_forecast`'s final eval is 1.000 `timeout`. `ppo_sinusoid`'s is 0.617 `timeout`, 0.317
+    `off_pad`, 0.050 `bounce` and 0.011 `crash`.
+  - This matches Phase 5. `ppo` seed 0 first scored 0.700 at its first eval (200 k), and P5-D14
+    found early timeouts in PPO training up to about 100 k steps.
+  - Nothing was changed because of it. Per P6-D1, smoke runs are not tuning trials.
+- **CPU.** The averages are dominated by evaluation (6 × 180 tune-pool episodes in 115 k steps,
+  against one eval per 200 k in the final runs) and by 64 env workers sharing 36 cores. They
+  overstate steady state: the Phase 5 `ppo` finals averaged 4.8 cores (15.3 CPU-h / 3.17 h).
+  - The slot cost stays at 8 for every Phase 6 run.
+  - Four forecast runs at once would be the worst case, estimated at about 30 cores on the 36-core
+    host. Over-subscription would cost wall clock only; the runs are seeded and CPU-deterministic.
+  - Measured wall clock is reported with the results.
+
+*Launch.* The four sweeps are queued in this order on the global FIFO scheduler (34 slots, cost 8,
+so 4 runs at once):
+- `make sweep CFG=configs/rl/residual_ppo.yaml SEEDS="0 1 2 3 4"`
+- then the same for `ppo_forecast`, `residual_ppo_forecast` and `ppo_sinusoid`.
+
+That is 20 runs × 10 M steps, about 20–25 h. The sweep IDs are in `artifacts/runs/_sweeps/`.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|
