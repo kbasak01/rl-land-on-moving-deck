@@ -1069,7 +1069,8 @@ def render_learned(out_dir: Path, title: str) -> str:
         "arrived above 0.5 m/s one substep before contact (`ppo` 0 of 500). (2) Up to 41 `sac` "
         "successes (1 / 3 / 13 / 24 at SS3–SS6, per 1 000 seed-episodes) had an unloaded "
         "stretch while tunnelled, and whether they would have lost contact for more than the "
-        "50 ms grace without the overlap is not shown (`ppo`: 2 at SS6). Both can only raise "
+        "50 ms grace without the overlap is not shown (`ppo`: 2 at SS6; "
+        "`pid_feedforward_lowvz_cut`: 1 at SS6). Both can only raise "
         "`sac`'s success, by at most a few points at SS5/SS6.",
         "- No hypothesis (H1–H5) is scored here and no method contrast is tested; the spread "
         "and aggregates are descriptive.",

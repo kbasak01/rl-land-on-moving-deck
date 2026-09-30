@@ -464,9 +464,10 @@ acceleration and tilt at maximum depth.
   - **Correction (Gate 5 review, 2026-09-30):** this does *not* show that no success depends
     on the penetration. Without the overlap the drone would separate during the unloaded
     stretch and then have to close the gap again, so the counterfactual gap is at least as long
-    as the unloaded stretch and plausibly longer; 20 of the 41 `sac` stretches are ≥ 25 ms and
+    as the unloaded stretch and plausibly longer; 18 of the 41 `sac` stretches are ≥ 25 ms and
     one is exactly 50 ms. What holds: **up to 41 `sac` successes (1 / 3 / 13 / 24 at SS3–SS6,
-    per 1 000 seed-episodes) and 2 `ppo` successes (SS6) may depend on the overlap; this is
+    per 1 000 seed-episodes), 2 `ppo` successes (SS6) and 1 `pid_feedforward_lowvz_cut` success
+    (SS6) may depend on the overlap; this is
     not shown either way.** The original sentence read "So no `success` depends on the
     penetration" and is withdrawn.
 - **The two `deep_at_first_contact` episodes do not depend on it either.**
