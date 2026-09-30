@@ -2885,6 +2885,94 @@ end to end through `main` on a temporary dev-pool list, never a committed one. I
 labels, worker independence, the carry checks, the privileged label and byte-identical
 re-rendering, plus known-value tests of the spread and IQM.
 
+### P5-D14 — Reward-hacking audit of the ten final Phase 5 runs (2026-09-30)
+
+*Scope.* The audit covered:
+- every training episode in the monitors (PPO 681 073, SAC 161 527);
+- all 8 000 e05 rows;
+- the e01 and e01_lowvz_cut `id` rows as baselines.
+
+1 354 scratch re-flights (a 25-per-SS sample, plus every e05 tunnelled or disagreement episode)
+added per-step logs through the committed env and `build_policy`. **Each re-flight reproduced its
+committed row exactly, 1 354 of 1 354.** Nothing was re-trained and nothing in `results/e05` or
+`results/e01*` changed.
+- *Command.* `python scripts/reward_hacking_audit.py --out-dir results/audit --scratch-dir <dir>
+  --workers 24`. The main thread re-ran it into scratch, and all 16 CSVs were byte-identical.
+- *Hashes.*
+  - `verdicts.csv`: `36ec2fdcd9ce7c9553c74b157e09dd6b4d94b883f8323c11000008c9a55b832a`
+  - `README.md`: `e30e413db8845480d1a40888b4cc6395a94c03e2760b7c2aa91bf38622e2c2ed`
+  - `ppo.csv`: `47030581299b8f80898f734307a26372ded42bb9e7e47c72d6ec733a8ac49cbe`
+  - `sac.csv`: `190dfb6e4769391d7b725bba86977cf118d4f9570d8e8756c0ea093ce1df5330`
+- *Thresholds.* They were pre-stated in `results/audit/README.md`, whose section says it was
+  written at 2026-09-30 08:49 EDT before any audit number. That timestamp is the agent's own
+  record: the section was not committed separately before computation. No threshold was moved,
+  and post-hoc readings are labelled as such beside the pre-stated verdicts.
+
+*Verdicts*, PPO / SAC (`verdicts.csv`):
+
+| check | PPO | SAC |
+|---|---|---|
+| 1a training timeouts, final 10 % of steps | clean (0.000) | clean (0.000) |
+| 1b training timeouts, 10 bins | clean (max 0.040) | clean (max 0.269) |
+| 1c e05 timeouts vs `gated` | clean (0 / 4 000) | clean (1 / 4 000) |
+| 2a tunnelling (limit: `lowvz_cut` 0.75 %, 7.03 mm) | clean (0.15 %, 5.35 mm) | **finding** (6.6 %, 15.67 mm) |
+| 2b tunnelling mechanism | finding: post-contact idle, 6 of 6 | inconclusive: impact 103, idle 119, other 42 of 264 |
+| 2c outcome depends on tunnelling (pre-stated flag) | finding (2 of 6) | finding (44 of 264) |
+| 3 detector disagreement | clean (0) | clean (0.2 % at SS6) |
+| 4 success concentrated in easy start states | clean | clean |
+| 5 pre-contact norm-cap saturation | clean (0.8 %) | **finding** (12.2 %; 86 % of it in the first 0.5 s) |
+| 6 post-contact down-force (H1a confound) | clean by 0.008 (idle fraction 0.492), **3 of 5 seeds idle** | **finding** (0.871, all seeds) |
+| 7 passive, deck-driven landings | clean (3.6 %) | clean (0 %) |
+| 8 seed outliers | minor metrics only | SAC seed 1 (SS6 55.5 %) is not singled out by any check |
+
+*Readings.*
+- **Hover trap.** Neither final policy hovers.
+  - Post hoc, at 1 % bins, four of five SAC seeds hovered between 20 k and 160 k steps (timeout
+    0.93–1.00) and recovered within 40–60 k steps.
+  - PPO's early timeouts (≤ 100 k steps) are most likely the untrained initial policy; this is
+    not proven.
+  - The pre-stated 10-bin check was too coarse to see either.
+- **SAC tunnelling is driven mainly by impact speed, with the post-contact throttle cut adding to
+  it.**
+  - The tunnelling rate rises with closing speed: 1.5 % at 0.2–0.3 m/s, 24.6 % at 0.5–0.6, 61 %
+    at 0.6–0.7, 92 % at 0.8–0.9.
+  - Maximum depth comes a median 38 ms after first contact, and the motors are at idle then in
+    59 % of cases.
+- **No success depends on penetration.** Post hoc, 0 of PPO's 6 flagged episodes and 1 of SAC's
+  264 are plausibly outcome-changing, and that one is a bounce, which counts against the policy.
+- **P5-D3's idle-thrust explanation for `lowvz_cut` tunnelling is now verified.** PPO's 6 and
+  lowvz_cut's 6 `id` episodes are all of that kind.
+- **PPO's fixed ~1.5 s touchdown is an active descent.** It descends at about −1.2 m/s, then holds
+  −0.26 m/s relative to the deck for the last ~0.9 s. Closing speed does not depend on the deck's
+  vertical velocity (R² ≤ 0.021), and it lands on a rising deck 48–54 % of the time, close to
+  `pid_feedforward`.
+- **H1a confound, carried to Phase 7.** A post-contact throttle cut is present in every SAC seed
+  and in three of the five PPO seeds. Both methods bounce 0.2–0.3 % at SS6, against 7.5–10.5 % for
+  lowvz and lowvz_cut. `pid_feedforward_lowvz_cut` (P5-D2) is the control for it.
+
+*Two measurement facts, recorded and not changed. Both are frozen definitions applied to every
+method alike.*
+1. **The recorded touchdown closing speed understates impact speed.** It is read after the first
+   contact substep's solver impulse, about 7 % below the value one substep earlier (median ratio
+   0.92–0.94 for every method).
+   - In the re-flight sample, 15 of 445 SAC successes (3.4 %) arrived above 0.5 m/s one substep
+     before contact; PPO had 0 of 500 and `pid_feedforward` 0 of 99.
+   - SAC's SS5/SS6 success therefore depends on the measurement instant by a few points.
+   - This is P2-D5/P2-D6's frozen definition.
+2. **`success.yaml`'s comment says penetration is flagged "at first contact", but the code flags
+   it at any contact substep.**
+   - The committed tunnelling counts, e01 and e05 alike, follow the code.
+   - In 262 of 264 SAC cases the maximum depth comes after first contact.
+   - The comment is wrong, not the counts. Both readings are carried; neither is changed here.
+
+*Code.*
+- `src/rld/rl/audit.py` (new) and `scripts/reward_hacking_audit.py` (new).
+- `tests/test_rl_audit.py` (new): 17 tests, including an end-to-end re-flight that reproduces a
+  committed e01 row.
+- `tests/test_rl_leakage.py` forbids `rld.rl` from referencing the frozen lists, and it is kept
+  unchanged. The script (evaluation-side) checks MANIFEST, reads `id.parquet`, and passes the rows
+  into `rld.rl.audit`, which never opens a list.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|

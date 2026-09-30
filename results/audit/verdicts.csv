@@ -1,0 +1,25 @@
+check,method,statistic,value,threshold,verdict
+1a,ppo,"max over runs, final-10% training timeout frac",0.0,>= 0.05,clean
+1b,ppo,"max over runs and bins, training timeout frac",0.03978978978978979,>= 0.5,clean
+1c,ppo,"max (run,SS) e05 timeout frac; SS where pooled > gated",0.0; none,> 0.05 or pooled > gated,clean
+2a,ppo,pooled e05 tunnel rate; max depth mm,0.0015; 5.350495813180984,> 0.0075 (lowvz_cut id) or > 7.0304511072935645 mm,clean
+2b,ppo,tunnelled episodes by timing reading (impact; post_contact_idle; other),0; 6; 0 of 6,a reading covering >= 50 % is named the mechanism; else the mix is reported,finding
+2c,ppo,tunnelled episodes possibly outcome-dependent,2/6,> 0,finding
+3,ppo,max SS pooled e05 disagreement rate,0.0,>= 0.01,clean
+4,ppo,"flagged (SS, variable) contrasts",none,Bonferroni CI excludes 0 and |learned Q5-Q1| >= 0.10,clean
+5,ppo,pooled pre-contact norm-cap fraction (sample S),0.008107185526540365,> 0.1,clean
+6,ppo,post-contact idle frac; median post-contact setpoint z,0.49233750504642715; -0.3654792755842209,>= 0.5 or <= -1.0,clean
+7,ppo,pooled passive touchdown fraction (sample S),0.036,> 0.25,clean
+8,ppo,runs singled out (seed: metric),2:e05_tunnel_rate_SS5;4:e05_tunnel_rate_SS6;2:e05_depth_max_mm_SS5;4:e05_depth_max_mm_SS6;0:s_sat_cap_pre;3:e05_deck_vz_td_mean_SS5,most extreme of five and outside the others' range by more than that range,finding
+1a,sac,"max over runs, final-10% training timeout frac",0.0,>= 0.05,clean
+1b,sac,"max over runs and bins, training timeout frac",0.2692878338278932,>= 0.5,clean
+1c,sac,"max (run,SS) e05 timeout frac; SS where pooled > gated",0.005; none,> 0.05 or pooled > gated,clean
+2a,sac,pooled e05 tunnel rate; max depth mm,0.066; 15.665756314767721,> 0.0075 (lowvz_cut id) or > 7.0304511072935645 mm,finding
+2b,sac,tunnelled episodes by timing reading (impact; post_contact_idle; other),103; 119; 42 of 264,a reading covering >= 50 % is named the mechanism; else the mix is reported,inconclusive
+2c,sac,tunnelled episodes possibly outcome-dependent,44/264,> 0,finding
+3,sac,max SS pooled e05 disagreement rate,0.002,>= 0.01,clean
+4,sac,"flagged (SS, variable) contrasts",none,Bonferroni CI excludes 0 and |learned Q5-Q1| >= 0.10,clean
+5,sac,pooled pre-contact norm-cap fraction (sample S),0.12192134984351613,> 0.1,finding
+6,sac,post-contact idle frac; median post-contact setpoint z,0.8712517462070758; -0.7504762495076339,>= 0.5 or <= -1.0,finding
+7,sac,pooled passive touchdown fraction (sample S),0.0,> 0.25,clean
+8,sac,runs singled out (seed: metric),2:train_timeout_frac_max_bin;2:train_tunnel_rate_final10;2:e05_timeout_frac_SS5;4:e05_depth_max_mm_SS5;2:s_post_idle_frac;3:e05_deck_vz_td_mean_SS4;3:e05_deck_vz_td_mean_SS5;3:e05_deck_vz_td_mean_SS6,most extreme of five and outside the others' range by more than that range,finding
