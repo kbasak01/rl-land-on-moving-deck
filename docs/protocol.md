@@ -3525,6 +3525,10 @@ leakage. Two findings are MAJOR and nine MINOR. All are fixed in this commit or 
 - *If the cell moves.* Scoring H4 at another cell (for example `id` SS6, where `ppo_sinusoid` is
   97.3 % and `ppo` 98.2 %) or under another statistic would be a **dated deviation**. It is the
   user's decision, and it must be made before any sinusoid-leg result is read.
+- **User decision (2026-10-01): H4 stays at `id` SS5, as pre-registered.** No deviation is
+  recorded. It was decided before any sinusoid-test-motion episode existed. Phase 7 scores H4 as
+  written. Because the point estimate is bounded at ≤ 0, H4 cannot be "supported", and under D0.4
+  the README withdraws the novelty claim and reports the transfer as the finding.
 
 **MINOR.**
 1. *The `residual_ppo_forecast` zeroed-residual check is weaker than the gate test.*

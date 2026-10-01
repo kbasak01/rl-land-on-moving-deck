@@ -544,8 +544,9 @@ baseline when the residual is zeroed (test).
 (a) **H4 is bounded at its pre-registered cell (P6-D6).**
 - `ppo_sinusoid` and `ppo` are both 200/200 on JONSWAP `id` SS5 in every seed. So at `id` SS5,
   drop_sin − drop_jon ≤ 0 whatever the sinusoid leg shows, and H4 cannot be supported there.
-- Score H4 as written unless the user records a dated deviation (another cell or statistic)
-  **before any sinusoid-test-motion episode is read**. Ask the user first.
+- **User decision (2026-10-01, P6-D6): H4 stays at `id` SS5 as pre-registered.** Score it as
+  written. The novelty claim is withdrawn in the README (D0.4), and the transfer is reported as
+  the finding. The H4 cross is still flown in full and reported.
 
 (b) **Evaluation-side work this phase needs.**
 - *Sinusoid test motion.* `rld.eval.envs.motion_for` builds only JONSWAP and static motion. The H4
