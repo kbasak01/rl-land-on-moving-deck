@@ -579,3 +579,14 @@ thrust, deck acceleration, tilt and commanded setpoint at maximum depth.
 
 `baselines.csv` is byte-identical to Phase 5's `results/audit/baselines.csv`. Both rest on
 the same e01 rows and the same `pid_feedforward` sample-S re-flights.
+
+## Errata at the Gate 6 review (2026-10-01, main thread; recorded in docs/protocol.md P6-D6)
+
+Appended only; nothing above this heading was changed.
+
+1. **Check 6, "For H1a" bullet.** The bounce comparison (11 and 4 per 1 000 against 55, 75 and
+   105) also carries the Phase 6 "Before you start" (c) caveat: `bounce` is driven by the 50 ms
+   contact-loss grace rule and is unstable at 240 Hz (P5-D1).
+2. **Same bullet, last line.** "The H1a closing-speed reduction is not supported by this table"
+   uses Phase 7's verdict vocabulary. Read it as: "this table **shows no sign of** the H1a
+   closing-speed reduction". H1a is scored only in Phase 7.

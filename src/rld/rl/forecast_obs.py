@@ -19,8 +19,9 @@ uses, resolved the same way: ``artifacts/dmf/<name>`` under the repository root
 (:func:`forecaster_dir`; a test pins the two paths equal). It runs on ONNX Runtime's CPU
 provider with **one** intra-op and one inter-op thread (:func:`load_forecaster`), so a
 worker's forecast never spreads over more than the core it steps on. The forecaster was fitted
-on the dev pool (P4-D1): its forecasts are in-sample on the train and tune pools and
-out-of-sample on the frozen lists (recorded in P6-D1).
+on the dev pool (P4-D1): the DLinear-OLS point forecast, the only part this block reads, is
+fitted on the train pool, so its forecasts are in-sample in training and out-of-sample on the
+tune pool and the frozen lists (recorded in P6-D1 and P6-D6).
 
 One block function, two call sites
 ----------------------------------
