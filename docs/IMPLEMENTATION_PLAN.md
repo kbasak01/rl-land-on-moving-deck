@@ -539,6 +539,45 @@ baseline when the residual is zeroed (test).
 
 ### Phase 7 — Evaluation under shift and ablations (2 days + ~0.5 day compute) · owner: `eval-auditor`
 
+**Before you start (added after Gate 6, 2026-10-01).**
+
+(a) **H4 is bounded at its pre-registered cell (P6-D6).**
+- `ppo_sinusoid` and `ppo` are both 200/200 on JONSWAP `id` SS5 in every seed. So at `id` SS5,
+  drop_sin − drop_jon ≤ 0 whatever the sinusoid leg shows, and H4 cannot be supported there.
+- Score H4 as written unless the user records a dated deviation (another cell or statistic)
+  **before any sinusoid-test-motion episode is read**. Ask the user first.
+
+(b) **Evaluation-side work this phase needs.**
+- *Sinusoid test motion.* `rld.eval.envs.motion_for` builds only JONSWAP and static motion. The H4
+  cross needs a sinusoid test leg on the same lists: per-episode phases from the episode seed and
+  committed RMS, matching `rld.rl.motion`.
+- *Feed methods.* `ppo_forecast` and `residual_ppo_forecast` need the runner's ship-motion feed.
+  `rld.eval.learned` already passes it (P6-D4). The static list cannot feed them.
+- *Relative-p95.* The paired relative-p95 statistic (P3-D1 §4) is not implemented yet.
+
+(c) **Carry these into every table and verdict.**
+- The P6-D1 forecast caveats: forecasts were in-sample in training, and the feed is an extra ideal
+  sensor.
+- The residual methods descend *harder* than their base (P6-D5, corrected): no residual seed cuts
+  the throttle, and a `lowvz`-like descent was within authority. Score H1a exactly as written.
+- From the Phase 6 "Before you start" note (c) and (d): the two-phase descent, the 50 ms
+  bounce-grace rule, the ~7 % closing-speed understatement, and tunnelling counted at any contact
+  substep.
+- P6-D5's tunnelling bound: 3 / 1 / 0 / 3 SS6 successes per 1 000.
+- All hard landings in e06 are deck-tilt events (P6-D5).
+
+(d) **λ sensitivity runs on "the best two methods".** Fix the rule that picks them (metric, cell,
+tie-break) in `docs/protocol.md` before reading any Phase 7 number.
+
+(e) **Labels.**
+- The `ppo_sinusoid` learning-curve panels are on sinusoid motion. Label them in the Phase 9
+  figures.
+- `results/e06/success_vs_seastate.md`'s "not audited" line is superseded by P6-D5.
+
+**First task:** the paired relative-p95 statistic in `rld.eval.stats`, with its unit test on a
+synthetic case with a known r (P3-D1 §4). Then the sinusoid test-motion leg in the evaluation
+runner.
+
 Full matrix on frozen episode lists: 4 regimes × 4 sea states × all methods × all seeds.
 Additional arms:
 - **H4 realism cross**: {JONSWAP-trained, sinusoid-trained} × {JONSWAP, sinusoid} test motion.
