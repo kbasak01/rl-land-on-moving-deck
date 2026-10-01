@@ -3346,6 +3346,141 @@ fractions sum to 1; anything not listed is 0).
 `run_info.json` holds the non-deterministic facts and is not hashed here. No hypothesis is scored,
 and P3-D1 is unchanged.
 
+### P6-D5 — Reward-hacking audit of the twenty final Phase 6 runs (2026-10-01)
+
+*Pre-statement, now provable.* The checks and thresholds were committed alone in
+`results/audit/e06/README.md` at **`f66bca6`, 2026-10-01 14:44:22 EDT**. The first audit CSV was
+written at 15:11 EDT.
+- The thresholds are P5-D14's, unchanged, plus Phase 6 checks 1b-fine, 9 and 10 and the
+  per-seed reporting of check 6.
+- The README was only appended to afterwards (+328 lines, 0 removed).
+- One slip is recorded in the README's own post-run section: its header reads "written 14:39–15:10
+  EDT", and the 15:10 was an estimate typed before the commit.
+- This closes P5-D14's gap, where the timestamp was only the agent's own record.
+
+*Scope and reproduction.*
+- `python scripts/reward_hacking_audit.py --phase 6 --out-dir results/audit/e06 --scratch-dir <dir>
+  --workers 24`, at `1d57571`.
+- **2 340 of 2 340 re-flights reproduce their committed e06 row** through committed code. They
+  cover:
+  - 2 200 sampled flights (25 per SS per run);
+  - every tunnelled episode and every hard landing;
+  - 1 053 forecast-run flights on the runner's past-only feed.
+- This also closes P6-D4's provenance gap.
+- A second run with different worker and chunk settings gave 28 of 28 byte-identical CSVs.
+- The Phase 5 audit, re-run into scratch after the code change, is 16 of 16 byte-identical. The
+  committed `results/audit/*` did not change.
+
+*Verdicts* (`verdicts.csv`), in the order `residual_ppo` / `ppo_forecast` / `residual_ppo_forecast` / `ppo_sinusoid`:
+
+| check | `residual_ppo` | `ppo_forecast` | `residual_ppo_forecast` | `ppo_sinusoid` |
+|---|---|---|---|---|
+| 1a training timeouts, final 10 % | clean (0.000) | clean (0.000) | clean (0.000) | clean (0.000) |
+| 1b training timeouts, 10 bins | clean (0.000) | clean (0.091) | clean (0.000) | clean (0.059) |
+| 1b-fine, 1 % bins, bin 0 | clean (0.000) | **finding** (0.901) | clean (0.000) | **finding** (0.908) |
+| 1b-fine, bins 1–99 | clean | **finding** (seed 2: 0.785 at 200–300 k) | clean | clean (0.430) |
+| 1c e06 timeouts | clean (0) | clean (0) | clean (0) | clean (0) |
+| 2a tunnelling rate; max depth (limit `lowvz_cut` 0.75 %, 7.03 mm) | clean (0.175 %; 6.17 mm) | clean (0.25 %; 6.21 mm) | clean (0.075 %; 5.65 mm) | **finding** (0.275 %; **7.12 mm**) |
+| 2b mechanism, impact / idle / other | 0 / 1 / 6 | 0 / 7 / 3 | 0 / 2 / 1 | 0 / 8 / 3 |
+| 2c outcome may depend on tunnelling | **finding** (3 of 7) | **finding** (1 of 10) | clean (0 of 3) | **finding** (3 of 11) |
+| 3 detector disagreement | clean (0) | clean (0) | clean (0) | clean (0) |
+| 4 success concentrated in easy start states (48 tests) | clean | clean | clean | clean |
+| 5 pre-contact norm-cap saturation | clean (0.0 %) | clean (3.1 %) | clean (0.0 %) | clean (0.7 %) |
+| 6 post-contact down-force, pooled (idle fraction; median setpoint m/s) | clean (0.055; −0.24) | clean (0.471; −0.33) | clean (0.055; −0.24) | **finding** (0.549; −0.37) |
+| 7 passive, deck-driven landings | clean (1.2 %) | clean (4.0 %) | clean (0.6 %) | clean (3.0 %) |
+| 8 seed outliers | minor | minor | minor | minor |
+| 9 residual authority-limited (π_z at its limit on > 50 % of pre-contact steps) | no (46.5 %) | — | no (45.2 %) | — |
+| 10a forecast block changes the action (> 0.015 m/s median) | — | yes (0.0455 m/s) | yes (0.0269 m/s) | — |
+| 10b forecast block changes outcomes | — | not shown | not shown | — |
+
+*Readings.*
+- **H1a confound, check 6, per residual seed** (`downforce_per_seed.csv`; idle fraction, then median
+  post-contact setpoint in m/s):
+  - `residual_ppo` seeds 0–4: idle 0.115 / 0.036 / 0.064 / 0.048 / 0.014; setpoint −0.29 / −0.22 /
+    −0.19 / −0.29 / −0.21.
+  - `residual_ppo_forecast` seeds 0–4: idle 0.032 / 0.010 / 0.019 / 0.006 / 0.210; setpoint −0.23 /
+    −0.19 / −0.27 / −0.20 / −0.31.
+  - For reference, `pid_feedforward_lowvz_cut` gives 0.948 / −1.50 and the base `pid_feedforward`
+    0.000 / −0.20.
+  - **No residual seed has learned the post-contact throttle cut.**
+  - Their SS6 bounces, 11 and 4 per 1 000, are below `pid_feedforward` (55), `lowvz_cut` (75) and
+    `lowvz` (105). So their low bounce rate is not a throttle-cut effect. This is carried beside
+    H1a.
+- **The pure methods repeat `ppo`'s split** (P5-D14): 3 of 5 seeds cut to idle after contact
+  (`ppo_forecast` seeds 0–2; `ppo_sinusoid` seeds 0, 3, 4). Pooled, `ppo_sinusoid` crosses the
+  check-6 threshold.
+- **Hovering.**
+  - The residual methods never time out in training.
+  - The pure methods time out at 0.75–0.91 in their first 100 k steps, as `ppo` did. An untrained
+    policy and a learned trap cannot be told apart there.
+  - `ppo_forecast` seed 2 relapses: training timeouts go 0.75, 0.28, then **0.785 at 200–300 k
+    steps**, then 0.15, then 0 from 400 k on.
+  - No final policy hovers (1c).
+- **The residual uses most of its authority.**
+  - Before contact, |α·π| is 0.41 / 0.36 m/s at the median and 0.70 / 0.71 m/s at most
+    (`residual_ppo` / `residual_ppo_forecast`).
+  - π_z sits at its limit on 46.5 % / 45.2 % of pre-contact steps, just short of the pre-stated
+    50 % mark.
+  - The output clip and the norm cap never bind.
+  - **This is how touchdown fell from 4.57 s to about 1.98 s:**
+    - The residual holds −0.45 m/s through the approach, while the base commands +0.02 to
+      −0.15 m/s.
+    - About 1 s out it backs off to about −0.07 m/s, so the last second is flown at −0.25 to
+      −0.29 m/s.
+    - That is `ppo`'s two-phase descent, rebuilt within the residual's bound.
+    - The residual's 0.45 m/s authority cannot take the descent far below the base. That is why
+      the residual policies are no softer than `ppo`, and why H1a's reference
+      `pid_feedforward_lowvz` (a constant 0.111 m/s descent) is out of reach of what the residual
+      learned. This reading is post hoc.
+- **The forecast block is used, but no change in outcome is shown.**
+  - Replacing the block with its training mean or with zeros moves the executed setpoint by a
+    median 0.045 m/s (`ppo_forecast`) and 0.027 m/s (`residual_ppo_forecast`). That is above the
+    pre-stated 0.015 m/s for every seed.
+  - In 2 000 counterfactual flights, touchdown shifts by about one control step at the median, and
+    the outcome changes once.
+  - The paired success difference is −0.002 [−0.006, 0.000] and 0 [0, 0].
+  - *Limit of the test.* The original sample is 500 of 500 successes, so it could only detect
+    losses.
+- **Tilt-only hard landings.**
+  - All 101 new-method hard landings are tilt-only. So are `ppo`'s 15 and `pid_feedforward`'s 9.
+  - The drone's own tilt is ≤ 5.8° in every one, against a deck tilt of 10.8–21.7°. In 77 of the
+    101 the deck alone exceeds 15°.
+  - All 125 fall on 27 listed episodes.
+  - These are deck-tilt events with a nearly level drone. The frozen relative-tilt criterion
+    (P2-D5) scores them as `hard_landing` for every method alike; it is not a new-method effect.
+- **Tunnelling.**
+  - All 31 tunnelled episodes are **post-contact**, none impact. Maximum depth comes 62–525 ms
+    after contact, at closing speeds of 0.17–0.39 m/s.
+  - 18 happen at idle motors, the P5-D14 mechanism.
+  - 13 happen under low, non-idle thrust (0.44–0.68 of weight). That is `residual_ppo`'s main case,
+    near the end of the 0.5 s dwell.
+  - `ppo_sinusoid`'s 7.12 mm maximum, 0.09 mm over the reference, is seed 2, SS6 #58: idle motors
+    88 ms after contact, in an episode that was already a tilt `hard_landing` at first contact.
+  - **Bound, under P5-D14's rule.** Up to 7 SS6 successes may depend on tunnelling overlap:
+    `residual_ppo` 3, `ppo_forecast` 1 and `ppo_sinusoid` 3, per 1 000 seed-episodes. Their
+    unloaded stretches are 4–33 ms. That is at most 0.3 points of any cell, and no reading in P6-D4
+    changes direction because of it.
+- **Measurement caveats carried** (P5-D14): recorded closing speed is about 7 % below impact speed,
+  and penetration is flagged at any contact substep.
+
+*Code.*
+- `src/rld/rl/audit.py`: an `AuditSpec` with `--phase {5,6}`; the feed for forecast runs; read-only
+  hooks whose recorded base, π and input rebuild the executed action bit for bit or the audit
+  stops; a scratch-only forecast-block replacement.
+- `src/rld/rl/audit_phase6.py` (new).
+- `tests/test_rl_audit_phase6.py` (new, 18 tests). `test_rl_leakage.py` still passes.
+
+*Artifacts (SHA-256).*
+- `results/audit/e06/README.md`: `5561232b59bd40aa193787d7ccc1310810cc9c384d5d8f0672491396b45e6a47`.
+- `verdicts.csv`: `dcdbcc9564fc5ae91faac0f9c5bc4003c7caa1da367d2c659f3e007515d81718`.
+- `downforce_per_seed.csv`: `a727be5dbff6c311066f22fc54ba705f228ea43c8b0bb923fe548770adb0e1b2`.
+- `residual_authority.csv`: `5e8c4de7b205da76b3df5d7847a994d2a42650630ae10986629aa0b2c23b8727`.
+- `forecast_dependence.csv`: `25c93ac168a52ce7f38ca0886b4a98f8e7fdee611be11e4175657d3d1d76710f`.
+- `tunnelling_episodes.csv`: `6eea307765581ed6794d68a82acfeffce9155e4ed1962c802ad148f2a3a030b2`.
+- `hard_landing_tilt.csv`: `8470c63cc67bf570e304f4ec5a2f6d3b43d296f3938c863ab710bb374b24207d`.
+- `training_bins_fine.csv`: `9520ed9559cf9ace966ef3b34fef02826199ed88362a8e248186b8baea736e6a`.
+- The remaining 21 CSVs are hashed in the README's post-run section.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|
