@@ -103,3 +103,84 @@ class FakeLanding(gym.Env[np.ndarray, np.ndarray]):
 def run_dirs_under(root: Path, group: str) -> list[Path]:
     """Return the run directories of one group, sorted."""
     return sorted(p for p in (root / group).iterdir() if p.is_dir())
+
+
+def phase6_config(name: str, **overrides: Any) -> TrainConfig:
+    """Return a committed Phase 6 config with one in-process worker (network unchanged).
+
+    Args:
+        name: Config stem under ``configs/rl/`` (``"residual_ppo"``, ...).
+        **overrides: Dotted keys with ``__`` for ``.``.
+
+    Returns:
+        The parsed config; the hyperparameters, reward and method components are the
+        committed ones.
+    """
+    raw = load_yaml(RL_CONFIG_DIR / f"{name}.yaml")
+    changes: dict[str, Any] = {
+        "n_envs": 1,
+        "vec_env": "dummy",
+        "eval.n_envs": 1,
+        "prefetch_reset": False,
+    }
+    changes.update({k.replace("__", "."): v for k, v in overrides.items()})
+    return train_config_from_dict(apply_overrides(raw, changes), f"phase6 {name}")
+
+
+def fresh_run_dir(cfg: TrainConfig, root: Path, seed: int = 0) -> Path:
+    """Write a run directory holding the **untrained** model of ``cfg`` as its ``final/``.
+
+    The model is built exactly as a fresh training run builds it (``_build_model``, so a
+    residual run's ``action_net`` is zero-initialised) on one in-process worker with the
+    method's wrappers, with fresh ``VecNormalize`` statistics. ``config.yaml`` and
+    ``provenance.json`` (with the component digests) are written as ``train`` writes them.
+
+    Args:
+        cfg: The config.
+        root: Parent directory; the run lands in ``root/<run_group>/<seed>``.
+        seed: Training seed.
+
+    Returns:
+        The run directory.
+    """
+    import json
+
+    import yaml
+    from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+
+    from rld.rl.callbacks import save_checkpoint
+    from rld.rl.config import config_to_dict
+    from rld.rl.train import (
+        _build_model,
+        _factory_components,
+        build_env_configs,
+        component_provenance,
+        training_pools,
+    )
+    from rld.rl.wrappers import EnvFactory
+
+    run_dir = root / cfg.run_group / str(seed)
+    run_dir.mkdir(parents=True)
+    (run_dir / "config.yaml").write_text(yaml.safe_dump(config_to_dict(cfg), sort_keys=False))
+    (run_dir / "provenance.json").write_text(
+        json.dumps({"seed": seed, "components": component_provenance(cfg)})
+    )
+    cfgs = build_env_configs(cfg)
+    train, tune = training_pools(cfg, cfgs)
+    components = _factory_components(cfg, train, tune)["train"]
+    factory = EnvFactory(cfgs, tuple(train), cfg.pad, seed, 0, "SS3", None, False, **components)
+    venv = VecNormalize(
+        DummyVecEnv([factory]),
+        training=True,
+        norm_obs=cfg.normalize.norm_obs,
+        norm_reward=cfg.normalize.norm_reward,
+        clip_obs=cfg.normalize.clip_obs,
+        clip_reward=cfg.normalize.clip_reward,
+        gamma=cfg.gamma,
+    )
+    try:
+        model = _build_model(cfg, venv, seed, run_dir)
+        save_checkpoint(model, venv, run_dir / "final", {"steps": 0})
+    finally:
+        venv.close()
+    return run_dir

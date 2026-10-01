@@ -30,11 +30,26 @@ is ever deleted or overwritten.
 
 Evaluation-time loading
 -----------------------
-:func:`load_policy` returns a :class:`LearnedPolicy` satisfying
-:class:`rld.control.base.Controller`: never privileged, never takes a ship-motion feed (both
-raise), and normalises observations with the checkpoint's own statistics loaded with
-``training=False, norm_reward=False``. :func:`build_policy` is the picklable factory
-``rld.eval.runner.callable_spec`` takes (bind ``run_dir``/``ckpt`` with ``functools.partial``).
+:func:`load_policy` returns a :class:`LearnedPolicy` (or, for the Phase 6 methods, one of its
+subclasses; :func:`policy_class`) satisfying :class:`rld.control.base.Controller`: never
+privileged, and normalising observations with the checkpoint's own statistics loaded with
+``training=False, norm_reward=False``. A pure or residual policy never takes a ship-motion
+feed (it raises); a forecast policy requires one (``needs_motion_feed = True``;
+:func:`run_needs_motion_feed` tells the caller which, so it can set ``callable_spec``'s flag).
+:func:`build_policy` is the picklable factory ``rld.eval.runner.callable_spec`` takes (bind
+``run_dir``/``ckpt`` with ``functools.partial``); it builds a residual base from the
+evaluation's configs, exactly as the runner builds the ``pid_feedforward`` baseline.
+
+Phase 6 components
+------------------
+``residual`` (:mod:`rld.rl.residual`), ``forecast_obs`` (:mod:`rld.rl.forecast_obs`) and
+``motion`` (:mod:`rld.rl.motion`) are wired into every training **and** tune-pool
+evaluation worker through :class:`rld.rl.wrappers.EnvFactory`, so learning curves and
+curriculum promotion see the same method as training. A residual run's ``action_net`` is
+zero-initialised right after the PPO model is built (never on resume).
+``provenance.json`` records the SHA-256 of the residual base's committed config, of the
+forecaster's ``meta.json`` and of the deck-stats file a sinusoid run reads; loading a
+checkpoint refuses a base config or forecaster that has changed since training.
 
 Nothing in this module reads ``results/episodes/``.
 
@@ -59,18 +74,16 @@ from pathlib import Path
 from types import FrameType
 from typing import Any
 
-import numpy as np
 import torch
 import yaml
 from dmf.sim.generate import RealizationSpec
-from dmf.typedefs import FloatArray
 from stable_baselines3 import PPO, SAC
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import CallbackList
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecEnv, VecNormalize
 
 from rld.config import REPO_ROOT
-from rld.control.base import PrivilegedContext, reject_motion_feed
+from rld.control.registry import entry
 from rld.control.tuning import TuningEpisode, draw_tuning_episodes, load_tuning
 from rld.deck.splits import dev_pool, key_for_spec
 from rld.envs.observation import observation_space
@@ -97,7 +110,15 @@ from rld.rl.config import (
     train_config_from_dict,
 )
 from rld.rl.curriculum import Curriculum
+from rld.rl.forecast_obs import (
+    ForecastPolicy,
+    ResidualForecastPolicy,
+    forecaster_dir,
+)
+from rld.rl.motion import DECK_STATS_SEEDS, committed_rms_full, file_sha256
+from rld.rl.policy import LearnedPolicy
 from rld.rl.procs import status_owner_alive
+from rld.rl.residual import ResidualPolicy, build_base_controller, zero_init_action_net
 from rld.rl.resume import (
     ResumeError,
     ResumePlan,
@@ -123,9 +144,12 @@ __all__ = [
     "git_state",
     "load_policy",
     "load_vecnormalize",
+    "policy_class",
+    "policy_input_size",
     "prepare_resume",
     "prepare_run_dir",
     "read_status",
+    "run_needs_motion_feed",
     "train",
     "training_pools",
 ]
@@ -291,6 +315,8 @@ FORKSERVER_PRELOAD: tuple[str, ...] = (
     "stable_baselines3",
     "rld.rl.wrappers",
     "rld.rl.eval_workers",
+    "rld.rl.residual",
+    "rld.rl.forecast_obs",
 )
 
 
@@ -385,7 +411,8 @@ def _build_model(cfg: TrainConfig, venv: VecEnv, seed: int, run_dir: Path) -> Ba
         run_dir: Run directory; TensorBoard goes to ``tb/``.
 
     Returns:
-        The model.
+        The model; a residual run's ``action_net`` is zero-initialised
+        (:func:`rld.rl.residual.zero_init_action_net`).
     """
     activation = torch.nn.Tanh if cfg.policy.activation == "tanh" else torch.nn.ReLU
     arch = cfg.policy.net_arch
@@ -393,7 +420,7 @@ def _build_model(cfg: TrainConfig, venv: VecEnv, seed: int, run_dir: Path) -> Ba
     if cfg.ppo is not None:
         p = cfg.ppo
         lr: Any = LinearDecay(p.learning_rate) if p.lr_schedule == "linear" else p.learning_rate
-        return PPO(
+        ppo = PPO(
             "MlpPolicy",
             venv,
             learning_rate=lr,
@@ -417,6 +444,10 @@ def _build_model(cfg: TrainConfig, venv: VecEnv, seed: int, run_dir: Path) -> Ba
             seed=seed,
             device="cpu",
         )
+        if cfg.residual is not None:
+            # P3-D1 section 6: the initial policy is the base, a_res = 0 exactly.
+            zero_init_action_net(ppo)
+        return ppo
     assert cfg.sac is not None
     s = cfg.sac
     return SAC(
@@ -439,10 +470,77 @@ def _build_model(cfg: TrainConfig, venv: VecEnv, seed: int, run_dir: Path) -> Ba
     )
 
 
+def _factory_components(
+    cfg: TrainConfig,
+    train_pool: list[RealizationSpec],
+    tune_pool: list[RealizationSpec],
+) -> dict[str, dict[str, Any]]:
+    """Return the Phase 6 :class:`EnvFactory` keyword arguments for the two worker pools.
+
+    Training and tune-pool evaluation workers get the same components, so the learning
+    curves and the curriculum see the method being trained (a sinusoid run never meets a
+    JONSWAP deck, P6-D1). Each pool's sinusoid table holds only its own realizations.
+
+    Args:
+        cfg: The training config.
+        train_pool: The run's train realizations.
+        tune_pool: The tune realizations.
+
+    Returns:
+        ``{"train": kwargs, "tune": kwargs}``.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for name, pool in (("train", train_pool), ("tune", tune_pool)):
+        kwargs: dict[str, Any] = {
+            "residual": cfg.residual,
+            "forecast_obs": cfg.forecast_obs,
+            "motion": cfg.motion,
+        }
+        if cfg.motion == "sinusoid":
+            table = committed_rms_full(key_for_spec(s) for s in pool)
+            kwargs["sinusoid_rms"] = tuple(table.items())
+        out[name] = kwargs
+    return out
+
+
 def _sigterm(signum: int, frame: FrameType | None) -> None:
     """Turn SIGTERM into ``SystemExit`` so the run records ``failed`` before dying."""
     del frame
     raise SystemExit(f"terminated by signal {signum}")
+
+
+def _repo_relative(path: Path) -> str:
+    """Return ``path`` relative to the repository root when it is inside it, else as is."""
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def component_provenance(cfg: TrainConfig) -> dict[str, Any]:
+    """Return the digests of what a Phase 6 run reads besides its config.
+
+    Args:
+        cfg: The training config.
+
+    Returns:
+        ``{"motion": ..., "residual_base_config", "residual_base_config_sha256",
+        "forecaster_dir", "forecaster_meta_sha256", "deck_stats_seeds",
+        "deck_stats_seeds_sha256"}`` -- only the keys the run's components use.
+    """
+    out: dict[str, Any] = {"motion": cfg.motion}
+    if cfg.residual is not None:
+        path = entry(cfg.residual.base).config_path
+        out["residual_base_config"] = _repo_relative(path)
+        out["residual_base_config_sha256"] = file_sha256(path)
+    if cfg.forecast_obs is not None:
+        model_dir = forecaster_dir(cfg.forecast_obs.forecaster)
+        out["forecaster_dir"] = _repo_relative(model_dir)
+        out["forecaster_meta_sha256"] = file_sha256(model_dir / "meta.json")
+    if cfg.motion == "sinusoid":
+        out["deck_stats_seeds"] = _repo_relative(DECK_STATS_SEEDS)
+        out["deck_stats_seeds_sha256"] = file_sha256(DECK_STATS_SEEDS)
+    return out
 
 
 def _episodes_digest(episodes: list[TuningEpisode]) -> str:
@@ -691,6 +789,7 @@ def _train_locked(
                     "eval_episodes_sha256": episodes_sha,
                     "eval_tuning_config": str(cfg.eval.tuning_config),
                     "reward": vars(cfgs.reward),
+                    "components": component_provenance(cfg),
                 },
             )
         else:
@@ -708,6 +807,7 @@ def _train_locked(
             forkserver_preload()
         prefetch = cfg.prefetch_reset
         suffix = "" if plan is None else f".resume{plan.segment}"
+        components = _factory_components(cfg, train_pool, tune_pool)
         factories = [
             EnvFactory(
                 cfgs,
@@ -719,11 +819,22 @@ def _train_locked(
                 run_dir / "monitor",
                 prefetch,
                 suffix,
+                **components["train"],
             )
             for rank in range(cfg.n_envs)
         ]
         eval_factories = [
-            EnvFactory(cfgs, tuple(tune_pool), cfg.pad, seed, rank, None, None, prefetch)
+            EnvFactory(
+                cfgs,
+                tuple(tune_pool),
+                cfg.pad,
+                seed,
+                rank,
+                None,
+                None,
+                prefetch,
+                **components["tune"],
+            )
             for rank in range(cfg.eval.n_envs)
         ]
         if plan is None:
@@ -921,89 +1032,6 @@ def load_vecnormalize(path: Path, venv: VecEnv | None = None) -> VecNormalize:
     return frozen_normalizer(detached)
 
 
-class LearnedPolicy:
-    """A trained policy behind the :class:`rld.control.base.Controller` contract.
-
-    Stateless across steps (an MLP of the current observation), so ``reset`` clears
-    nothing. Never privileged and never given a ship-motion feed.
-
-    Attributes:
-        name: Method label (the run's ``method``).
-        privileged: Always False.
-        needs_motion_feed: Always False.
-        run_dir: The run it came from.
-        checkpoint: The checkpoint directory.
-        steps: Training env steps at the checkpoint.
-    """
-
-    privileged: bool = False
-    needs_motion_feed: bool = False
-
-    def __init__(
-        self,
-        name: str,
-        model: BaseAlgorithm,
-        normalizer: VecNormalize | None,
-        run_dir: Path,
-        checkpoint: Path,
-        steps: int,
-    ) -> None:
-        """Hold the model and its frozen normaliser.
-
-        Args:
-            name: Method label.
-            model: The SB3 model (CPU).
-            normalizer: Frozen normaliser, or ``None`` if the run had none.
-            run_dir: The run directory.
-            checkpoint: The checkpoint directory.
-            steps: Training env steps at the checkpoint.
-        """
-        self.name = name
-        self.model = model
-        self.normalizer = normalizer
-        self.run_dir = run_dir
-        self.checkpoint = checkpoint
-        self.steps = steps
-
-    def reset(
-        self,
-        seed: int,
-        context: PrivilegedContext | None = None,
-        motion_feed: Any = None,
-    ) -> None:
-        """Start an episode; nothing to clear.
-
-        Args:
-            seed: The episode seed (unused: the policy is deterministic).
-            context: Must be ``None``.
-            motion_feed: Must be ``None``.
-
-        Raises:
-            ValueError: If a privileged context or a ship-motion feed is passed.
-        """
-        del seed
-        if context is not None:
-            raise ValueError(f"{self.name} is a learned policy and is never privileged")
-        reject_motion_feed(self.name, motion_feed)
-
-    def act(self, obs: FloatArray) -> FloatArray:
-        """Return the deterministic action for one observation.
-
-        Args:
-            obs: The raw observation vector.
-
-        Returns:
-            A ``(3,)`` float32 action in ``[-1, 1]^3`` (the shared normalised velocity
-            setpoint).
-        """
-        x = np.asarray(obs, dtype=np.float32).reshape(1, -1)
-        if self.normalizer is not None:
-            x = np.asarray(self.normalizer.normalize_obs(x), dtype=np.float32)
-        action, _ = self.model.predict(x, deterministic=True)
-        out: FloatArray = np.clip(np.asarray(action, dtype=np.float32).reshape(-1), -1.0, 1.0)
-        return out
-
-
 def _upgrade_saved_run_config(raw: dict[str, Any]) -> dict[str, Any]:
     """Fill keys added after a run was trained, with the value that run actually used.
 
@@ -1025,44 +1053,156 @@ def _upgrade_saved_run_config(raw: dict[str, Any]) -> dict[str, Any]:
     return raw
 
 
-def load_policy(run_dir: Path, ckpt: str | int = "final") -> LearnedPolicy:
+def _run_config(run_dir: Path) -> TrainConfig:
+    """Return a run directory's own config (upgraded for keys added after it was trained)."""
+    raw = _upgrade_saved_run_config(yaml.safe_load((run_dir / "config.yaml").read_text()))
+    return train_config_from_dict(raw, str(run_dir / "config.yaml"))
+
+
+def policy_class(cfg: TrainConfig) -> type[LearnedPolicy]:
+    """Return the evaluation policy class of a run's config.
+
+    Args:
+        cfg: The run's config.
+
+    Returns:
+        :class:`LearnedPolicy` (``ppo``, ``sac``, ``ppo_sinusoid``),
+        :class:`~rld.rl.residual.ResidualPolicy` (``residual_ppo``),
+        :class:`~rld.rl.forecast_obs.ForecastPolicy` (``ppo_forecast``) or
+        :class:`~rld.rl.forecast_obs.ResidualForecastPolicy` (``residual_ppo_forecast``).
+    """
+    if cfg.residual is not None and cfg.forecast_obs is not None:
+        return ResidualForecastPolicy
+    if cfg.residual is not None:
+        return ResidualPolicy
+    if cfg.forecast_obs is not None:
+        return ForecastPolicy
+    return LearnedPolicy
+
+
+def run_needs_motion_feed(run_dir: Path) -> bool:
+    """Return whether a run's policy consumes the past-only ship-motion feed.
+
+    The value ``rld.eval.runner.callable_spec(..., needs_motion_feed=...)`` must be given
+    for the run; the runner refuses a policy whose own flag disagrees.
+
+    Args:
+        run_dir: The run directory.
+
+    Returns:
+        True for a forecast-observation run.
+    """
+    return policy_class(_run_config(Path(run_dir))).needs_motion_feed
+
+
+def policy_input_size(cfg: TrainConfig, cfgs: EvalConfigs) -> int:
+    """Return the network input size of a run: the env observation plus any forecast block.
+
+    Args:
+        cfg: The run's config.
+        cfgs: The evaluation configs (observation layout).
+
+    Returns:
+        25 for the committed layout, 31 with the 1/2/3 s forecast block.
+    """
+    base = int(observation_space(cfgs.observation).shape[0])
+    return base + (0 if cfg.forecast_obs is None else cfg.forecast_obs.block_size)
+
+
+def _check_components(run_dir: Path, cfg: TrainConfig) -> None:
+    """Refuse a checkpoint whose residual base config or forecaster changed since training.
+
+    Compared against ``provenance.json["components"]`` when the run recorded it (runs from
+    before Phase 6 did not, and have no such component).
+
+    Raises:
+        ValueError: On a digest mismatch.
+    """
+    path = run_dir / "provenance.json"
+    if not path.exists():
+        return
+    recorded = json.loads(path.read_text()).get("components")
+    if not recorded:
+        return
+    live = component_provenance(cfg)
+    for key in ("residual_base_config_sha256", "forecaster_meta_sha256"):
+        if key in recorded and recorded[key] != live.get(key):
+            raise ValueError(
+                f"{run_dir}: {key} was {recorded[key]} at training, is {live.get(key)} now"
+            )
+
+
+def load_policy(
+    run_dir: Path, ckpt: str | int = "final", *, cfgs: EvalConfigs | None = None
+) -> LearnedPolicy:
     """Load a trained policy with its frozen normalisation statistics.
 
     Args:
         run_dir: The run directory.
         ckpt: See :func:`checkpoint_dir`.
+        cfgs: The evaluation configs a residual base is built from; the committed configs
+            when ``None``.
 
     Returns:
-        The :class:`LearnedPolicy` (CPU).
+        The :func:`policy_class` instance (CPU).
+
+    Raises:
+        ValueError: If the residual base config or the forecaster changed since training.
     """
     run_dir = Path(run_dir)
-    raw = _upgrade_saved_run_config(yaml.safe_load((run_dir / "config.yaml").read_text()))
-    cfg = train_config_from_dict(raw, str(run_dir / "config.yaml"))
+    cfg = _run_config(run_dir)
     path = checkpoint_dir(run_dir, ckpt)
     algo_cls: Any = PPO if cfg.algo == "ppo" else SAC
     model: BaseAlgorithm = algo_cls.load(str(path / "model.zip"), device="cpu")
     stats = path / "vecnormalize.pkl"
     normalizer = load_vecnormalize(stats) if stats.exists() else None
     meta = json.loads((path / "checkpoint.json").read_text())
-    return LearnedPolicy(cfg.method, model, normalizer, run_dir, path, int(meta.get("steps", -1)))
+    steps = int(meta.get("steps", -1))
+    _check_components(run_dir, cfg)
+    cls = policy_class(cfg)
+    if cls is LearnedPolicy:
+        return LearnedPolicy(cfg.method, model, normalizer, run_dir, path, steps)
+    env_cfgs = load_eval_configs() if cfgs is None else cfgs
+    args = (cfg.method, model, normalizer, run_dir, path, steps)
+    if cls is ResidualPolicy:
+        assert cfg.residual is not None
+        base = build_base_controller(cfg.residual.base, env_cfgs)
+        return ResidualPolicy(*args, base=base, alpha=cfg.residual.alpha)
+    assert cfg.forecast_obs is not None
+    model_dir = forecaster_dir(cfg.forecast_obs.forecaster)
+    leads = cfg.forecast_obs.leads_full_s
+    if cls is ForecastPolicy:
+        return ForecastPolicy(*args, forecaster_dir=model_dir, leads_full_s=leads)
+    assert cfg.residual is not None
+    return ResidualForecastPolicy(
+        *args,
+        base=build_base_controller(cfg.residual.base, env_cfgs),
+        alpha=cfg.residual.alpha,
+        forecaster_dir=model_dir,
+        leads_full_s=leads,
+    )
 
 
 def build_policy(cfgs: EvalConfigs, *, run_dir: Path, ckpt: str | int = "final") -> LearnedPolicy:
     """Picklable evaluation factory for ``rld.eval.runner.callable_spec``.
 
     Args:
-        cfgs: The evaluation configs; their observation layout must match the policy's.
+        cfgs: The evaluation configs; their observation layout (plus the run's forecast
+            block, if any) must match the policy's input, and a residual base is built
+            from them.
         run_dir: The run directory.
         ckpt: See :func:`checkpoint_dir`.
 
     Returns:
-        The policy.
+        The policy; ``needs_motion_feed`` is True exactly for a forecast run
+        (:func:`run_needs_motion_feed`).
 
     Raises:
-        ValueError: If the observation size differs from the policy's input size.
+        ValueError: If the input size differs from the policy's (31 for a forecast run).
     """
-    policy = load_policy(run_dir, ckpt)
-    expected = observation_space(cfgs.observation).shape
+    policy = load_policy(run_dir, ckpt, cfgs=cfgs)
+    cfg = _run_config(Path(run_dir))
+    expected = (policy_input_size(cfg, cfgs),)
     got = policy.model.observation_space.shape
     if expected != got:
         raise ValueError(f"observation shape {expected} != policy input {got}")

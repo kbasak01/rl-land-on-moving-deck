@@ -1,4 +1,4 @@
-"""Phase 5: training and search configs -- the P3-D1 pins and the loader's protocol checks.
+"""Phase 5-6: training and search configs -- the P3-D1 pins and the loader's protocol checks.
 
 The committed ``configs/rl/ppo.yaml``, ``sac.yaml`` and ``tune_*.yaml`` carry pre-registered
 numbers (P3-D1 sections 5-6): 10 M PPO / 2 M SAC env steps, <= 20 trials at 2 M / 0.5 M,
@@ -22,6 +22,8 @@ from rld.control.tuning import TUNING_CONFIG
 from rld.rl.config import (
     RL_CONFIG_DIR,
     STRUCTURE_REWARD_KEYS,
+    ForecastObsConfig,
+    ResidualConfig,
     apply_overrides,
     config_to_dict,
     load_train_config,
@@ -241,3 +243,98 @@ def test_prefetch_reset_is_optional_and_round_trips() -> None:
     again = train_config_from_dict(yaml.safe_load(yaml.safe_dump(config_to_dict(off))))
     assert again == replace(off, source=None)
     assert off.workers == 8  # ceil(0.4 * 16) + 1, whatever the switch
+
+
+# --------------------------------------------------------------------------- Phase 6
+
+#: The four Phase 6 methods and their components: (residual, forecast_obs, motion).
+PHASE6_COMPONENTS: dict[str, tuple[object, object, str]] = {
+    "residual_ppo": (ResidualConfig(alpha=0.3, base="pid_feedforward"), None, "jonswap"),
+    "ppo_forecast": (None, ForecastObsConfig("residual_interval", (1.0, 2.0, 3.0)), "jonswap"),
+    "residual_ppo_forecast": (
+        ResidualConfig(alpha=0.3, base="pid_feedforward"),
+        ForecastObsConfig("residual_interval", (1.0, 2.0, 3.0)),
+        "jonswap",
+    ),
+    "ppo_sinusoid": (None, None, "sinusoid"),
+}
+PHASE6_KEYS = {"residual", "forecast_obs", "motion"}
+
+
+@pytest.mark.parametrize("name", sorted(PHASE6_COMPONENTS))
+def test_phase6_config_inherits_ppo(name: str) -> None:
+    # P3-D1 section 5, P5-D11: every Phase 6 PPO-family method inherits configs/rl/ppo.yaml
+    # unchanged -- hyperparameters, reward weights, log_std_init, curriculum, evaluation,
+    # the 10 M budget -- and differs only in its name and its method components.
+    import dataclasses
+
+    ppo = dataclasses.asdict(load_train_config(RL_CONFIG_DIR / "ppo.yaml"))
+    cfg = load_train_config(RL_CONFIG_DIR / f"{name}.yaml")
+    final = dataclasses.asdict(cfg)
+    differs = {k for k in final if final[k] != ppo[k]}
+    assert differs <= {"method", "run_group", "source", *PHASE6_KEYS}
+    assert differs >= {"method", "run_group", "source"}
+    assert cfg.method == cfg.run_group == name
+    assert (cfg.residual, cfg.forecast_obs, cfg.motion) == PHASE6_COMPONENTS[name]
+    assert cfg.total_steps == 10_000_000 and cfg.workers == 8
+    raw = yaml.safe_load((RL_CONFIG_DIR / f"{name}.yaml").read_text())
+    assert set(raw) >= PHASE6_KEYS  # stated explicitly, not left to the defaults
+
+
+@pytest.mark.parametrize("name", sorted(PHASE6_COMPONENTS))
+def test_phase6_smoke_config_is_its_final_config(name: str) -> None:
+    import dataclasses
+
+    final = load_train_config(RL_CONFIG_DIR / f"{name}.yaml")
+    smoke = load_train_config(RL_CONFIG_DIR / f"{name}_smoke.yaml")
+    a, b = dataclasses.asdict(final), dataclasses.asdict(smoke)
+    differs = {k for k in a if a[k] != b[k]}
+    assert differs == {
+        "method",
+        "run_group",
+        "total_steps",
+        "eval",
+        "checkpoint_interval_steps",
+        "source",
+    }
+    assert {k for k in a["eval"] if a["eval"][k] != b["eval"][k]} == {"interval_steps"}
+    assert smoke.method == smoke.run_group == f"{name}_smoke"
+    assert smoke.total_steps == 100_000
+    assert smoke.ppo is not None
+    rollout = smoke.ppo.n_steps * smoke.n_envs
+    steps = math.ceil(smoke.total_steps / rollout) * rollout
+    assert steps // smoke.eval.interval_steps >= 1  # at least one periodic evaluation
+    assert steps >= smoke.checkpoint_interval_steps  # a periodic checkpoint, then final/
+
+
+def test_phase6_keys_are_optional_and_round_trip() -> None:
+    ppo = load_train_config(RL_CONFIG_DIR / "ppo.yaml")
+    assert (ppo.residual, ppo.forecast_obs, ppo.motion) == (None, None, "jonswap")
+    # Written only when set: a pure PPO config serialises as it did before Phase 6, so a
+    # Phase 5 run directory's config.yaml (and its digest) is unchanged.
+    assert not PHASE6_KEYS & set(config_to_dict(ppo))
+    for name in PHASE6_COMPONENTS:
+        cfg = load_train_config(RL_CONFIG_DIR / f"{name}.yaml")
+        again = train_config_from_dict(yaml.safe_load(yaml.safe_dump(config_to_dict(cfg))))
+        assert replace(again, source=cfg.source) == cfg
+    # apply_overrides may add an optional top-level key (and nothing else unknown).
+    raw = apply_overrides(tiny_raw("ppo"), {"motion": "sinusoid"})
+    assert train_config_from_dict(raw).motion == "sinusoid"
+    with pytest.raises(KeyError):
+        apply_overrides(tiny_raw("ppo"), {"motoin": "sinusoid"})
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"motion": "real_ship"}, "motion must be one of"),
+        ({"forecast_obs": {"forecaster": "residual_interval", "leads_full_s": []}}, "non-empty"),
+        ({"forecast_obs": {"forecaster": "residual_interval", "leads_full_s": [1.05]}}, "grid"),
+        ({"forecast_obs": {"forecaster": "residual_interval", "leads_full_s": [20.0]}}, "grid"),
+        ({"forecast_obs": {"forecaster": "../x", "leads_full_s": [1.0]}}, "directory name"),
+        ({"forecast_obs": {"forecaster": "residual_interval"}}, "missing keys"),
+    ],
+)
+def test_phase6_config_rejects(change: dict[str, object], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        train_config_from_dict({**tiny_raw("ppo"), **change})

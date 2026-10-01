@@ -8,9 +8,18 @@ lists, so the suite cannot put a policy in front of an evaluation episode. Two c
 ``oracle_gated`` flown on the temporary list), so the carry checks, the privileged label and
 the byte-identical re-render are all exercised.
 
+The Phase 6 end-to-end test (e06) trains a tiny **residual** PPO run (``ResidualPolicy``, two
+seeds) and a tiny **forecast** PPO run (``ForecastPolicy``, 31-entry input, consumes the
+runner's past-only ship-motion feed), flies both through :func:`main` on the same temporary
+list, and carries the tiny SAC output of the e05-style test beside them with
+``--carry-learned``, so the feed flag, the policy-class check, the learned carry and its
+checks, and the Phase 6 notes and labels are exercised. It is skipped when the committed
+``residual_interval`` forecaster is not fitted (``make dmf-forecasters``).
+
 Units: rates dimensionless; speeds metres per second model scale; steps env control steps.
 """
 
+import functools
 import json
 import math
 from pathlib import Path
@@ -24,10 +33,15 @@ from rld.eval.envs import EvalConfigs, load_eval_configs
 from rld.eval.episodes import EpisodeDraw, ListedEpisode, resolve_draws, write_lists
 from rld.eval.learned import (
     AGGREGATE_COLUMNS,
+    CARRIED_LEARNED_PREFIX,
     CARRIED_PREFIX,
+    _learned_label,
     aggregate_rows,
+    carry_learned,
+    check_policies,
     evaluate_runs,
     inspect_run,
+    learned_spec,
     live_provenance,
     main,
     order_runs,
@@ -35,9 +49,10 @@ from rld.eval.learned import (
     seed_spread,
 )
 from rld.eval.report import read_rows, summarise, summary_columns, write_rows
-from rld.eval.runner import EPISODE_COLUMNS, controller_spec, run_list
+from rld.eval.runner import EPISODE_COLUMNS, callable_spec, controller_spec, run_list
 from rld.eval.stats import iqm
-from rld.rl.train import prepare_run_dir, train
+from rld.rl.forecast_obs import forecaster_dir
+from rld.rl.train import build_policy, prepare_run_dir, train
 
 # --------------------------------------------------------------------------- fast
 
@@ -97,6 +112,26 @@ def test_seed_spread_and_aggregate_on_known_values() -> None:
     assert "seed(s) 2" in missing["note"]
     # Same inputs, same numbers: every interval is reproducible from its seed.
     assert [repr(r) for r in aggregate_rows(recs)] == [repr(r) for r in agg]
+
+
+def test_learned_label_marks_class_feed_sinusoid_and_carry() -> None:
+    base = {"run_total_steps": "10000000"}
+    # A summary written before the policy columns (e05) keeps its e05 label exactly.
+    assert _learned_label("ppo", [base]) == "ppo (learned; 10 000 000 env steps per seed)"
+    sinus = {
+        **base,
+        "run_policy_class": "LearnedPolicy",
+        "run_needs_motion_feed": "False",
+        "run_training_motion": "sinusoid",
+        "eval_deck_motion": "jonswap",
+    }
+    label = _learned_label("ppo_sinusoid", [sinus])
+    assert "trained on sinusoid motion only" in label and "not the H4 cross" in label
+    feed = {**sinus, "run_policy_class": "ForecastPolicy", "run_needs_motion_feed": "True"}
+    feed["run_training_motion"] = "jonswap"
+    label = _learned_label("ppo_forecast", [feed])
+    assert "`ForecastPolicy`" in label and "ship-motion feed" in label and "H4" not in label
+    assert "carried from `results/e05`" in _learned_label("ppo", [base], "e05")
 
 
 # --------------------------------------------------------------------------- slow
@@ -284,3 +319,219 @@ def test_main_end_to_end(
     assert main(["--out-dir", str(out), "--title", "tiny", "--render-only"]) == 0
     assert (out / "success_vs_seastate.md").read_text() == md
     assert main(["--out-dir", str(out), "--title", "tiny", "--check"]) == 0
+
+
+# --------------------------------------------------------------------------- Phase 6 (e06)
+
+_NO_FORECASTER = not (forecaster_dir("residual_interval") / "meta.json").is_file()
+
+
+@pytest.fixture(scope="module")
+def p6_runs(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
+    """A tiny residual PPO run group (seeds 0, 1) and a tiny forecast PPO run group (seed 0)."""
+    root = tmp_path_factory.mktemp("p6runs")
+    common: dict[str, Any] = {"total_steps": 256, "ppo__n_steps": 128, "ppo__batch_size": 64}
+    residual = tiny_config(
+        "ppo",
+        method="test_residual",
+        run_group="test_residual",
+        residual={"alpha": 0.3, "base": "pid_feedforward"},
+        **common,
+    )
+    forecast = tiny_config(
+        "ppo",
+        method="test_forecast",
+        run_group="test_forecast",
+        forecast_obs={"forecaster": "residual_interval", "leads_full_s": [1.0, 2.0, 3.0]},
+        **common,
+    )
+    for cfg, seeds in ((residual, (1, 0)), (forecast, (0,))):
+        for seed in seeds:
+            run_dir = prepare_run_dir(cfg, seed, root)
+            assert train(cfg, seed, run_dir)["state"] == "done"
+    return {"residual": root / "test_residual", "forecast": root / "test_forecast"}
+
+
+@pytest.mark.slow
+@pytest.mark.pybullet
+@pytest.mark.skipif(_NO_FORECASTER, reason="no fitted residual_interval (make dmf-forecasters)")
+def test_feed_flag_and_policy_class(
+    p6_runs: dict[str, Path], tmp_lists: Path, cfgs: EvalConfigs
+) -> None:
+    from rld.eval.episodes import read_list
+
+    res = inspect_run("test_residual", p6_runs["residual"] / "0")
+    fc = inspect_run("test_forecast", p6_runs["forecast"] / "0")
+    assert res.needs_motion_feed is False and fc.needs_motion_feed is True
+    assert learned_spec(res).needs_motion_feed is False
+    assert learned_spec(fc).needs_motion_feed is True
+    assert not learned_spec(fc).privileged
+    checked, facts = check_policies([res, fc], cfgs)
+    assert [r.policy_class for r in checked] == ["ResidualPolicy", "ForecastPolicy"]
+    assert [f["policy_input_shape"] for f in facts] == [[25], [31]]
+    # A method label the expected-class table knows must build to that class.
+    import dataclasses
+
+    with pytest.raises(ValueError, match="expected ResidualPolicy"):
+        check_policies([dataclasses.replace(fc, method="residual_ppo")], cfgs)
+
+    # The forecast policy cannot be flown without the runner's feed: a spec that withholds it
+    # is refused, never flown blind.
+    episodes = read_list(tmp_lists / "id.parquet")[:1]
+    blind = callable_spec(
+        "test_forecast",
+        functools.partial(build_policy, run_dir=fc.run_dir, ckpt="final"),
+        run_seed=0,
+    )
+    with pytest.raises(ValueError, match="needs_motion_feed"):
+        run_list(episodes, blind, cfgs, workers=1)
+    # With the flag the rows do not depend on the worker layout.
+    episodes = read_list(tmp_lists / "id.parquet")
+    one = evaluate_runs([fc, res], episodes, cfgs, workers=1, chunk=1)
+    two = evaluate_runs([fc, res], episodes, cfgs, workers=2, chunk=2)
+    assert len(one) == 2 * len(episodes)
+    for a, b in zip(one, two, strict=True):
+        for key in EPISODE_COLUMNS:
+            x, y = a[key], b[key]
+            assert x == y or (isinstance(x, float) and x != x and y != y), key
+
+
+def _tiny_e05(runs_root: Path, tmp_lists: Path, out: Path, sources: tuple[Path, Path]) -> None:
+    """Write an e05-style output of the two tiny SAC runs (the carried learned source)."""
+    argv = [
+        "--learned",
+        f"test_sac={runs_root / '0'},{runs_root / '3'}",
+        "--episodes-dir",
+        str(tmp_lists),
+        "--out-dir",
+        str(out),
+        "--workers",
+        "2",
+        "--chunk",
+        "1",
+        "--carry",
+        f"{sources[0]}=pid_feedforward",
+        f"{sources[1]}=oracle_gated",
+        "--title",
+        "tiny e05",
+    ]
+    assert main(argv) == 0
+
+
+@pytest.mark.slow
+@pytest.mark.pybullet
+@pytest.mark.skipif(_NO_FORECASTER, reason="no fitted residual_interval (make dmf-forecasters)")
+def test_main_end_to_end_phase6(
+    runs_root: Path,
+    p6_runs: dict[str, Path],
+    tmp_lists: Path,
+    cfgs: EvalConfigs,
+    tmp_path: Path,
+) -> None:
+    import shutil
+
+    from rld.eval.episodes import read_list
+
+    episodes = read_list(tmp_lists / "id.parquet")
+    prov = live_provenance(cfgs, tmp_lists)
+    src_a = _fly_source(tmp_path, "pid_feedforward", episodes, cfgs, prov)
+    src_b = _fly_source(tmp_path, "oracle_gated", episodes, cfgs, prov)
+    e05 = tmp_path / "e05"
+    _tiny_e05(runs_root, tmp_lists, e05, (src_a, src_b))
+
+    out = tmp_path / "e06"
+    res_dirs = f"{p6_runs['residual'] / '1'},{p6_runs['residual'] / '0'}"
+    argv = [
+        "--learned",
+        f"test_residual={res_dirs}",
+        f"test_forecast={p6_runs['forecast'] / '0'}",
+        "--episodes-dir",
+        str(tmp_lists),
+        "--out-dir",
+        str(out),
+        "--workers",
+        "2",
+        "--chunk",
+        "1",
+        "--carry",
+        f"{src_a}=pid_feedforward",
+        f"{src_b}=oracle_gated",
+        "--carry-learned",
+        f"{e05}=test_sac",
+        "--title",
+        "tiny e06",
+    ]
+    assert main(argv) == 0
+
+    rows = read_rows(out / "episodes.csv")
+    assert len(rows) == 3 * len(episodes)
+    assert [(r["method"], r["run_seed"]) for r in rows[:: len(episodes)]] == [
+        ("test_residual", "0"),
+        ("test_residual", "1"),
+        ("test_forecast", "0"),
+    ]
+    assert {r["privileged"] for r in rows} == {"False"}
+    summary = read_rows(out / "summary.csv")
+    by_method = {r["method"]: r for r in summary}
+    assert by_method["test_residual"]["run_policy_class"] == "ResidualPolicy"
+    assert by_method["test_residual"]["run_needs_motion_feed"] == "False"
+    assert by_method["test_forecast"]["run_policy_class"] == "ForecastPolicy"
+    assert by_method["test_forecast"]["run_needs_motion_feed"] == "True"
+    assert {r["eval_deck_motion"] for r in summary} == {"jonswap"}
+    assert {r["run_training_motion"] for r in summary} == {"jonswap"}
+
+    # The carried learned lines are verbatim copies of the e05-style source.
+    for kind, prefix in CARRIED_LEARNED_PREFIX.items():
+        carried = (out / f"{prefix}e05.csv").read_text().splitlines()
+        source = (e05 / kind).read_text().splitlines()
+        assert carried == source  # the whole tiny source is test_sac on the flown cells
+    info = json.loads((out / "run_info.json").read_text())
+    learned_info = info["carried_learned"]["e05"]
+    assert all(f["lines_byte_identical_to_source"] for f in learned_info["files"].values())
+    assert all(learned_info["source_flew_identical_listed_episodes"].values())
+    assert set(learned_info["source_flew_identical_listed_episodes"]) == {
+        "test_sac/0",
+        "test_sac/3",
+    }
+    assert all(learned_info["seeds_and_aggregate_rederived_from_carried_summary"].values())
+    assert set(learned_info["source_checkpoints_vs_summary_digests"].values()) == {"unchanged"}
+    assert [p["policy_class"] for p in info["policy_check"]] == [
+        "ResidualPolicy",
+        "ResidualPolicy",
+        "ForecastPolicy",
+    ]
+    assert all(info["rederived_byte_identical"].values())
+    assert "carried_learned_seeds_e05.csv" in info["rederived_byte_identical"]
+
+    md = (out / "success_vs_seastate.md").read_text()
+    assert md.startswith("# tiny e06\n")
+    assert "in-sample during training" in md and "extra ideal" in md
+    assert "Residual methods (`test_residual`)" in md
+    assert "carried from `results/e05`" in md  # the carried learner's label
+    assert "test_sac | 3 |" in md and "test_forecast | 0 |" in md
+    assert "commit-timing oracle (privileged)" in md
+    assert "ship-motion feed (extra ideal sensor)" in md
+    # --check and --render-only reproduce it under its own title, without --title.
+    assert main(["--out-dir", str(out), "--render-only"]) == 0
+    assert (out / "success_vs_seastate.md").read_text() == md
+    assert main(["--out-dir", str(out), "--check"]) == 0
+    # The e05-style source still re-derives byte for byte (its notes are unchanged).
+    assert main(["--out-dir", str(e05), "--check"]) == 0
+
+    # A tampered carried aggregate line fails --check; a tampered source fails the carry.
+    agg = out / f"{CARRIED_LEARNED_PREFIX['aggregate.csv']}e05.csv"
+    text = agg.read_text()
+    agg.write_text(text.replace(",0.95,", ",0.9,", 1))
+    assert main(["--out-dir", str(out), "--check"]) == 1
+    agg.write_text(text)
+    bad = tmp_path / "bad_e05"
+    shutil.copytree(e05, bad)
+    lines = (bad / "seeds.csv").read_text().splitlines(keepends=True)
+    # One seed's success rate in the first spread line, changed: no longer what the summary
+    # lines re-derive to.
+    tampered = lines[1].split(",")
+    column = lines[0].rstrip("\n").split(",").index("success_rate_seed0")
+    tampered[column] = repr(float(tampered[column]) * 0.5 + 0.25)
+    (bad / "seeds.csv").write_text(lines[0] + ",".join(tampered) + "".join(lines[2:]))
+    with pytest.raises(SystemExit, match="re-derived"):
+        carry_learned(tmp_path / "scratch", {bad: ("test_sac",)}, episodes, prov, write=False)

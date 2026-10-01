@@ -3005,6 +3005,580 @@ method alike.*
   unchanged. The script (evaluation-side) checks MANIFEST, reads `id.parquet`, and passes the rows
   into `rld.rl.audit`, which never opens a list.
 
+## Phase 6
+
+### P6-D1 — Phase 6 method definitions, fixed before any Phase 6 training step (2026-09-30)
+
+*Status.* This entry was written and committed before any Phase 6 smoke or final run. P3-D1 is
+unchanged; its block SHA-256 is still `21465588…`.
+
+*Inherited, unchanged (P3-D1 §5, P5-D11, P5-D12).*
+- All four methods take `configs/rl/ppo.yaml` verbatim: trial 14's hyperparameters and reward
+  weights, `log_std_init` −2.80, 10 M env steps, seeds 0–4.
+- They use the same P3-D2 train pool, the same curriculum, and the same tune-pool evaluation draw.
+- `tests/test_rl_config.py::test_phase6_config_inherits_ppo` pins every final config equal to
+  `ppo.yaml` except in `method`, `run_group` and the three component keys below.
+- None of the four has a hyperparameter search of its own.
+
+**`residual_ppo`** (`src/rld/rl/residual.py`).
+- *Executed action.* `clip(a_pid_ff(o) + 0.3·π(o), −1, 1)`, then the env's own norm cap (P2-D2).
+  α = 0.3 in normalised units is 0.45 m/s model scale.
+- *The base.* `pid_feedforward` with the committed `configs/control/pid_feedforward.yaml`. It is
+  built as the runner builds the baseline, reset every episode, and fed the raw observation.
+- *The policy's input.* π reads the unchanged 25-entry observation. The base action is **not**
+  appended, as P3-D1 writes "π(o)".
+  - `pid_feedforward`'s lateral integrator is state the policy does not see.
+- *Initialisation.* Only `action_net`'s weight and bias are zero-initialised. The value head, the
+  MLPs and `log_std` are not.
+  - The initial deterministic policy is therefore exactly `pid_feedforward`.
+  - **Effective exploration std** is 0.3 × 0.061 = **0.018** normalised units. This follows from
+    inheriting `ppo.yaml`'s `log_std_init`, and it is stated rather than re-tuned.
+- *One composition path.* Training (`ResidualActionWrapper`), the tune-pool evaluation workers,
+  and evaluation (`ResidualPolicy`) all call the same `compose_residual`.
+- **Gate test.** `tests/test_rl_residual.py::test_gate_zeroed_residual_is_pid_feedforward` flies
+  the zero-initialised committed network through `rld.eval.runner.run_list` on 14 frozen `id`
+  episodes (2 220 steps).
+  - The sample is SS3–SS6 × 3, plus `pid_feedforward`'s first SS6 `bounce` and first SS6
+    `hard_landing` from e01.
+  - Every episode column except `method` is identical to `pid_feedforward`, and every per-step
+    float32 action is bit-identical.
+  - The training-wrapper path reproduces the same actions.
+  - It needs only committed files, so it cannot skip.
+
+**Forecast observation block** (`ppo_forecast`, `residual_ppo_forecast`;
+`src/rld/rl/forecast_obs.py`). This is the Phase 4 block deferred by P4-D4a.
+- *Forecaster.* dmf `residual_interval` (DLinear-OLS), the same one as the primary
+  `gated_forecast` arm. A test pins that.
+- *Block.* `leads_full_s(forecast, (1, 2, 3) s full)`, i.e. 0.2 / 0.4 / 0.6 s model: point pad z
+  (m) and pad v_z (m/s), model scale.
+  - Layout `[z1, vz1, z2, vz2, z3, vz3]`, clipped to ±10 so the box stays finite. The clip never
+    binds.
+  - It is appended after the 25 env entries, giving 31. `VecNormalize` normalises it.
+- *Feed.* It is computed from a past-only `ShipMotionFeed` advanced to the control time. Training
+  builds the feed per episode in the wrapper; evaluation receives it from the runner
+  (`needs_motion_feed=True`).
+  - Train/eval parity is bit-identical on 3 `id` episodes, including episodes from the prefetch
+    standby slot.
+  - Perturbing the future leaves the block bit-identical.
+- *Threads.* ORT runs with 1 intra-op and 1 inter-op thread in every worker.
+- *Carried caveats.*
+  1. The forecaster was fitted on the P3-D2 dev pool (P4-D1). Its forecasts are therefore
+     **in-sample during training** and out-of-sample on the frozen lists, so the policy may learn
+     to trust them more than test-time accuracy warrants.
+  2. The feed is an extra ideal ship-motion sensor that `ppo` does not have (P4-D3). So `ppo_forecast`
+     vs `ppo` (H3) compares sensor suites as well as information about the future.
+- *Cost.* A forecast adds about 1.2 ms per env step (+73 % at p50, measured with one worker). The
+  feed's 200-sample pre-fill runs on the reset-prefetch thread.
+
+**`ppo_sinusoid`** (`motion: sinusoid`; `src/rld/rl/motion.py`).
+- *Motion.* Every training episode, every periodic tune-pool evaluation episode, and therefore
+  curriculum promotion and the learning curves, fly a `SinusoidDeckMotion`. It is built per
+  episode and matched to the episode's P3-D2 realization:
+  - amplitude √2 × the committed RMS in `results/deck_stats_seeds.csv` (aft rows), which matches
+    `matched_rms` to rtol 1e-9;
+  - the realization's peak encounter period;
+  - phases drawn from the episode seed.
+- *No JONSWAP.* No JONSWAP motion enters its training. The frozen-list evaluation on JONSWAP (Gate
+  6) and the H4 cross (Phase 7) are evaluation-side.
+
+**Smoke runs are pipeline checks, not tuning trials.**
+- One per method: seed 0, 100 k steps, `method` = `run_group` = `<method>_smoke`.
+- Nothing read from them may change a hyperparameter. A failure that seems to need such a change
+  goes to the user and would be a dated deviation.
+
+**Also recorded.**
+- `load_policy` refuses to load if `pid_feedforward.yaml` or the forecaster's `meta.json` has
+  changed since training. Their digests are in `provenance.json["components"]`.
+- `config_to_dict` omits the new keys at their defaults, so the Phase 5 run configs and their
+  hashes are unchanged.
+- **Eval side, open.** `rld.eval.learned` and the audit's re-flight do not yet pass
+  `needs_motion_feed` for the forecast runs, and they fail loudly until they do. That is the
+  eval-auditor's work, before e06.
+- **Slot cost, open.** The scheduler formula is unchanged, since there are no extra threads. But a
+  forecast worker uses about 70 % more CPU per step. Process-tree CPU is measured on the smoke
+  runs before the final forecast runs are queued.
+
+### P6-D2 — Smoke runs: pipeline checks pass; final sweeps queued (2026-09-30)
+
+*What ran.* Four smoke runs, all launched together with `make train-bg CFG=configs/rl/<m>_smoke.yaml
+SEED=0`:
+- seed 0 each, trained at `8736876` with `git_dirty` false;
+- 114 688 steps each (7 rollouts);
+- all `done`, none resumed.
+
+Each `final/` holds `model.zip` and `vecnormalize.pkl`, and `load_policy` returns the expected
+class:
+
+| run | policy class | obs | feed | wall | CPU-h (avg cores) | tune-pool success, 6 evals (20 k … 114 688) | final stage |
+|---|---|---|---|---|---|---|---|
+| `residual_ppo_smoke` | `ResidualPolicy` | 25 | no | 315 s | 0.52 (5.9) | 1.000, 0.994, 0.994, 1.000, 1.000, 1.000 | SS5 |
+| `ppo_forecast_smoke` | `ForecastPolicy` | 31 | yes | 413 s | 1.13 (9.8) | 0.000, 0.000, 0.000, 0.022, 0.089, 0.000 | SS3 |
+| `residual_ppo_forecast_smoke` | `ResidualForecastPolicy` | 31 | yes | 407 s | 0.74 (6.5) | 1.000, 1.000, 0.994, 1.000, 1.000, 0.994 | SS5 |
+| `ppo_sinusoid_smoke` | `LearnedPolicy` | 25 | no | 309 s | 0.76 (8.9) | 0.000, 0.000, 0.000, 0.000, 0.000, 0.006 | SS3 |
+
+*Readings. These are pipeline facts, not results; tune-pool numbers are never results.*
+- **The residual runs start where they should.** They begin at `pid_feedforward`'s level on the
+  tune draw and promote SS3 → SS5 within the smoke budget, consistent with the zero-initialised
+  residual.
+- **The pure-PPO runs have not learned yet at 115 k steps.**
+  - `ppo_forecast`'s final eval is 1.000 `timeout`. `ppo_sinusoid`'s is 0.617 `timeout`, 0.317
+    `off_pad`, 0.050 `bounce` and 0.011 `crash`.
+  - This matches Phase 5. `ppo` seed 0 first scored 0.700 at its first eval (200 k), and P5-D14
+    found early timeouts in PPO training up to about 100 k steps.
+  - Nothing was changed because of it. Per P6-D1, smoke runs are not tuning trials.
+- **CPU.** The averages are dominated by evaluation (6 × 180 tune-pool episodes in 115 k steps,
+  against one eval per 200 k in the final runs) and by 64 env workers sharing 36 cores. They
+  overstate steady state: the Phase 5 `ppo` finals averaged 4.8 cores (15.3 CPU-h / 3.17 h).
+  - The slot cost stays at 8 for every Phase 6 run.
+  - Four forecast runs at once would be the worst case, estimated at about 30 cores on the 36-core
+    host. Over-subscription would cost wall clock only; the runs are seeded and CPU-deterministic.
+  - Measured wall clock is reported with the results.
+
+*Launch.* The four sweeps are queued in this order on the global FIFO scheduler (34 slots, cost 8,
+so 4 runs at once):
+- `make sweep CFG=configs/rl/residual_ppo.yaml SEEDS="0 1 2 3 4"`
+- then the same for `ppo_forecast`, `residual_ppo_forecast` and `ppo_sinusoid`.
+
+That is 20 runs × 10 M steps, about 20–25 h. The sweep IDs are in `artifacts/runs/_sweeps/`.
+
+### P6-D3 — Phase 6 sweeps complete; learning curves (2026-10-01)
+
+*Runs.* All 20 runs are `done`:
+- `artifacts/runs/{residual_ppo,ppo_forecast,residual_ppo_forecast,ppo_sinusoid}/{0..4}`, 10 010 624
+  steps each;
+- every one trained at `6cedd5d` with `git_dirty` false, and `resumed_from` null for all;
+- no run failed, stalled or was dropped.
+
+The sweep ran from 2026-09-30 17:56 to 2026-10-01 15:26 UTC, about 21.5 h, with 4 runs at a time.
+
+| method | wall per seed | fps |
+|---|---|---|
+| `residual_ppo` | 3.23–3.28 h | 847–861 |
+| `ppo_forecast` | 5.52–5.67 h | 491–504 |
+| `residual_ppo_forecast` | 5.28–5.39 h | 516–526 |
+| `ppo_sinusoid` | 2.15–2.54 h | 1 095–1 291 |
+
+- The forecaster's per-step cost (P6-D1) makes the forecast runs about 1.7× slower.
+- `ppo_sinusoid` seeds 3–4 ran with fewer neighbours, which is why they were faster.
+
+*Curriculum.* Every run reached SS5.
+- SS4 at 0.4 M steps and SS5 at 0.8 M steps, except `ppo_forecast` seeds 2–3 and `ppo_sinusoid`
+  seed 4, which promoted at 0.6 M and 1.0 M.
+- The early fall in the residual methods' training return (about 40.5 → 38.9 over the first 3 M
+  steps) begins at these promotions: harder sea states give lower returns. Return then recovers
+  to about 39.6.
+
+*Learning curves* (`results/e06/`, 5 seeds, mean ± SD with ddof = 1, from
+`scripts/export_learning_curves.py`; SHA-256):
+
+| file | SHA-256 |
+|---|---|
+| `learning_curves_residual_ppo.csv` / `.png` | `ba279218163ac6b5708fca680496423023a62fdea005d5f0f5f8c1c46dd438ca` / `e08536585710dcc0ae0df1a6cbfe9da1076baca624a60bf62e8b7aeaae95875a` |
+| `learning_curves_ppo_forecast.csv` / `.png` | `1721dcc620f2be5b905d0b7c46d1df5cdb9422985a266109a44951b9e6cc19ac` / `4041bfc366067200050172b84578d1a10bf72a30b469a118a785d815c38e1dbd` |
+| `learning_curves_residual_ppo_forecast.csv` / `.png` | `0bb8291f63017d34158cd89e85df7a39ccbc21d37cb1b8cd46be694d2fd7bf82` / `2320b07de377e11a5fdc4daff7e68e9c0644c2261382119fc85ffbada44f605c` |
+| `learning_curves_ppo_sinusoid.csv` / `.png` | `06f7e5397c78f1a6b969cf5e43f7e4d5282b2961fcf5b4548e4c075e787c54d5` / `480ec2e484ba287bb29af6d580835abaddbf41ee9044b7d8189cf20e3e17c354` |
+
+Tune-pool readings, which are not results:
+- the residual methods stay at about 1.000 tune success throughout;
+- `ppo_forecast` reaches about 1.0 by about 1 M steps;
+- the final evals are 0.994–1.000 for every run;
+- `ppo_sinusoid`'s curve is on **sinusoid** motion (P6-D1).
+
+### P6-D4 — Phase 6 final checkpoints on the frozen id list: e06 (2026-10-01)
+
+*What was flown.* The `final/` checkpoint of each of the 20 Phase 6 runs on `results/episodes/id.parquet`
+(SS3–SS6, N = 200 per cell, aft pad): **16 000 episodes**, none skipped.
+- The path is the same as P5-D13: `rld.eval.learned`, chunked `run_matrix`, chunk 25, 24 workers,
+  OMP/MKL = 1. The flight took 403.9 s.
+- `make_episodes.py --check` ran first: 10/10 OK, MANIFEST `e6f30e55…`, `id` file `919be99d…`,
+  content `ea38d8a5…`.
+- *Policy path.* `build_policy` returns `ResidualPolicy` (`residual_ppo`), `ForecastPolicy`
+  (`ppo_forecast`), `ResidualForecastPolicy` (`residual_ppo_forecast`) or `LearnedPolicy`
+  (`ppo_sinusoid`).
+  - Every policy is deterministic, with `VecNormalize` frozen, and none is privileged.
+  - The two forecast methods receive the runner's past-only `ShipMotionFeed`
+    (`needs_motion_feed` from `run_needs_motion_feed`).
+  - A pre-flight `check_policies` asserts class, feed flag, privilege and input size (25 or 31).
+- **`ppo_sinusoid` flies JONSWAP here.** These rows are its Gate 6 `id` result, **not** the H4
+  cross, which is Phase 7.
+- *Command.* `python -m rld.eval.learned --learned residual_ppo=…/0,…,4 ppo_forecast=…
+  residual_ppo_forecast=… ppo_sinusoid=… --ckpt final --list id --out-dir results/e06 --workers 24
+  --carry-learned results/e05=ppo,sac`.
+
+*Provenance.*
+- HEAD `7d6fc64`, `git_dirty` true. The dirty paths are only the eval-side `src/rld/eval/learned.py`
+  and `tests/test_eval_learned.py`, committed unchanged right after as `0e49f39`. This is the same
+  gap as P5-D13, and the audit's re-flights through committed code close it (P6-D5).
+- 100 checkpoint files were hashed before and after the flight and did not change. The
+  post-flight digests of the 20 runs are committed in `results/e06/summary.csv`
+  (`run_model_sha256`, `run_vecnormalize_sha256`, `run_checkpoint_json_sha256`,
+  `run_config_sha256`), and they match the files. Only the pre-flight digests are the agent's own
+  record (corrected at `/phase-gate 6`, P6-D6). The files are the 20 runs'
+  `model.zip`, `vecnormalize.pkl`, `checkpoint.json` and `config.yaml`, plus the 10 Phase 5
+  checkpoints.
+- **Carried rows.**
+  - The six baselines come from e01 and e01_lowvz_cut, line for line, as in P5-D13.
+  - `ppo` and `sac` come from e05 (`carried_learned_{summary,seeds,aggregate}_e05.csv`).
+  - Every carried line is byte-identical to its source, and the sources flew the identical
+    episodes.
+  - Re-summarising the source episodes reproduces the source summaries.
+  - e05 `--check` is still byte-identical after the eval-side change.
+  - As a scratch check, 80 e05 rows re-flown with today's code are 80/80 byte-identical.
+- **`--check`** (re-run by the main thread): `summary.csv`, `seeds.csv`, `aggregate.csv`, both
+  carried-learned derived files and `success_vs_seastate.md` are all byte-identical.
+
+**Headline: `id`, aft pad, success per sea state.**
+- Learned rows show the rliable IQM across 5 seeds (%), with the stratified-bootstrap 95 % CI
+  (P3-D1 §4: 2 000 replicates, seed 20260926), then the per-seed range.
+- Baselines show % [Wilson 95 % CI] k/200.
+- Success is not pooled across sea states.
+- SS6 is outside every method's training distribution.
+
+| method | SS3 | SS4 | SS5 | SS6 (out of distribution) |
+|---|---|---|---|---|
+| `residual_ppo` | 100.0 [100.0, 100.0]; 100.0–100.0 | 100.0 [100.0, 100.0]; 100.0–100.0 | 99.5 [99.5, 99.8]; 99.5–100.0 | 96.2 [95.7, 97.8]; 95.5–98.5 |
+| `ppo_forecast` (feed) | 100.0 [100.0, 100.0]; 100.0–100.0 | 100.0 [100.0, 100.0]; 100.0–100.0 | 100.0 [100.0, 100.0]; 100.0–100.0 | 98.0 [97.5, 98.5]; 97.5–98.5 |
+| `residual_ppo_forecast` (feed) | 100.0 [100.0, 100.0]; 100.0–100.0 | 100.0 [100.0, 100.0]; 100.0–100.0 | 99.5 [99.5, 99.5]; 99.5–99.5 | 96.8 [96.5, 98.0]; 96.5–98.5 |
+| `ppo_sinusoid` (JONSWAP `id`; not H4) | 100.0 [100.0, 100.0]; 100.0–100.0 | 100.0 [100.0, 100.0]; 100.0–100.0 | 100.0 [100.0, 100.0]; 100.0–100.0 | 97.3 [96.7, 97.8]; 96.5–98.0 |
+| `ppo` (carried, e05) | 100.0 [100.0, 100.0]; 100.0–100.0 | 100.0 [100.0, 100.0]; 100.0–100.0 | 100.0 [100.0, 100.0]; 100.0–100.0 | 98.2 [98.0, 98.5]; 98.0–98.5 |
+| `sac` (carried, e05; 2 M steps) | 99.8 [98.8, 100.0]; 98.5–100.0 | 98.2 [96.3, 99.0]; 96.0–99.0 | 87.0 [81.7, 90.3]; 80.0–91.0 | 72.5 [60.2, 79.3]; 55.5–81.5 |
+| `pid_track_descend` | 100.0 [98.1, 100.0] 200 | 96.0 [92.3, 98.0] 192 | 85.0 [79.4, 89.3] 170 | 80.0 [73.9, 85.0] 160 |
+| `pid_feedforward` | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | 99.0 [96.4, 99.7] 198 | 90.5 [85.6, 93.8] 181 |
+| `pid_feedforward_lowvz` | 100.0 [98.1, 100.0] 200 | 98.0 [95.0, 99.2] 196 | 95.5 [91.7, 97.6] 191 | 85.0 [79.4, 89.3] 170 |
+| `pid_feedforward_lowvz_cut` | 100.0 [98.1, 100.0] 200 | 98.5 [95.7, 99.5] 197 | 98.0 [95.0, 99.2] 196 | 88.0 [82.8, 91.8] 176 |
+| `gated` | 100.0 [98.1, 100.0] 200 | 98.5 [95.7, 99.5] 197 | 89.5 [84.5, 93.0] 179 | 63.0 [56.1, 69.4] 126 |
+| `oracle_gated` (privileged; commit-timing oracle) | 100.0 [98.1, 100.0] 200 | 98.5 [95.7, 99.5] 197 | 89.0 [83.9, 92.6] 178 | 64.5 [57.7, 70.8] 129 |
+
+- *Per-seed SS6 counts* (of 200, seeds 0–4; per-seed Wilson CIs are in `success_vs_seastate.md`):
+  - `residual_ppo` 192 / 197 / 193 / 192 / 191;
+  - `ppo_forecast` 196 / 197 / 195 / 195 / 197;
+  - `residual_ppo_forecast` 197 / 193 / 194 / 193 / 194;
+  - `ppo_sinusoid` 196 / 195 / 194 / 195 / 193.
+- *Optimality gap at SS6* (points): `residual_ppo` 3.5 [2.4, 4.2], `ppo_forecast` 2.0 [1.6, 2.4],
+  `residual_ppo_forecast` 2.9 [2.2, 3.4], `ppo_sinusoid` 2.7 [2.3, 3.2].
+- *What the seed CI is.* It reflects seed variation only. Where every seed scores 200/200 it
+  collapses, and the episode-level uncertainty is then each seed's Wilson CI, [98.1, 100.0].
+- **No contrast is tested here.** Every comparison below is an unpaired reading of the tables. H1b
+  (`residual_ppo` vs `pid_feedforward` at SS6), H2 and H3 are Phase 7's paired tests.
+
+**Closing speed** (p95 along the deck normal, m/s model scale). Learned rows show the IQM of the
+per-seed p95s [CI]. These are descriptive, not P3-D1 §4's pooled relative-p95 statistic, and the
+recorded value understates impact speed by about 7 % (P5-D14).
+
+| method | SS3 | SS4 | SS5 | SS6 |
+|---|---|---|---|---|
+| `residual_ppo` | 0.269 [0.267, 0.271] | 0.271 [0.266, 0.273] | 0.277 [0.272, 0.279] | 0.283 [0.281, 0.287] |
+| `ppo_forecast` | 0.268 [0.262, 0.271] | 0.269 [0.264, 0.271] | 0.272 [0.268, 0.275] | 0.281 [0.272, 0.295] |
+| `residual_ppo_forecast` | 0.277 [0.274, 0.281] | 0.279 [0.275, 0.281] | 0.278 [0.276, 0.280] | 0.278 [0.274, 0.280] |
+| `ppo_sinusoid` | 0.274 [0.270, 0.277] | 0.275 [0.271, 0.279] | 0.282 [0.278, 0.285] | 0.288 [0.282, 0.292] |
+| `ppo` | 0.265 [0.263, 0.266] | 0.267 [0.264, 0.270] | 0.271 [0.267, 0.275] | 0.278 [0.274, 0.285] |
+| `sac` | 0.392 [0.369, 0.433] | 0.437 [0.406, 0.478] | 0.595 [0.562, 0.619] | 0.668 [0.590, 0.778] |
+| `pid_feedforward` | 0.219 | 0.226 | 0.262 | 0.264 |
+| `pid_feedforward_lowvz` (H1a reference) | 0.127 | 0.139 | 0.188 | 0.181 |
+| `pid_feedforward_lowvz_cut` | 0.127 | 0.139 | 0.188 | 0.181 |
+| `pid_track_descend` | 0.308 | 0.412 | 0.525 | 0.502 |
+| `gated` | 0.217 | 0.229 | 0.250 | 0.267 |
+| `oracle_gated` (privileged) | 0.220 | 0.236 | 0.252 | 0.254 |
+
+**Outcome breakdown where the new methods lose** (counts per 1 000 seed-episodes; every cell's six
+fractions sum to 1; anything not listed is 0).
+
+| method | SS5 | SS6 | tunnelling > 5 mm (of 4 000) | max depth |
+|---|---|---|---|---|
+| `residual_ppo` | 4 `hard_landing` | 24 `hard_landing`, 11 `bounce` | 7 | 6.17 mm |
+| `ppo_forecast` | 0 | 18 `hard_landing`, 2 `bounce` | 10 | 6.21 mm |
+| `residual_ppo_forecast` | 5 `hard_landing` | 25 `hard_landing`, 4 `bounce` | 3 | 5.65 mm |
+| `ppo_sinusoid` | 0 | 25 `hard_landing`, 2 `bounce` | 11 | 7.12 mm |
+
+- In all 80 new cells there are **0** `crash`, `off_pad` and `timeout`. Detector disagreement is
+  0 / 16 000.
+- *Post hoc.* Every `hard_landing` of the four new methods (and of `ppo`) breaks the 15°
+  relative-tilt limit, not the 0.5 m/s limit; P2-D5 folds tilt into `hard_landing`. The largest
+  closing speed in any of them is 0.390 m/s.
+- Every residual SS5 loss is the same episode, `id` SS5 #45: 9 losses, one per seed except
+  `residual_ppo` seed 4, which lands it. The deck tilt at touchdown is 16.9–21.7° across the 9
+  (`results/audit/e06/hard_landing_tilt.csv`). `pid_feedforward` loses it too. *(Corrected at
+  the Gate 6 review, P6-D6.)*
+
+**Seed-to-seed spread** (`seeds.csv`; sample SD, ddof = 1).
+- Success SD is 0.0 points at SS3–SS4 for all four new methods.
+- At SS5 it is 0.22 for `residual_ppo` and 0.0 for the others.
+- At SS6: `residual_ppo` 1.17, `ppo_forecast` 0.50, `residual_ppo_forecast` 0.82,
+  `ppo_sinusoid` 0.57 (for comparison, `ppo` 0.27 and `sac` 9.65).
+- p95 SD is 0.002–0.005 m/s, except `ppo_forecast` at SS6 with 0.012 (per-seed 0.271–0.295).
+- No seed is an outlier.
+
+**Readings.** These are unpaired and untested, and are reported, not acted on.
+1. **At SS6, every seed of all four new methods (95.5–98.5 %) is above `pid_feedforward`'s single
+   run** (90.5 % [85.6, 93.8]). Its Wilson upper bound is below every new-method seed's point
+   estimate, but the episode-level CIs overlap: the lowest seed, 191/200, has Wilson [91.7, 97.6].
+   The seed-bootstrap CI leaves out episode uncertainty. H1b is Phase 7's paired test. Every
+   RL-vs-PID gap carries two facts from the Phase 6 "Before you start" note (c):
+   - the learned methods land with a two-phase descent that the PID tuning space cannot express;
+   - 11 of `pid_feedforward`'s 19 SS6 losses are `bounce`, a class driven by the 50 ms grace rule
+     (P5-D1). The new methods' SS6 bounces are 2–11 per 1 000.
+2. **None of the four is above `ppo`.** At SS6, the seed-bootstrap CIs of `residual_ppo` and
+   `ppo_sinusoid` lie wholly below `ppo`'s, and `ppo_forecast`'s overlaps it. Phase 7 tests these
+   contrasts.
+3. **The residual policies no longer behave like their base.**
+   - Median time to touchdown is 1.94–2.01 s, against 4.4–4.6 s for `pid_feedforward`.
+   - p50 closing speed is 0.247–0.263 m/s, against about 0.19 m/s.
+   - Their p95 is above `pid_feedforward`'s in every cell, and well above the H1a reference
+     `pid_feedforward_lowvz` (0.188 m/s at SS5).
+   - H1a is scored only in Phase 7, but this table gives no sign of the ≥ 15 % reduction H1a
+     predicts. The post-contact throttle-cut confound is checked per residual seed in P6-D5.
+4. **`ppo_sinusoid` on JONSWAP `id` is within about 1 point of `ppo`** (100 % at SS3–SS5, 97.3 % at
+   SS6). Training on sinusoids alone shows no visible penalty on this list. That is not H4, which
+   compares *drops* across both test motions in Phase 7, but it bears on it. **It already
+   bounds H4 at its pre-registered cell: see P6-D6.**
+5. **The forecast block brings no visible gain.** `ppo_forecast` matches `ppo` (both 100 % at
+   SS5; 98.0 vs 98.2 at SS6), and its p95 is the same to within 0.003 m/s. Both P6-D1 caveats
+   apply. H3 is Phase 7's.
+6. **Tunnelling.** `ppo_sinusoid`'s 7.12 mm maximum is just above the 7.03 mm `lowvz_cut` reference
+   that P5-D14 used as a limit. Its rates are 0.075–0.28 % of 4 000. The mechanism is in P6-D5.
+
+*Artifacts, in `results/e06/` (SHA-256).*
+
+| file | SHA-256 |
+|---|---|
+| `episodes.csv` (16 000 rows) | `eb832a557691f920d24fd5cde407df5ca35162f941ac705d1bcf76545803f358` |
+| `summary.csv` (80 rows) | `7aa5c49b4e692432462cd53417bc9563f1fdefb9279fae969b2b26d13b5310a3` |
+| `seeds.csv` (16 rows) | `02e816c7bc4e334ae7823e8662f583d51a303425b055f4479b8dda2fef56dc16` |
+| `aggregate.csv` (48 rows) | `6974e3896efe504fabc3553510afa123d49c731d8dd3bd33ed285e9bbe550d79` |
+| `success_vs_seastate.md` | `8d6ff5721a8bed2de1440da023023820e460f6a4051fb9f953ac167888200cdb` |
+| `carried_summary_e01.csv` | `27da5b6f8db170cbcb0c794c039113018d82242b2beb9470a8149f8823b2d277` |
+| `carried_summary_e01_lowvz_cut.csv` | `39101ccbf2df946ac838bb635f3e295d58d1008ef175987d4301f25cdcda9594` |
+| `carried_learned_summary_e05.csv` | `a2a0f50f77012a4488c6c28939a170725ed95453d2a9589f10612a7a1d6192f2` |
+| `carried_learned_seeds_e05.csv` | `cf61ce010b08535fabe96996cd5e8259ac04578cbf4bc95c8fcfe6a7883c1613` |
+| `carried_learned_aggregate_e05.csv` | `ded3cdd53290d025f60c81a029d8545dcaf6d99babe204dd03d842acfa2874b9` |
+
+`run_info.json` holds the non-deterministic facts and is not hashed here. No hypothesis is scored,
+and P3-D1 is unchanged.
+
+### P6-D5 — Reward-hacking audit of the twenty final Phase 6 runs (2026-10-01)
+
+*Pre-statement, now provable.* The checks and thresholds were committed alone in
+`results/audit/e06/README.md` at **`f66bca6`, 2026-10-01 14:44:22 EDT**. The first audit CSV was
+written at 15:11 EDT.
+- The thresholds are P5-D14's, unchanged, plus Phase 6 checks 1b-fine, 9 and 10 and the
+  per-seed reporting of check 6.
+- The README was only appended to afterwards (+328 lines, 0 removed; +339 / −0 from `f66bca6` after the P6-D6 errata).
+- One slip is recorded in the README's own post-run section: its header reads "written 14:39–15:10
+  EDT", and the 15:10 was an estimate typed before the commit.
+- This closes P5-D14's gap, where the timestamp was only the agent's own record.
+
+*Scope and reproduction.*
+- `python scripts/reward_hacking_audit.py --phase 6 --out-dir results/audit/e06 --scratch-dir <dir>
+  --workers 24`, at `1d57571`.
+- **2 340 of 2 340 re-flights reproduce their committed e06 row** through committed code. They
+  cover:
+  - 2 200 sampled flights: 2 000 learned (25 per SS per run) plus 200 baseline
+    (`pid_feedforward` 100, `pid_feedforward_lowvz_cut` 100; `reflight_counts.csv`);
+  - every tunnelled episode and every hard landing;
+  - 1 053 forecast-run flights on the runner's past-only feed.
+- This also closes P6-D4's provenance gap.
+- A second run with different worker and chunk settings gave 28 of 28 byte-identical CSVs.
+- The Phase 5 audit, re-run into scratch after the code change, is 16 of 16 byte-identical. The
+  committed `results/audit/*` did not change.
+
+*Verdicts* (`verdicts.csv`), in the order `residual_ppo` / `ppo_forecast` / `residual_ppo_forecast` / `ppo_sinusoid`:
+
+| check | `residual_ppo` | `ppo_forecast` | `residual_ppo_forecast` | `ppo_sinusoid` |
+|---|---|---|---|---|
+| 1a training timeouts, final 10 % | clean (0.000) | clean (0.000) | clean (0.000) | clean (0.000) |
+| 1b training timeouts, 10 bins | clean (0.000) | clean (0.091) | clean (0.000) | clean (0.059) |
+| 1b-fine, 1 % bins, bin 0 | clean (0.000) | **finding** (0.901) | clean (0.000) | **finding** (0.908) |
+| 1b-fine, bins 1–99 | clean | **finding** (seed 2: 0.785 at 200–300 k) | clean | clean (0.430) |
+| 1c e06 timeouts | clean (0) | clean (0) | clean (0) | clean (0) |
+| 2a tunnelling rate; max depth (limit `lowvz_cut` 0.75 %, 7.03 mm) | clean (0.175 %; 6.17 mm) | clean (0.25 %; 6.21 mm) | clean (0.075 %; 5.65 mm) | **finding** (0.275 %; **7.12 mm**) |
+| 2b mechanism, impact / idle / other | 0 / 1 / 6 | 0 / 7 / 3 | 0 / 2 / 1 | 0 / 8 / 3 |
+| 2c outcome may depend on tunnelling | **finding** (3 of 7) | **finding** (1 of 10) | clean (0 of 3) | **finding** (3 of 11) |
+| 3 detector disagreement | clean (0) | clean (0) | clean (0) | clean (0) |
+| 4 success concentrated in easy start states (48 tests) | clean | clean | clean | clean |
+| 5 pre-contact norm-cap saturation | clean (0.0 %) | clean (3.1 %) | clean (0.0 %) | clean (0.7 %) |
+| 6 post-contact down-force, pooled (idle fraction; median setpoint m/s) | clean (0.055; −0.24) | clean (0.471; −0.33) | clean (0.055; −0.24) | **finding** (0.549; −0.37) |
+| 7 passive, deck-driven landings | clean (1.2 %) | clean (4.0 %) | clean (0.6 %) | clean (3.0 %) |
+| 8 seed outliers | minor | minor | minor | minor |
+| 9 residual authority-limited (π_z at its limit on > 50 % of pre-contact steps) | no (46.5 %) | — | no (45.2 %) | — |
+| 10a forecast block changes the action (> 0.015 m/s median) | — | yes (0.0455 m/s) | yes (0.0269 m/s) | — |
+| 10b forecast block changes outcomes | — | not shown | not shown | — |
+
+*Readings.*
+- **H1a confound, check 6, per residual seed** (`downforce_per_seed.csv`; idle fraction, then median
+  post-contact setpoint in m/s):
+  - `residual_ppo` seeds 0–4: idle 0.115 / 0.036 / 0.064 / 0.048 / 0.014; setpoint −0.29 / −0.22 /
+    −0.19 / −0.29 / −0.21.
+  - `residual_ppo_forecast` seeds 0–4: idle 0.032 / 0.010 / 0.019 / 0.006 / 0.210; setpoint −0.23 /
+    −0.19 / −0.27 / −0.20 / −0.31.
+  - For reference, `pid_feedforward_lowvz_cut` gives 0.948 / −1.50 and the base `pid_feedforward`
+    0.000 / −0.20.
+  - **No residual seed has learned the post-contact throttle cut.**
+  - Their SS6 bounces, 11 and 4 per 1 000, are below `pid_feedforward` (55), `lowvz_cut` (75) and
+    `lowvz` (105). So their low bounce rate is not a throttle-cut effect. This is carried beside
+    H1a, together with the "Before you start" (c) caveat: `bounce` is driven by the 50 ms
+    contact-loss grace rule and is unstable at 240 Hz (P5-D1).
+- **The pure methods repeat `ppo`'s split** (P5-D14): 3 of 5 seeds cut to idle after contact
+  (`ppo_forecast` seeds 0–2; `ppo_sinusoid` seeds 0, 3, 4). Pooled, `ppo_sinusoid` crosses the
+  check-6 threshold.
+- **Hovering.**
+  - The residual methods never time out in training.
+  - The pure methods time out at 0.75–0.91 in their first 100 k steps, as `ppo` did. An untrained
+    policy and a learned trap cannot be told apart there.
+  - `ppo_forecast` seed 2 relapses: training timeouts go 0.75, 0.28, then **0.785 at 200–300 k
+    steps**, then 0.15, then 0 from 400 k on.
+  - No final policy hovers (1c).
+- **The residual uses most of its authority.**
+  - Before contact, |α·π| is 0.41 / 0.36 m/s at the median and 0.70 / 0.71 m/s at most
+    (`residual_ppo` / `residual_ppo_forecast`).
+  - π_z sits at its limit on 46.5 % / 45.2 % of pre-contact steps, just short of the pre-stated
+    50 % mark.
+  - The output clip and the norm cap never bind.
+  - **This is how touchdown fell from 4.57 s to about 1.98 s:**
+    - The residual holds −0.45 m/s through the approach, while the base commands +0.02 to
+      −0.15 m/s.
+    - About 1 s out its own contribution falls to about −0.06 to −0.07 m/s. That is still
+      *downward*, on top of a base command of −0.19 to −0.21 m/s, so the last second is flown
+      at −0.25 to −0.29 m/s (`residual_descent_profile.csv`).
+    - That is `ppo`'s two-phase descent, rebuilt within the residual's bound.
+    - *Post hoc (corrected at the Gate 6 review, P6-D6).* In the last second the residual pushes
+      0.06–0.07 m/s **below** the base. A descent as slow as `pid_feedforward_lowvz`'s 0.111 m/s
+      needed about +0.09 m/s, roughly 20 % of the ±0.45 m/s authority. It was within reach and
+      was not learned; check 9 also finds the residual not authority-limited. An earlier version
+      of this bullet said the authority bound made the H1a reference out of reach. That was
+      wrong.
+- **The forecast block is used, but no change in outcome is shown.**
+  - Replacing the block with its training mean or with zeros moves the executed setpoint by a
+    median 0.045 m/s (`ppo_forecast`) and 0.027 m/s (`residual_ppo_forecast`). That is above the
+    pre-stated 0.015 m/s for every seed.
+  - In 2 000 counterfactual flights, touchdown shifts by about one control step at the median, and
+    the outcome changes once.
+  - The paired success difference is −0.002 [−0.006, 0.000] and 0 [0, 0].
+  - *Limit of the test.* The original sample is 500 of 500 successes, so it could only detect
+    losses.
+- **Tilt-only hard landings.**
+  - All 101 new-method hard landings are tilt-only. So are `ppo`'s 15 and `pid_feedforward`'s 9.
+  - The drone's own tilt is ≤ 5.8° in every one, against a deck tilt of 10.8–21.7°. In 77 of the
+    101 the deck alone exceeds 15°.
+  - All 125 fall on 27 listed episodes.
+  - These are deck-tilt events with a nearly level drone. The frozen relative-tilt criterion
+    (P2-D5) scores them as `hard_landing` for every method alike; it is not a new-method effect.
+- **Tunnelling.**
+  - All 31 tunnelled episodes are **post-contact**, none impact. Maximum depth comes 62–525 ms
+    after contact, at closing speeds of 0.17–0.39 m/s.
+  - 18 happen at idle motors, the P5-D14 mechanism.
+  - 13 happen under low, non-idle thrust (0.44–0.68 of weight). That is `residual_ppo`'s main case,
+    near the end of the 0.5 s dwell.
+  - `ppo_sinusoid`'s 7.12 mm maximum, 0.09 mm over the reference, is seed 2, SS6 #58: idle motors
+    88 ms after contact, in an episode that was already a tilt `hard_landing` at first contact.
+  - **Bound, under P5-D14's rule.** Up to 7 SS6 successes may depend on tunnelling overlap:
+    `residual_ppo` 3, `ppo_forecast` 1 and `ppo_sinusoid` 3, per 1 000 seed-episodes. Their
+    unloaded stretches are 4–33 ms. That is at most 0.3 points of any cell, and no reading in P6-D4
+    changes direction because of it.
+- **Measurement caveats carried** (P5-D14): recorded closing speed is about 7 % below impact speed,
+  and penetration is flagged at any contact substep.
+
+*Code.*
+- `src/rld/rl/audit.py`: an `AuditSpec` with `--phase {5,6}`; the feed for forecast runs; read-only
+  hooks whose recorded base, π and input rebuild the executed action bit for bit or the audit
+  stops; a scratch-only forecast-block replacement.
+- `src/rld/rl/audit_phase6.py` (new).
+- `tests/test_rl_audit_phase6.py` (new, 18 tests). `test_rl_leakage.py` still passes.
+
+*Artifacts (SHA-256).*
+- `results/audit/e06/README.md`: `2b2f8ad33b589fac429cb0d4f7bcdee1e6b4a6816923c186028525511739ee92` after the Gate 6 errata were appended (P6-D6). As first committed in `1d57571` it was `5561232b59bd40aa193787d7ccc1310810cc9c384d5d8f0672491396b45e6a47`.
+- `verdicts.csv`: `dcdbcc9564fc5ae91faac0f9c5bc4003c7caa1da367d2c659f3e007515d81718`.
+- `downforce_per_seed.csv`: `a727be5dbff6c311066f22fc54ba705f228ea43c8b0bb923fe548770adb0e1b2`.
+- `residual_authority.csv`: `5e8c4de7b205da76b3df5d7847a994d2a42650630ae10986629aa0b2c23b8727`.
+- `forecast_dependence.csv`: `25c93ac168a52ce7f38ca0886b4a98f8e7fdee611be11e4175657d3d1d76710f`.
+- `tunnelling_episodes.csv`: `6eea307765581ed6794d68a82acfeffce9155e4ed1962c802ad148f2a3a030b2`.
+- `hard_landing_tilt.csv`: `8470c63cc67bf570e304f4ec5a2f6d3b43d296f3938c863ab710bb374b24207d`.
+- `training_bins_fine.csv`: `9520ed9559cf9ace966ef3b34fef02826199ed88362a8e248186b8baea736e6a`.
+- The remaining 21 CSVs are hashed in the README's post-run section.
+
+### P6-D6 — Gate 6 review fold-in; H4 is bounded at its pre-registered cell (2026-10-01)
+
+*Review.* `results-skeptic` reviewed at `7caa2e6`. There is **no BLOCKING finding**, and no split
+leakage. Two findings are MAJOR and nine MINOR. All are fixed in this commit or recorded below.
+
+**M1. P6-D5 misread the residual's descent (fixed in P6-D5).**
+- P6-D5 said the residual's 0.45 m/s authority made the H1a reference out of reach.
+- `results/audit/e06/residual_descent_profile.csv` shows otherwise. In the last second the residual
+  adds −0.06 to −0.07 m/s to a base command of −0.19 to −0.21 m/s.
+- `lowvz`'s descent needed about +0.09 m/s, which was within authority. Check 9's pre-stated
+  verdict was also "not authority-limited".
+- The bullet is corrected in place and marked.
+
+**M2. H4 is arithmetically bounded at its pre-registered cell (dated note; H4 is NOT changed).**
+- *Definitions.* H4 (P3-D1 §8) is scored at `id` SS5:
+  - drop_sin = success(`ppo_sinusoid` on sinusoid) − success(`ppo_sinusoid` on JONSWAP);
+  - drop_jon = success(`ppo` on JONSWAP) − success(`ppo` on sinusoid);
+  - prediction: drop_sin − drop_jon ≥ 10 points.
+- *What e06 already fixes.* `ppo_sinusoid` on JONSWAP `id` SS5 is 200/200 in all 5 seeds, and so
+  is `ppo` (e05).
+- *The bound.* With x and s the two policies' sinusoid-leg success rates (%):
+  - drop_sin = s − 100 ≤ 0;
+  - drop_jon = 100 − x ≥ 0.
+  - So drop_sin − drop_jon = s + x − 200 ≤ 0, **whatever the Phase 7 sinusoid leg shows**.
+- *What follows.* H4 cannot be supported at `id` SS5. Under D0.4 (plan §0), a sinusoid-trained
+  policy that transfers is reported as the finding, and the novelty claim is withdrawn in the
+  README.
+- *Why it is written down now.* This mirrors P3-D1 §7's H1-ceiling paragraph. It is recorded
+  before any sinusoid-test-motion episode exists.
+- *What is not done.* Nothing is re-scored here. H4 stays as pre-registered, and Phase 7 scores it
+  as written.
+- *If the cell moves.* Scoring H4 at another cell (for example `id` SS6, where `ppo_sinusoid` is
+  97.3 % and `ppo` 98.2 %) or under another statistic would be a **dated deviation**. It is the
+  user's decision, and it must be made before any sinusoid-leg result is read.
+- **User decision (2026-10-01): H4 stays at `id` SS5, as pre-registered.** No deviation is
+  recorded. It was decided before any sinusoid-test-motion episode existed. Phase 7 scores H4 as
+  written. Because the point estimate is bounded at ≤ 0, H4 cannot be "supported". The README
+  withdraws the novelty claim and reports the transfer as the finding. Two triggers are cited:
+  - D0.4: the sinusoid-trained policy transfers, scoring 100 % on JONSWAP `id` SS5;
+  - P3-D1 §8: the CI includes 0.
+  If both sinusoid legs lose heavily, the CI could lie wholly below 0. §8's literal trigger
+  would then not fire, but D0.4's still does, so the outcome is the same either way.
+  *(The second trigger was added at `/phase-gate 6`.)*
+
+**MINOR.**
+1. *The `residual_ppo_forecast` zeroed-residual check is weaker than the gate test.*
+   `tests/test_rl_forecast_obs.py` (2 episodes, rows only) can skip without the forecaster.
+   - It ran with **0 skips** in the reviewer's run and in the Gate 6 `make test`. The suite's
+     single skip is `test_platform.py:191`, P2-D1, by design.
+   - The Gate 6 row records this.
+2. *SS5 #45 sentence in P6-D4.* Corrected in place: 9 losses; `residual_ppo` seed 4 lands it; deck
+   tilt 16.9–21.7°.
+3. *"100 checkpoint files hashed" in P6-D4.* The post-flight digests are committed in
+   `results/e06/summary.csv`; only the pre-flight digests are the agent's own record. The
+   P6-D4 sentence says so. *(This item first claimed that no digest was committed. That was
+   corrected at `/phase-gate 6`.)*
+4. *Stale line in `results/e06/success_vs_seastate.md`* ("Phase 6 methods not audited … no bound
+   exists"). It is superseded by P6-D5, whose tunnelling bound is 3 / 1 / 0 / 3 SS6 successes per
+   1 000. The file is not re-rendered, so its committed hash stands. Phase 7's render carries the
+   bound.
+5. *Grace-rule caveat on the residual bounce comparison.* Added to P6-D5, and appended to
+   `results/audit/e06/README.md` as an erratum.
+6. *"Not supported" used early in the audit README.* An appended erratum reads it as "shows no sign
+   of". The pre-stated section is untouched.
+7. *P6-D4 reading 1 compared a Wilson bound with point estimates.* The episode-level CI overlap is
+   now stated, and H1b is named as Phase 7's paired test.
+8. *The `ppo_sinusoid` learning-curve figure is not labelled as sinusoid motion.* The tune-pool
+   success and closing-speed panels of `results/e06/learning_curves_ppo_sinusoid.png` are on
+   **sinusoid** deck motion (P6-D1, P6-D3). The figure is not regenerated, so its committed hash
+   stands; Phase 9's figures carry the label.
+9. *`src/rld/rl/forecast_obs.py` docstring.* It said "in-sample on the train and tune pools". The
+   DLinear-OLS point forecast, the only part the block reads, is fitted on the **train** pool only
+   (`results/forecast/fit_manifest.json`). So tune-pool evaluations, curriculum promotion included,
+   saw out-of-sample forecasts. The docstring is corrected; this is a docstring-only change.
+   P6-D1's "in-sample during training" stands.
+
+**Notes carried without action.**
+- The gate test uses an untrained network with a zeroed `action_net`. That is equivalent to a
+  zeroed trained residual: zero weight and bias give exactly 0 for any finite input.
+- The audit thresholds were pre-stated after e06's numbers were known. The README says so.
+- The residual's executed exploration std, 0.018, is about 3.3× below `ppo`'s (P6-D1).
+- `ppo_sinusoid`'s amplitudes and periods are *statistics* of the matched JONSWAP realizations, by
+  design. "No JONSWAP motion" means no JONSWAP time series.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|
@@ -3014,3 +3588,4 @@ method alike.*
 | 3 | 2026-09-22 | PASSED (2nd attempt) | First attempt FAILED on the `results-skeptic` review (BLOCKING B1: the restated H1 was beatable by a slower PID; MAJOR M1-M3), before any RL run; remediated with user decisions (P3-D1 revision 1 §9, P3-D3 amendments). Second attempt: `make test lint` green (233 passed, 1 skipped by design, 162 s; ruff + ruff-format + mypy --strict clean). `pid_feedforward` 200/200 on the static pad and 200/200 at `id` SS3 (Wilson [98.1, 100.0] each) against the >= 95 % gate, from `results/e01/episodes.csv` at `d35f224`. Success-vs-sea-state table `results/e01/success_vs_seastate.md` committed: 5 controllers x 14 cells x N = 200, re-renders byte-identically from `summary.csv`; no crash or off_pad anywhere; detector disagreement 5/14000; tunnelling 14 (all `pid_track_descend`, max 6.5 mm). Frozen lists `results/episodes/` committed at `0780aaa`, MANIFEST SHA-256 `e6f30e55e478d39061b94e38de33959ca99b16e8cac38a3bd99b34f6543ad4a2`, `--check` 10/10 OK. P3-D1 FROZEN revision 1, block SHA-256 **`21465588610e65f1d1253bd26e5ce5db1da938889c6042338e1de8d4d99f5ed2`** (from `### P3-D1 — FROZEN` to the line before `### P3-D2`, UTF-8). Second `results-skeptic` review: no BLOCKING; MAJOR-1 (H1 scope) and MINOR 1-9 folded in by P3-D4 errata without touching the frozen block; three items carried to Phase 4 (P3-D4). |
 | 4 | 2026-09-23 | PASSED | Criteria checked against committed artifacts at `eeb87d5` plus the Gate 4 wording fixes. `make test lint` green: 320 passed, 1 skipped by design (P2-D1), 313 s; ruff, ruff-format and mypy --strict clean. `tests/test_deck_forecast.py` and `tests/test_control_gated_forecast.py` 56/56 with **0 skips**, artifacts present (a fresh clone without `artifacts/dmf/` would skip parity, so this run is the evidence). **Parity:** `results/forecast/parity.csv`, 18 gated checks over 6 model dirs, all pass at `1e-4·max(1,|y|)`, worst 0.041× tolerance; bridge-fed parity needs dmf's float32 cast (P4-D3). **Causality:** the feed-clock spy and the future-perturbation bit-identity tests pass. **Leakage:** 729 train / 135 tune forecaster keys vs 1 273 frozen-list realizations, overlap 0 (recomputed independently from `fit_keys.json`). **Frozen-list results:** `gated_forecast` and `gated_forecast_tcn` committed in `results/e02/` beside `gated`, `oracle_gated` and the three PID baselines, 26 cells × 200 each at aft and CG, with `td_in_quiescent_window`, quiet landings per listed episode and Wilson CIs; the static list is not run for feed controllers, reason recorded. Phase 3 aft rows byte-identical to e01 (14 000/14 000). Secondary seed arms in `results/e02_tcn_seeds/` (`12fd9f5`, clean). Oracle relabel done; P4-D5 records the hash. MANIFEST 10/10; P3-D1 block SHA-256 unchanged. **Results-skeptic:** first review MAJOR M1–M5 remediated (P4-D3 wording, P4-D4a erratum, P4-D5, M1 columns, seed arms); second review no BLOCKING and no MAJOR, 6 MINOR wording and provenance errors fixed in P4-D4/P4-D4a. Headline (P4-D4): pre-registered expectation 1 held, 2 600/2 600 aft `gated_forecast` timeouts; forecast gating lowers success against `gated` in 19 (DLinear) and 9 (TCN) of 26 cells, and improves it in none. |
 | 5 | 2026-09-30 | PASSED | Criteria checked against committed artifacts at `b54493d`. `make test lint` green: 462 passed, 1 skipped by design (P2-D1), 368 s; ruff, ruff-format and mypy --strict clean. P3-D1 block SHA-256 unchanged (`21465588…`); MANIFEST `--check` 10/10. **Learning curves** (5 seeds, mean ± SD; `00bff09`): `results/e05/learning_curves_ppo.{png,csv}` (`500e795d0686d04507d452ed07ccd033d908d037c2f3bbc139ddb1d2216c3a45`, `a84124dd35eca77899e26822b3ff7a3b67bcbfea79d7d91199e45245a676ce9c`) and `learning_curves_sac.{png,csv}` (`e9c416e5be4c17eee23fc0d0e7d7dbd7332fd62632ffdb07bb6223e8d1365506`, `cc61fde31be366c14085794ac649097a90aa853e43eeed75295d115d443d394e`); the SD band is not clipped to [0, 1]. **`id` results** (P5-D13, `9707642`): 10 final checkpoints × 800 frozen `id` episodes, aft; IQM success SS3–SS6 PPO 100.0 / 100.0 / 100.0 / 98.2, SAC 99.8 / 98.2 / 87.0 / 72.5, six baselines carried byte-identically beside them; `--check` 4/4 byte-identical. e05 was flown with `src/rld/eval/learned.py` untracked (recorded in `run_info.json`); the audit's 1 248 learned re-flights through committed code reproduce their e05 rows exactly, which covers that provenance gap. **Hacking audit** (P5-D14, `d3af59c`, corrected `b54493d`): findings recorded, not clean — SAC tunnelling 6.6 % (max 15.7 mm, impact-speed driven), SAC pre-contact saturation, post-contact throttle cut in all SAC and 3/5 PPO seeds (H1a confound), and up to 41 SAC / 2 PPO successes that may depend on tunnelling overlap plus a ~7 % closing-speed measurement-instant understatement, both caveated in the e05 table; clean on final-policy hovering, detector disagreement, easy-start exploitation and passive landings; regenerates byte-identically. **Seed spread** (`results/e05/seeds.csv`): PPO success SD 0.0 points at SS3–SS5 and 0.3 at SS6; SAC 0.7 / 1.3 / 4.2 / 9.7 at SS3–SS6 (seed 1 at SS6 55.5 %). No run dropped or resumed; PPO budget rule applied with no cut (P5-D12). **Results-skeptic:** no BLOCKING; MAJOR M1 (overclaim that no success depends on penetration) remediated in `b54493d`; MINOR 1–3 fixed there, 4 and 7 recorded in this row, 5 carried to Phase 6's "Before you start", 6 needs no change. `/phase-gate 5` re-run at `1833810`: `results-skeptic` re-review confirms M1 and minors 1–5, 7 remediated, no BLOCKING or MAJOR; two new MINOR slips fixed in the next commit ("20 of the 41" corrected to 18 SAC unloaded stretches ≥ 25 ms; the overlap bound now also names 1 `pid_feedforward_lowvz_cut` SS6 success). |
+| 6 | 2026-10-01 | PASSED | Criteria checked against committed artifacts at `9f2cf3f` plus this row's commit. `make test lint` green: 515 passed, 1 skipped by design (`test_platform.py:191`, P2-D1), 461 s; ruff, ruff-format and mypy --strict clean. P3-D1 block SHA-256 unchanged (`21465588…`); `make_episodes.py --check` OK on all 5 lists (MANIFEST `e6f30e55…`). **All runs complete** (P6-D3): 20 / 20 `done` (`residual_ppo`, `ppo_forecast`, `residual_ppo_forecast`, `ppo_sinusoid` × seeds 0–4), 10 010 624 steps each, trained at `6cedd5d` with `git_dirty` false, none resumed or dropped; inherited `ppo.yaml` unchanged (P6-D1, pinned by `test_phase6_config_inherits_ppo`); smoke runs were pipeline checks only (P6-D2). Learning curves, 5 seeds mean ± SD, in `results/e06/learning_curves_*` (`7d6fc64`). **`id` results committed** (P6-D4, `0e49f39`): 20 final checkpoints × 800 frozen `id` episodes, aft; IQM success SS3–SS6 `residual_ppo` 100.0 / 100.0 / 99.5 / 96.2, `ppo_forecast` 100.0 / 100.0 / 100.0 / 98.0, `residual_ppo_forecast` 100.0 / 100.0 / 99.5 / 96.8, `ppo_sinusoid` (JONSWAP; not H4) 100.0 / 100.0 / 100.0 / 97.3; `ppo`, `sac` and six baselines carried byte-identically; `--check` byte-identical for e06 and e05. **Zeroed residual reduces to the baseline (test):** `tests/test_rl_residual.py::test_gate_zeroed_residual_is_pid_feedforward` (14 frozen `id` episodes, 2 220 steps; every episode column but `method` identical to `pid_feedforward`, per-step actions bit-identical, training-wrapper path identical) and `tests/test_rl_forecast_obs.py::test_zeroed_residual_forecast_policy_is_pid_feedforward` (`residual_ppo_forecast`, 2 episodes) both **ran and passed, not skipped**, in this gate's `make test` and in a separate targeted run. **Hacking audit** (P6-D5, `1d57571`; thresholds pre-stated and committed alone at `f66bca6` before computation): findings recorded — early-training hovering in the pure methods (1 % bins; `ppo_forecast` seed 2 relapse at 200–300 k), `ppo_sinusoid` tunnelling max 7.12 mm vs 7.03 mm and pooled post-contact idle 0.549, up to 7 SS6 successes that may depend on tunnelling overlap; clean on final-policy hovering, detector disagreement, easy starts, saturation, passive landings; **no residual seed has the post-contact throttle cut** (H1a confound); 2 340 / 2 340 re-flights reproduce e06. **Results-skeptic:** no BLOCKING; MAJOR M1 (P6-D5 authority reading contradicted by the descent profile) corrected in place, MAJOR M2 (H4 arithmetically bounded at `id` SS5) recorded as a dated note with H4 unchanged (P6-D6); 9 MINOR fixed or recorded (P6-D6). Re-review at `9f2cf3f`: all remediated, no new BLOCKING or MAJOR; two new MINOR slips (this row's skip evidence; P6-D5's README line count) fixed in this commit. `/phase-gate 6` re-run at `9b1c322` (after the user's H4 decision): `make test` 515 passed, 1 skipped (P2-D1), 474 s; both zeroed-residual tests 2/2 passed, not skipped; lint clean; P3-D1 `21465588…` and all 5 lists OK; `--check` byte-identical for e06 (6/6) and e05 (4/4). A fresh `results-skeptic` review found no BLOCKING or MAJOR. It also flew the trained `residual_ppo/3` and `residual_ppo_forecast/4` with `action_net` zeroed in memory: 0 differing columns from `pid_feedforward` on 4 `id` episodes each. No sinusoid-test-motion episode exists anywhere. Three MINOR slips were fixed in the next commit: the Phase 7 note's hard-landing sentence is narrowed to the methods P6-D5 covers; the post-flight checkpoint digests are in `results/e06/summary.csv`; P6-D5's 2 200 = 2 000 learned + 200 baseline. Its NOTE was also acted on: both H4 withdrawal triggers are now cited, and the sinusoid test-leg definition, period included, is to be recorded before the first sinusoid flight. |
