@@ -3579,6 +3579,155 @@ leakage. Two findings are MAJOR and nine MINOR. All are fixed in this commit or 
 - `ppo_sinusoid`'s amplitudes and periods are *statistics* of the matched JONSWAP realizations, by
   design. "No JONSWAP motion" means no JONSWAP time series.
 
+## Phase 7
+
+### P7-D1 — Phase 7 arm definitions, fixed before any Phase 7 flight (2026-10-01)
+
+*Status.* This entry is committed **alone**, before any Phase 7 episode is flown. That includes the
+sinusoid test leg, the λ, noise, pad-at-CG and MSS arms, and the first full-matrix episode of a
+learned method outside `id`. It specifies what P3-D1 left open. **It changes no threshold, no
+prediction, no episode list and no success criterion.** The P3-D1 block SHA-256 stays
+`21465588…`. The user's decisions are dated 2026-10-01 and were taken at the Phase 7 plan review.
+
+**1. Sinusoid test motion (the H4 cross).**
+- The test leg is built by `rld.rl.motion.sinusoid_motion`, the training builder, called from the
+  evaluation runner. That makes the training and test definitions one function.
+  - Amplitude per DOF: √2 × the realization's RMS over its whole record, full scale, read from the
+    committed **aft** rows of `results/deck_stats_seeds.csv`.
+  - Period: the realization's peak encounter period.
+  - Phases: one per DOF, drawn U(0, 2π) from the listed **episode seed**.
+- The leg flies the **same committed lists** as JONSWAP. A sinusoid source has the JONSWAP source's
+  window and full-scale lookback, so the start offset and the initial state are the listed ones.
+  The runner's strict start check holds unchanged.
+- Every method flies the leg on all four `id` sea states, aft pad, the three always-printed
+  baselines included. H4 is read at `id` SS5 only. The other cells are descriptive.
+- The two forecast methods receive a past-only feed of the **sinusoid** ship motion. That is the
+  motion they would sense.
+
+**2. Estimators that P3-D1 §8 names but does not fully specify.**
+- *Success of a learned method in a cell.* The rliable IQM over the 5 seeds of each seed's success
+  rate. A deterministic baseline has one run, so its value is its success rate.
+- *H2.* drop(m) = IQM success at `id` SS5 − IQM success at `unseen_seastate` SS6. Each replicate:
+  - resamples seeds per method (shared across a method's two cells, since a seed is one policy);
+  - resamples episodes **independently in each cell**, because the two cells are different
+    episodes.
+
+  The statistic is drop(`ppo`) − drop(`residual_ppo`).
+- *H4.* Both test motions fly the same episode list. So each replicate resamples seeds per method,
+  then **one** set of episode indices, shared by both motions and both methods. The statistic is
+  drop_sin − drop_jon.
+- *All contrasts.* 10 000 replicates, bootstrap seed 20260926, percentile 95 % CI. "Separates"
+  means the CI excludes 0.
+- *H1a/H3 relative-p95.* As P3-D1 §4 and P3-D4 #6. The P3-D4 #8 timeout-ranked variant is
+  reported beside it as a sensitivity analysis, never scored.
+- *H3, `unseen_vessel` part.* The half-rule is judged on point estimates: r(`unseen_vessel`,
+  SS) ≤ 0.5 · r(`id`, SS), per sea state, with both CIs reported. If r(`id`, SS) ≤ 0, the part is
+  scored "not applicable — no `id` gain to shrink".
+
+**3. λ sensitivity arm.**
+- *Selection rule (user, 2026-10-01).* "The best two methods" means the best **learned** method
+  and the best **classical** (non-privileged) controller. Each is ranked by success at `id` SS6
+  (aft, JONSWAP; IQM for learned methods) in the committed e05, e06, e01 and e01_lowvz_cut tables.
+  Ties go to the lower p95 closing speed, then to the lower method name.
+  - It selects **`ppo`** (IQM 0.9817, against `ppo_forecast` 0.9800) and **`pid_feedforward`**
+    (181/200, against `pid_feedforward_lowvz_cut` 176/200).
+  - These are Phase 5 and 6 numbers. No Phase 7 number exists yet.
+- *λ.* {1/15, 1/40}, against the main matrix at 1/25. This is a sensitivity arm. **The project λ
+  stays 1/25 (P1-D1, P1-D3).** 1/15 is outside the declared ladder. Its SS6 deck-point v_z p99 is
+  reported against the P1-D1 feasibility threshold, for context only.
+- *Flown.* `ppo` × seeds 0–4 and `pid_feedforward`, plus the always-printed `pid_track_descend`
+  and `oracle_gated`. Lists: `id`, `unseen_seastate`, `unseen_heading`, `unseen_vessel`, aft pad.
+  The static list is λ-independent and is not flown.
+- **The episodes at λ ≠ 1/25 are not identical to the listed ones.**
+  - The realization, the episode seed, the initial drone position and the pad are the listed ones.
+    The initial state comes from its own spawned stream, independent of the motion window.
+  - The start offset t0 is **re-drawn by the environment** from the same episode seed, inside the
+    new λ's window. That window does not scale in proportion: the episode is 12 s model at every λ,
+    but the record shrinks by √λ. At 1/40 some listed full-scale offsets fall outside it.
+  - The runner's start check for this arm asserts the realization key, the initial position and
+    the pad, and records t0. It does not compare t0.
+  - Contrasts against λ = 1/25 therefore use the H2-style bootstrap: seeds resampled, episodes
+    resampled **independently** per λ. A per-episode paired difference is never reported for
+    this arm.
+
+**4. Perception stand-in arm.**
+- *Grid.* σ_p ∈ {0, 1, 2, 4} cm × latency ∈ {0, 1, 2} control steps, i.e. {0, 33.3, 66.7} ms
+  model scale. The plan writes the latencies as {0, 33, 66} ms. 1 control step at 30 Hz is 33.3 ms,
+  or 167 ms full scale.
+  - *Configured values.* `PerceptionNoise` quantises latency **down** to whole steps, so a
+    literal 33 ms would be **0** steps, identical to the clean condition. The configured values are
+    therefore **33.4 ms and 66.7 ms**, which quantise to exactly 1 and 2 steps. A unit test asserts
+    the step counts.
+  - *Labels.* Every table states the effective latency in steps and in ms.
+  - *Why recorded now.* The approved Phase 7 plan already read the grid as 0 / 1 / 2 steps. This
+    item records that reading before any flight, so that the quantisation cannot silently drop a
+    condition.
+- *Velocity noise (user: position and velocity).* σ_v = σ_p / τ, with τ = 0.2 s model (1 s full
+  scale), giving σ_v ∈ {0, 0.05, 0.10, 0.20} m/s model scale.
+  - Rationale: a relative-velocity estimate smoothed over about 1 s full scale. It is a stated
+    modelling choice, not a measured estimator.
+  - The SS5 `id` deck v_z std is about 0.36 m/s for comparison (plan D0.1, scouting numbers).
+- *Hold.* 30 Hz, i.e. no hold.
+- *Scope.* Noise and latency apply to the six relative-pad entries only (`configs/env/noise.yaml`).
+  The drone's own state is clean. **The forecast feed of `ppo_forecast` and
+  `residual_ppo_forecast` stays ideal**, and that is stated beside them.
+- *Flown.* Every method (all 6 learned × 5 seeds and the 6 baselines), all four `id` sea states,
+  aft pad, JONSWAP. That is 11 non-clean conditions. The clean (0, 0) condition is the main
+  matrix's rows.
+- *Pairing.* Noise draws from its own spawned child of the episode seed. So t0 and the initial
+  state are the listed ones under every condition, and the strict start check holds. Contrasts
+  against clean are paired over identical episodes.
+
+**5. Pad-at-CG control (D0.5).**
+- Every learned method × seed and `pid_feedforward_lowvz_cut` fly every list with the pad
+  overridden to `cg`. The static list is not flown, because its pad is the CG by construction.
+- The other baselines' CG rows are carried line-for-line from `results/e02/`, which flew them on
+  the identical lists.
+- The start offset and the initial state do not depend on the pad, so the strict check holds.
+- No hypothesis is scored at CG. The arm isolates the dmf roll/pitch-heave phase defect's lever-arm
+  effect (aft − CG, per method and cell), and it is descriptive.
+
+**6. MSS transfer arm (optional; user: run it).**
+- *Records.* Project 4's MSS strip-theory records:
+  - ITTC S-175, SS5 JONSWAP (Hs 3.3 m, Tp 9.7 s, γ 3.3);
+  - headings {180°, 135°} × speeds {0, 6, 12} kn × seeds {0, 1, 2}, i.e. 18 realizations per grid
+    kind;
+  - grid kinds `mss` (primary, MSS spectrum and RAOs) and `corpus` (the attribution control: dmf's
+    own wave field through the MSS transfer function).
+- *Provenance.* MSS upstream is cloned at dmf's pinned SHA
+  `98970f71a21cfe81e7e29abdcc1bb6741789cddc` into `artifacts/mss/upstream/`. That path is
+  gitignored; `third_party/` is never edited. dmf's config is copied to
+  `configs/deck/mss_s175_ss5.yaml` with only `mat_path` changed. The Octave parity check is run
+  and its result recorded.
+- *Motion.* Evaluated **analytically** on the physics grid from the same seeded wave grid as dmf's
+  export. It is never interpolated from the 10 Hz CSV. Its 10 Hz samples are tested equal to the
+  exported records. It is Froude-scaled at λ = 1/25, with the S175 lever arm.
+- *Episodes.* A separate list directory `results/episodes_mss/` with its own MANIFEST.
+  - Committed before any MSS flight.
+  - Regimes `mss_transfer` (grid `mss`) and `mss_transfer_corpus` (grid `corpus`), N = 200 each.
+  - Drawn `balanced_round_robin` over the 18 realizations, generator seed **20261001**.
+  - The frozen `results/episodes/` and its MANIFEST `e6f30e55…` are not touched.
+  - All of these realizations are outside every training distribution: S175 is never trained on.
+- *Flown.* Every method, aft and CG.
+- *Reporting.* The tables sit beside `unseen_vessel` SS5 restricted to the 180° and 135° headings.
+  That comparison is descriptive: the motions are different realizations, and nothing is scored.
+  These are another simulator's trajectories, **not measurements of a real ship**.
+
+**7. H5.** H5 (ORT CPU vs GPU latency) needs Phase 8's ONNX export.
+- *User decision (2026-10-01).* Phase 7 gives H5 a verdict line reading **"pending — scored at
+  Gate 8"**.
+- Gate 7's "H1–H5 scored" is read as H1a, H1b, H2, H3 and H4 scored and H5 explicitly deferred.
+  This is a dated wording deviation, not a change to H5.
+
+**8. Carried into every Phase 7 table and verdict.** These are the Phase 7 "Before you start"
+items (c) of the plan, with no change:
+- the P6-D1 forecast caveats;
+- residual methods descend harder than their base, and no residual seed cuts the throttle (P6-D5);
+- the two-phase descent, the 50 ms bounce grace, the ~7 % closing-speed understatement, and
+  tunnelling counted at any contact substep;
+- P6-D5's tunnelling bound;
+- tilt-only hard landings.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|
