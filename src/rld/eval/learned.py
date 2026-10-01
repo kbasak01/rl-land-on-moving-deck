@@ -1,22 +1,28 @@
 r"""Learned policies on the frozen episode lists: per-seed cells, seed spread, rliable aggregates.
 
-Phase 5's ``results/e05/``: the ``final/`` checkpoint of every training seed of a learned
-method (``ppo``, ``sac``), flown on a committed list through the same chunked, parallel
-runner the classical baselines went through (:func:`rld.eval.runner.run_matrix`), with the
-baselines printed beside them -- **carried** from their committed runs, never re-flown.
+Phase 5's ``results/e05/`` and Phase 6's ``results/e06/``: the ``final/`` checkpoint of every
+training seed of a learned method (``ppo``, ``sac``; ``residual_ppo``, ``ppo_forecast``,
+``residual_ppo_forecast``, ``ppo_sinusoid``), flown on a committed list through the same
+chunked, parallel runner the classical baselines went through
+(:func:`rld.eval.runner.run_matrix`), with the baselines -- and, from e06, the earlier learned
+methods -- printed beside them, **carried** from their committed runs, never re-flown.
 
 What is flown
 -------------
 Each run is a :class:`~rld.eval.runner.PolicySpec` from
 :func:`~rld.eval.runner.callable_spec` with the picklable factory
 ``functools.partial(rld.rl.train.build_policy, run_dir=<run>, ckpt=<ckpt>)``: the batch-1
-:class:`~rld.rl.train.LearnedPolicy`, deterministic actions, ``VecNormalize`` statistics
-frozen (``training=False``, ``norm_reward=False``), never privileged and never given a
-ship-motion feed. The seed label (``run_seed``) is the run's **training seed**, read from
-its ``provenance.json`` and cross-checked against ``status.json``; the method label must be
-the run's own ``method``. A run that is not ``done`` is refused. Every run's config,
-``model.zip``, ``vecnormalize.pkl`` and ``checkpoint.json`` are hashed before the flight and
-again after it; a change aborts before anything is written.
+policy of the run's class (``LearnedPolicy``, ``ResidualPolicy``, ``ForecastPolicy``,
+``ResidualForecastPolicy``; :func:`check_policies` builds each once before the flight and
+checks it), deterministic actions, ``VecNormalize`` statistics frozen (``training=False``,
+``norm_reward=False``), never privileged. A forecast run's spec has ``needs_motion_feed =
+rld.rl.train.run_needs_motion_feed(run_dir)`` = True, so the runner hands it the past-only
+ship-motion feed; no other run gets one. The seed label (``run_seed``) is the run's
+**training seed**, read from its ``provenance.json`` and cross-checked against
+``status.json``; the method label must be the run's own ``method``. A run that is not
+``done`` is refused. Every run's config, ``model.zip``, ``vecnormalize.pkl`` and
+``checkpoint.json`` are hashed before the flight and again after it; a change aborts before
+anything is written.
 
 What is written (``out_dir``)
 -----------------------------
@@ -36,6 +42,11 @@ What is written (``out_dir``)
   (:func:`carry_baselines` checks every line against its source, the source's provenance
   against the live one, that the source flew the identical listed episodes, and that its
   summary is reproduced by re-summarising its own ``episodes.csv``).
+* ``carried_learned_{summary,seeds,aggregate}_<source>.csv`` (``--carry-learned``, e06) --
+  an earlier learned method's lines from an earlier output of this module, copied verbatim
+  and checked by :func:`carry_learned` (identical listed episodes per seed, summary
+  re-derived from the source episodes, seeds and aggregates re-derived byte for byte, source
+  checkpoints unchanged).
 * ``success_vs_seastate.md`` -- rendered from the CSVs above only (:func:`render_learned`);
   :func:`main` ``--render-only`` re-renders it, ``--check`` re-derives every CSV and the
   markdown from ``episodes.csv`` and compares bytes.
@@ -109,15 +120,20 @@ from rld.eval.stats import (
     stratified_bootstrap_ci,
 )
 from rld.provenance import environment_provenance
-from rld.rl.train import build_policy
+from rld.rl.train import build_policy, run_needs_motion_feed
 
 __all__ = [
     "AGGREGATE_COLUMNS",
+    "CARRIED_LEARNED_PREFIX",
     "DEFAULT_CARRY",
+    "EXPECTED_POLICY_CLASS",
     "RUN_COLUMNS",
+    "RUN_POLICY_COLUMNS",
     "LearnedRun",
     "aggregate_rows",
     "carry_baselines",
+    "carry_learned",
+    "check_policies",
     "evaluate_runs",
     "inspect_run",
     "learned_spec",
@@ -145,6 +161,32 @@ RUN_COLUMNS: tuple[str, ...] = (
     "run_vecnormalize_sha256",
     "run_checkpoint_json_sha256",
 )
+
+#: Per-run policy columns of ``summary.csv``, written after :data:`RUN_COLUMNS` since Phase 6
+#: (e06). A summary written before them (e05) has none, and :func:`rederive` reproduces it
+#: with the run columns its own header has. ``eval_deck_motion`` is the deck motion of the
+#: flown list (always dmf JONSWAP here), stated beside ``run_training_motion`` so that a
+#: sinusoid-trained run's row is never read as the H4 sinusoid-test cross.
+RUN_POLICY_COLUMNS: tuple[str, ...] = (
+    "run_policy_class",
+    "run_needs_motion_feed",
+    "run_training_motion",
+    "eval_deck_motion",
+)
+
+#: The deck motion of every committed list's episodes (dmf JONSWAP via the runner).
+EVAL_DECK_MOTION: str = "jonswap"
+
+#: The evaluation policy class each known learned method must build to (checked before the
+#: flight, :func:`check_policies`). A method not listed is checked only for consistency.
+EXPECTED_POLICY_CLASS: dict[str, str] = {
+    "ppo": "LearnedPolicy",
+    "sac": "LearnedPolicy",
+    "ppo_sinusoid": "LearnedPolicy",
+    "residual_ppo": "ResidualPolicy",
+    "ppo_forecast": "ForecastPolicy",
+    "residual_ppo_forecast": "ResidualForecastPolicy",
+}
 
 #: ``aggregate.csv`` columns.
 AGGREGATE_COLUMNS: tuple[str, ...] = (
@@ -219,6 +261,14 @@ class LearnedRun:
         train_git_dirty_paths: Dirty paths when it was trained.
         resumed_from: ``status.json``'s ``resumed_from`` (``None`` for a run never resumed).
         digests: ``{column: SHA-256}`` for :data:`RUN_COLUMNS`' hashed files.
+        needs_motion_feed: Whether the policy consumes the runner's past-only ship-motion
+            feed (:func:`rld.rl.train.run_needs_motion_feed`; the forecast runs).
+        training_motion: The deck-motion model the run trained on (``"jonswap"`` or
+            ``"sinusoid"``), from its ``config.yaml`` (absent means ``"jonswap"``).
+        policy_class: The evaluation policy class name, set by :func:`check_policies` from a
+            policy actually built from the checkpoint (``""`` until then).
+        components: The run's ``provenance.json["components"]`` (residual base config and
+            forecaster digests), as recorded at training.
     """
 
     method: str
@@ -232,6 +282,10 @@ class LearnedRun:
     train_git_dirty_paths: tuple[str, ...]
     resumed_from: str | None
     digests: tuple[tuple[str, str], ...]
+    needs_motion_feed: bool = False
+    training_motion: str = "jonswap"
+    policy_class: str = ""
+    components: tuple[tuple[str, str], ...] = ()
 
     def label_dir(self) -> str:
         """Return the run directory relative to the repository root when inside it."""
@@ -240,7 +294,13 @@ class LearnedRun:
         return str(path.relative_to(root)) if path.is_relative_to(root) else str(path)
 
     def columns(self) -> dict[str, str]:
-        """Return this run's :data:`RUN_COLUMNS` values, as text."""
+        """Return this run's :data:`RUN_COLUMNS` + :data:`RUN_POLICY_COLUMNS` values, as text.
+
+        Raises:
+            ValueError: If the policy class has not been checked (:func:`check_policies`).
+        """
+        if not self.policy_class:
+            raise ValueError(f"{self.method} seed {self.seed}: policy class not checked")
         return {
             "run_dir": self.label_dir(),
             "run_algo": self.algo,
@@ -249,6 +309,10 @@ class LearnedRun:
             "run_ckpt_steps": str(self.ckpt_steps),
             "run_train_git_sha": self.train_git_sha,
             **dict(self.digests),
+            "run_policy_class": self.policy_class,
+            "run_needs_motion_feed": str(self.needs_motion_feed),
+            "run_training_motion": self.training_motion,
+            "eval_deck_motion": EVAL_DECK_MOTION,
         }
 
 
@@ -339,6 +403,11 @@ def inspect_run(method: str, run_dir: Path, ckpt: str = "final") -> LearnedRun:
         train_git_dirty_paths=tuple(str(p) for p in prov.get("git_dirty_paths", [])),
         resumed_from=status.get("resumed_from"),
         digests=digests,
+        needs_motion_feed=run_needs_motion_feed(run_dir),
+        training_motion=str(raw.get("motion") or "jonswap"),
+        components=tuple(
+            (str(k), str(v)) for k, v in sorted((prov.get("components") or {}).items())
+        ),
     )
 
 
@@ -385,20 +454,93 @@ def order_runs(runs: Sequence[LearnedRun]) -> list[LearnedRun]:
 
 
 def learned_spec(run: LearnedRun) -> PolicySpec:
-    """Return the runner spec of one run: the batch-1 ``LearnedPolicy`` of its checkpoint.
+    """Return the runner spec of one run: the batch-1 policy of its checkpoint.
+
+    The policy is whatever :func:`rld.rl.train.build_policy` returns for the run
+    (``LearnedPolicy``, ``ResidualPolicy``, ``ForecastPolicy`` or
+    ``ResidualForecastPolicy``). A forecast run is given the runner's past-only
+    :class:`~rld.deck.forecast.ShipMotionFeed` (``needs_motion_feed`` from
+    :func:`rld.rl.train.run_needs_motion_feed`); the runner refuses a policy whose own flag
+    disagrees. Never privileged.
 
     Args:
         run: The run.
 
     Returns:
-        ``callable_spec(method, partial(build_policy, run_dir=..., ckpt=...), run_seed=seed)``:
-        not privileged, no motion feed.
+        ``callable_spec(method, partial(build_policy, run_dir=..., ckpt=...), run_seed=seed,
+        needs_motion_feed=run_needs_motion_feed(run_dir))``.
+
+    Raises:
+        ValueError: If the run's recorded feed flag differs from the live one.
     """
+    feed = run_needs_motion_feed(run.run_dir)
+    if feed != run.needs_motion_feed:
+        raise ValueError(
+            f"{run.method} seed {run.seed}: needs_motion_feed changed since inspection"
+        )
     return callable_spec(
         run.method,
         functools.partial(build_policy, run_dir=run.run_dir, ckpt=run.ckpt),
         run_seed=run.seed,
+        needs_motion_feed=feed,
     )
+
+
+def check_policies(
+    runs: Sequence[LearnedRun], cfgs: EvalConfigs
+) -> tuple[list[LearnedRun], list[dict[str, Any]]]:
+    """Build every run's evaluation policy once, before the flight, and check what it is.
+
+    Checks, per run: the built class is :data:`EXPECTED_POLICY_CLASS`'s for the method (when
+    the method is listed); its ``needs_motion_feed`` equals
+    :func:`rld.rl.train.run_needs_motion_feed`; it is not privileged; its network input is
+    :func:`rld.rl.train.policy_input_size` (25, or 31 with the forecast block --
+    :func:`~rld.rl.train.build_policy` raises otherwise).
+
+    Args:
+        runs: The runs.
+        cfgs: The committed configs.
+
+    Returns:
+        ``(runs with policy_class set, [per-run facts for run_info.json])``.
+
+    Raises:
+        ValueError: On any mismatch.
+    """
+    import dataclasses
+
+    checked: list[LearnedRun] = []
+    facts: list[dict[str, Any]] = []
+    for run in runs:
+        policy = build_policy(cfgs, run_dir=run.run_dir, ckpt=run.ckpt)
+        name = type(policy).__name__
+        expected = EXPECTED_POLICY_CLASS.get(run.method)
+        if expected is not None and name != expected:
+            raise ValueError(f"{run.method} seed {run.seed}: built {name}, expected {expected}")
+        feed = bool(getattr(policy, "needs_motion_feed", False))
+        if feed != run.needs_motion_feed:
+            raise ValueError(
+                f"{run.method} seed {run.seed}: policy needs_motion_feed={feed}, run says "
+                f"{run.needs_motion_feed}"
+            )
+        if bool(getattr(policy, "privileged", False)):
+            raise ValueError(f"{run.method} seed {run.seed}: a learned policy is never privileged")
+        shape = tuple(int(n) for n in policy.model.observation_space.shape or ())
+        checked.append(dataclasses.replace(run, policy_class=name))
+        facts.append(
+            {
+                "method": run.method,
+                "seed": run.seed,
+                "policy_class": name,
+                "needs_motion_feed": feed,
+                "privileged": False,
+                "policy_input_shape": list(shape),
+                "training_motion": run.training_motion,
+                "eval_deck_motion": EVAL_DECK_MOTION,
+                "components": dict(run.components),
+            }
+        )
+    return checked, facts
 
 
 def evaluate_runs(
@@ -473,22 +615,29 @@ def summarise_learned(
 
     Args:
         rows: Episode rows (in memory or read back as text).
-        run_columns: ``{(method, seed): RUN_COLUMNS values}``.
+        run_columns: ``{(method, seed): run column values}`` -- :data:`RUN_COLUMNS` and, for
+            a summary written since e06, :data:`RUN_POLICY_COLUMNS`; every run must have the
+            same keys, in the same order.
         provenance: Deterministic provenance columns.
 
     Returns:
         ``(records, columns)``: :func:`rld.eval.report.summarise`'s records with the run's
-        :data:`RUN_COLUMNS` inserted before the provenance, and the column order.
+        columns inserted before the provenance, and the column order.
 
     Raises:
         KeyError: If a (method, seed) in the rows has no run columns.
+        ValueError: If the runs' column names differ.
     """
+    names = {tuple(cols) for cols in run_columns.values()}
+    if len(names) > 1:
+        raise ValueError(f"runs disagree on their run columns: {sorted(names)}")
+    run_names = list(next(iter(names))) if names else list(RUN_COLUMNS)
     methods = list(dict.fromkeys(str(r["method"]) for r in rows))
     records = summarise(rows, methods, None, None)
     out: list[dict[str, Any]] = []
     for rec in records:
         out.append({**rec, **run_columns[(str(rec["method"]), int(rec["run_seed"]))], **provenance})
-    return out, summary_columns([*RUN_COLUMNS, *provenance])
+    return out, summary_columns([*run_names, *provenance])
 
 
 def _cells(summary: Sequence[Mapping[str, Any]]) -> dict[tuple[str, str, str, str], list[Any]]:
@@ -853,6 +1002,213 @@ def _rel(path: Path) -> str:
     return str(resolved.relative_to(root)) if resolved.is_relative_to(root) else str(resolved)
 
 
+#: File-name prefixes of a carried learned method's summary, seeds and aggregate lines; the
+#: rest of the stem is the source dir's name (e.g. ``carried_learned_summary_e05.csv``).
+CARRIED_LEARNED_PREFIX: dict[str, str] = {
+    "summary.csv": "carried_learned_summary_",
+    "seeds.csv": "carried_learned_seeds_",
+    "aggregate.csv": "carried_learned_aggregate_",
+}
+
+
+def _carried_learned_sources(out_dir: Path) -> list[str]:
+    """Return the source names of the carried learned files in ``out_dir``, sorted."""
+    prefix = CARRIED_LEARNED_PREFIX["summary.csv"]
+    return sorted(p.stem.removeprefix(prefix) for p in out_dir.glob(f"{prefix}*.csv"))
+
+
+def _carried_learned_path(out_dir: Path, kind: str, source: str) -> Path:
+    """Return the carried learned file of ``kind`` (``summary.csv`` ...) from ``source``."""
+    return out_dir / f"{CARRIED_LEARNED_PREFIX[kind]}{source}.csv"
+
+
+def _rederived_lines(summary: Sequence[Mapping[str, str]], kind: str, header: str) -> list[str]:
+    """Re-derive ``seeds.csv`` / ``aggregate.csv`` lines from summary records under ``header``.
+
+    Args:
+        summary: Summary records (text) of the carried methods.
+        kind: ``"seeds.csv"`` or ``"aggregate.csv"``.
+        header: The source file's header line (its column order is used).
+
+    Returns:
+        The data lines, newline-terminated, as :func:`rld.eval.report.write_rows` writes them.
+    """
+    records = seed_spread(summary)[0] if kind == "seeds.csv" else aggregate_rows(summary)
+    columns = header.rstrip("\n").split(",")
+    text = _csv_text(records, columns)
+    return text.splitlines(keepends=True)[1:]
+
+
+def _recheck_carried_learned(out_dir: Path, source: str) -> dict[str, bool]:
+    """Re-derive a carried learned source's seeds and aggregate lines from its summary lines.
+
+    Returns:
+        ``{carried file name: byte-identical}`` for the seeds and aggregate files.
+    """
+    summary = read_rows(_carried_learned_path(out_dir, "summary.csv", source))
+    out: dict[str, bool] = {}
+    for kind in ("seeds.csv", "aggregate.csv"):
+        path = _carried_learned_path(out_dir, kind, source)
+        lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+        out[path.name] = _rederived_lines(summary, kind, lines[0]) == lines[1:]
+    return out
+
+
+def carry_learned(
+    out_dir: Path,
+    sources: Mapping[Path, Sequence[str]],
+    episodes: Sequence[ListedEpisode],
+    provenance: Mapping[str, str],
+    *,
+    pad: str = "aft",
+    write: bool = True,
+) -> dict[str, Any]:
+    """Copy earlier learned methods' summary, seeds and aggregate lines, verbatim, and verify.
+
+    For each source (an earlier ``rld.eval.learned`` output, e.g. ``results/e05``) the lines of
+    its ``summary.csv``, ``seeds.csv`` and ``aggregate.csv`` whose method is carried, whose pad
+    is ``pad`` and whose (regime, sea state) is one of ``episodes``' cells are copied, under
+    each file's own header, to ``carried_learned_{summary,seeds,aggregate}_<name>.csv``.
+    Nothing is re-flown and nothing is reformatted. Checks, each recorded and each fatal:
+
+    1. every written line is byte-identical to a line of its source file;
+    2. the source summary's run-wide provenance columns equal ``provenance``;
+    3. for every carried (method, seed), the source ``episodes.csv`` rows are exactly the
+       listed episodes, in order;
+    4. re-summarising those source episode rows reproduces every metric column of every
+       carried summary line, as text;
+    5. re-deriving the seed spread and the rliable aggregates from the carried summary lines
+       (:func:`seed_spread`, :func:`aggregate_rows`; same bootstrap seed and replicates)
+       reproduces the carried seeds and aggregate lines byte for byte;
+    6. the source's own ``run_info.json`` recorded a byte-identical re-derivation;
+    7. each carried run's ``model.zip`` / ``vecnormalize.pkl`` / ``checkpoint.json`` /
+       ``config.yaml``, where still on disk, still has the digest in its summary line
+       (recorded per run; a mismatch is fatal, an absent file is recorded as such).
+
+    Args:
+        out_dir: Where to write.
+        sources: ``{source dir: methods}``, in output order.
+        episodes: The listed episodes this run flew.
+        provenance: The live deterministic provenance.
+        pad: The pad of the carried rows (the frozen aft pad).
+        write: Write the files (``False``: check only).
+
+    Returns:
+        ``{source name: {files, source SHA-256s, methods, rows, checks}}``.
+
+    Raises:
+        SystemExit: If a method is missing from a source, or any check fails.
+    """
+    cells = list(dict.fromkeys((e.regime, e.ss) for e in episodes))
+    info: dict[str, Any] = {}
+    for source, methods in sources.items():
+        name = source.name
+
+        def keep(r: Mapping[str, str], methods: Sequence[str] = methods) -> bool:
+            return r["method"] in methods and _pad(r) == pad and (r["regime"], r["ss"]) in cells
+
+        chosen: dict[str, list[str]] = {}
+        source_lines: dict[str, list[str]] = {}
+        for kind in ("summary.csv", "seeds.csv", "aggregate.csv"):
+            path = source / kind
+            lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+            records = read_rows(path)
+            if len(records) != len(lines) - 1:
+                raise SystemExit(f"{path}: a record spans several lines; cannot copy lines")
+            if kind == "summary.csv":
+                missing = sorted(set(methods) - {r["method"] for r in records})
+                if missing:
+                    raise SystemExit(f"{path}: no rows for {missing}")
+                for column, value in provenance.items():
+                    if records[0].get(column) != value:
+                        raise SystemExit(
+                            f"{path}: {column} {records[0].get(column)!r} != live {value!r}"
+                        )
+            chosen[kind] = [lines[0], *(lines[i + 1] for i, r in enumerate(records) if keep(r))]
+            source_lines[kind] = lines
+        summary = [r for r in read_rows(source / "summary.csv") if keep(r)]
+        ep_rows = [r for r in read_rows(source / "episodes.csv") if keep(r)]
+        identical_list: dict[str, bool] = {}
+        resummarised: dict[str, bool] = {}
+        for method in methods:
+            mine = [r for r in ep_rows if r["method"] == method]
+            seeds = list(dict.fromkeys(r["run_seed"] for r in mine))
+            for seed in seeds:
+                seed_rows = [r for r in mine if r["run_seed"] == seed]
+                identical_list[f"{method}/{seed}"] = _source_episodes_match(seed_rows, episodes)
+            recomputed = summarise(mine, [method])
+            source_recs = [r for r in summary if r["method"] == method]
+            resummarised[method] = len(recomputed) == len(source_recs) and all(
+                all(_text(new[c]) == old[c] for c in CELL_METRIC_COLUMNS)
+                for new, old in zip(recomputed, source_recs, strict=True)
+            )
+        rederived = {
+            kind: _rederived_lines(summary, kind, chosen[kind][0]) == chosen[kind][1:]
+            for kind in ("seeds.csv", "aggregate.csv")
+        }
+        source_info_path = source / "run_info.json"
+        source_info = json.loads(source_info_path.read_text(encoding="utf-8"))
+        source_check = source_info.get("rederived_byte_identical", {})
+        source_rederived = bool(source_check) and all(source_check.values())
+        checkpoints: dict[str, str] = {}
+        stale: list[str] = []
+        for rec in summary:
+            run_dir = REPO_ROOT / rec["run_dir"]
+            key = f"{rec['method']}/{rec['run_seed']}"
+            if not (run_dir / "config.yaml").exists():
+                checkpoints[key] = "absent"
+                continue
+            live = dict(_run_digests(run_dir, rec["run_ckpt"]))
+            same = all(live[c] == rec[c] for c in live)
+            checkpoints[key] = "unchanged" if same else "CHANGED"
+            if not same:
+                stale.append(key)
+        checks_ok = (
+            all(identical_list.values())
+            and all(resummarised.values())
+            and all(rederived.values())
+            and source_rederived
+            and not stale
+        )
+        if not checks_ok:
+            raise SystemExit(
+                f"{source}: carried learned rows fail a check: identical list {identical_list}, "
+                f"re-summarised {resummarised}, re-derived {rederived}, source re-derivation "
+                f"{source_rederived}, changed checkpoints {stale}"
+            )
+        files: dict[str, Any] = {}
+        for kind, lines in chosen.items():
+            target = _carried_learned_path(out_dir, kind, name)
+            if write:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text("".join(lines), encoding="utf-8")
+            written = (
+                target.read_text(encoding="utf-8").splitlines(keepends=True) if write else lines
+            )
+            src_set = set(source_lines[kind])
+            files[target.name] = {
+                "source": _rel(source / kind),
+                "source_sha256": _sha256(source / kind),
+                "rows": len(lines) - 1,
+                "lines_byte_identical_to_source": all(line in src_set for line in written)
+                and written == lines,
+            }
+        info[name] = {
+            "files": files,
+            "source_episodes": _rel(source / "episodes.csv"),
+            "source_episodes_sha256": _sha256(source / "episodes.csv"),
+            "source_run_info_rederived_byte_identical": source_rederived,
+            "methods": list(methods),
+            "provenance_equal_to_live": True,
+            "source_flew_identical_listed_episodes": identical_list,
+            "source_summary_reproduced_from_its_episodes": resummarised,
+            "seeds_and_aggregate_rederived_from_carried_summary": rederived,
+            "source_checkpoints_vs_summary_digests": checkpoints,
+            "note": "copied from the source run, not re-flown",
+        }
+    return info
+
+
 # --------------------------------------------------------------------------- write
 
 
@@ -907,10 +1263,10 @@ def rederive(out_dir: Path, title: str) -> dict[str, bool]:
     committed = read_rows(out_dir / "summary.csv")
     header = (out_dir / "summary.csv").read_text(encoding="utf-8").splitlines()[0].split(",")
     extra = header[header.index(RUN_COLUMNS[0]) :]
-    run_cols = {
-        (r["method"], int(r["run_seed"])): {c: r[c] for c in RUN_COLUMNS} for r in committed
-    }
-    prov = {c: committed[0][c] for c in extra if c not in RUN_COLUMNS}
+    known = (*RUN_COLUMNS, *RUN_POLICY_COLUMNS)
+    run_names = [c for c in extra if c in known]
+    run_cols = {(r["method"], int(r["run_seed"])): {c: r[c] for c in run_names} for r in committed}
+    prov = {c: committed[0][c] for c in extra if c not in run_names}
     summary, columns = summarise_learned(rows, run_cols, prov)
     spread, spread_cols = seed_spread(summary)
     scratch: dict[str, str] = {}
@@ -923,6 +1279,8 @@ def rederive(out_dir: Path, title: str) -> dict[str, bool]:
     result = {
         name: text == (out_dir / name).read_text(encoding="utf-8") for name, text in scratch.items()
     }
+    for source in _carried_learned_sources(out_dir):
+        result.update(_recheck_carried_learned(out_dir, source))
     result[MARKDOWN_NAME] = render_learned(out_dir, title) == (out_dir / MARKDOWN_NAME).read_text(
         encoding="utf-8"
     )
@@ -983,62 +1341,61 @@ def _carried(out_dir: Path) -> list[tuple[str, dict[str, str]]]:
     return sorted(found, key=rank)
 
 
-def _learned_label(method: str, recs: Sequence[Mapping[str, str]]) -> str:
-    """Return a learned method's label with its budget, read from the summary."""
+def _learned_label(
+    method: str, recs: Sequence[Mapping[str, str]], carried_from: str | None = None
+) -> str:
+    """Return a learned method's label with its budget, read from the summary.
+
+    A row with :data:`RUN_POLICY_COLUMNS` (e06 on) also names its policy class, a motion feed,
+    a sinusoid training motion (flown on JONSWAP: not the H4 cross), and a carried source.
+    """
     budgets = sorted({int(r["run_total_steps"]) for r in recs})
     text = " / ".join(_steps(str(b)) for b in budgets)
-    return f"{method} (learned; {text} env steps per seed)"
+    extras: list[str] = []
+    first = recs[0] if recs else {}
+    if first.get("run_policy_class"):
+        extras.append(f"`{first['run_policy_class']}`")
+    if first.get("run_needs_motion_feed") == "True":
+        extras.append("+ past-only ship-motion feed (extra ideal sensor)")
+    motion = first.get("run_training_motion")
+    if motion and motion != first.get("eval_deck_motion"):
+        extras.append(
+            f"trained on {motion} motion only, flown on {first.get('eval_deck_motion')} `id`: "
+            "Gate 6 result, not the H4 cross"
+        )
+    if carried_from is not None:
+        extras.append(f"carried from `results/{carried_from}`")
+    tail = "".join(f"; {e}" for e in extras)
+    return f"{method} (learned; {text} env steps per seed{tail})"
 
 
-def _baseline_label(method: str, privileged: bool, source: str) -> str:
-    """Return a carried baseline's label: registry label, 'carried', its source."""
-    return f"{method_label(method, privileged)} [baseline, carried from `results/{source}`]"
+def _carried_learned(
+    out_dir: Path,
+) -> tuple[list[dict[str, str]], list[dict[str, str]], list[dict[str, str]], dict[str, str]]:
+    """Return the carried learned summary, seeds and aggregate records and ``{method: source}``."""
+    summary: list[dict[str, str]] = []
+    spread: list[dict[str, str]] = []
+    agg: list[dict[str, str]] = []
+    source_of: dict[str, str] = {}
+    for source in _carried_learned_sources(out_dir):
+        recs = read_rows(_carried_learned_path(out_dir, "summary.csv", source))
+        summary += recs
+        spread += read_rows(_carried_learned_path(out_dir, "seeds.csv", source))
+        agg += read_rows(_carried_learned_path(out_dir, "aggregate.csv", source))
+        for rec in recs:
+            source_of.setdefault(rec["method"], source)
+    return summary, spread, agg, source_of
 
 
-def render_learned(out_dir: Path, title: str) -> str:
-    """Render ``success_vs_seastate.md`` from the CSVs in ``out_dir`` and nothing else.
-
-    Reads ``summary.csv``, ``seeds.csv``, ``aggregate.csv`` and every
-    ``carried_summary_*.csv``. Sections: caveats and notes; the headline success table per
-    sea state (every learned seed with its Wilson CI and k/N, the IQM row with its
-    stratified-bootstrap CI, the seed range, then each carried baseline); the aggregates;
-    the seed-to-seed spread; the full outcome breakdown and touchdown audit for every
-    (method, seed, sea state) including the baselines; termination-reason counts.
-
-    Args:
-        out_dir: The directory holding the CSVs.
-        title: The document title.
-
-    Returns:
-        The markdown text.
-
-    Raises:
-        ValueError: If the text contains a forbidden phrase (P3-D4).
-    """
-    summary = read_rows(out_dir / "summary.csv")
-    spread = read_rows(out_dir / "seeds.csv")
-    agg = read_rows(out_dir / "aggregate.csv")
-    carried = _carried(out_dir)
-    methods = list(dict.fromkeys(r["method"] for r in summary))
-    regimes = list(dict.fromkeys(r["regime"] for r in summary))
-    pads = list(dict.fromkeys(r["pad"] for r in summary))
-    base_methods = list(dict.fromkeys(r["method"] for _, r in carried))
-    by_method = {m: [r for r in summary if r["method"] == m] for m in methods}
-    agg_by = {
-        (r["method"], r["pad"], r["regime"], r["ss"], r["metric"], r["statistic"]): r for r in agg
-    }
-    spread_by = {(r["method"], r["pad"], r["regime"], r["ss"]): r for r in spread}
-    carried_by = {(r["method"], _pad(r), r["regime"], r["ss"]): (s, r) for s, r in carried}
-
-    lines: list[str] = [f"# {title}", ""]
-    lines += [f"- {c}" for c in CAVEATS]
+def _notes_e05(by_method: Mapping[str, Sequence[Mapping[str, str]]]) -> list[str]:
+    """Return the header notes of a Phase 5 (e05) rendering, unchanged since e05."""
     budgets = "; ".join(
         f"`{m}` {' / '.join(_steps(b) for b in sorted({r['run_total_steps'] for r in recs}))} "
         f"env steps per seed (checkpoint `{recs[0]['run_ckpt']}`, "
         f"{' / '.join(_steps(s) for s in sorted({r['run_ckpt_steps'] for r in recs}))} steps)"
         for m, recs in by_method.items()
     )
-    lines += [
+    return [
         "- Success = all four frozen criteria (`configs/env/success.yaml`); rates in %, "
         "Wilson 95 % CI in brackets, then k/N. Success is never pooled across sea states.",
         "- Learned rows: each training seed's checkpoint flown as the batch-1 `LearnedPolicy` "
@@ -1078,6 +1435,173 @@ def render_learned(out_dir: Path, title: str) -> str:
         "`carried_summary_*.csv` by `rld.eval.learned`; do not edit by hand.",
         "",
     ]
+
+
+def _notes_phase6(
+    by_method: Mapping[str, Sequence[Mapping[str, str]]], source_of: Mapping[str, str]
+) -> list[str]:
+    """Return the header notes of a rendering with Phase 6 policy columns or carried learners."""
+    budgets = "; ".join(
+        f"`{m}` {' / '.join(_steps(b) for b in sorted({r['run_total_steps'] for r in recs}))} "
+        f"env steps per seed (checkpoint `{recs[0]['run_ckpt']}`, "
+        f"{' / '.join(_steps(s) for s in sorted({r['run_ckpt_steps'] for r in recs}))} steps)"
+        for m, recs in by_method.items()
+    )
+    classes = "; ".join(
+        f"`{m}` → `{recs[0].get('run_policy_class') or 'LearnedPolicy'}`"
+        for m, recs in by_method.items()
+    )
+    feed = [m for m, recs in by_method.items() if recs[0].get("run_needs_motion_feed") == "True"]
+    residual = [
+        m for m, recs in by_method.items() if "Residual" in (recs[0].get("run_policy_class") or "")
+    ]
+    other_motion = [
+        (m, recs[0]["run_training_motion"])
+        for m, recs in by_method.items()
+        if recs[0].get("run_training_motion")
+        and recs[0]["run_training_motion"] != recs[0].get("eval_deck_motion")
+    ]
+    sources = sorted(set(source_of.values()))
+    lines = [
+        "- Success = all four frozen criteria (`configs/env/success.yaml`); rates in %, "
+        "Wilson 95 % CI in brackets, then k/N. Success is never pooled across sea states.",
+        "- Learned rows: each training seed's checkpoint flown as the batch-1 policy "
+        "`rld.rl.train.build_policy` returns for the run (deterministic action, `VecNormalize` "
+        "statistics frozen, not privileged) on the identical listed episodes. `seed` is the "
+        f"training seed. Policy classes: {classes}.",
+    ]
+    if feed:
+        names = ", ".join(f"`{m}`" for m in feed)
+        lines.append(
+            f"- **Ship-motion feed** ({names}): the runner hands these policies a past-only "
+            "`ShipMotionFeed` advanced to the control time, and the policy runs its own dmf "
+            "`residual_interval` (DLinear-OLS) forecaster on it; the 6-entry forecast block "
+            "(pad z and v_z at 1 / 2 / 3 s full scale = 0.2 / 0.4 / 0.6 s model) is appended "
+            "to the 25-entry observation. **P6-D1 caveats:** (1) the forecaster was fitted on "
+            "the P3-D2 development pool (P4-D1), so its forecasts were **in-sample during "
+            "training** and are out-of-sample on this list; the policy may trust them more "
+            "than their test-time accuracy warrants. (2) The feed is an **extra ideal "
+            "ship-motion sensor** that the other learned methods do not have (P4-D3), so a "
+            "forecast versus no-forecast reading compares sensor suites as well as "
+            "information about the future."
+        )
+    if residual:
+        names = ", ".join(f"`{m}`" for m in residual)
+        lines.append(
+            f"- Residual methods ({names}) execute clip(a_pid_feedforward(o) + 0.3 · π(o), "
+            "−1, 1), then the env's norm cap (α = 0.3 normalised = 0.45 m/s model scale); "
+            "the base is `pid_feedforward` with its committed config, reset every episode "
+            "(P6-D1)."
+        )
+    for method, motion in other_motion:
+        lines.append(
+            f"- **`{method}` rows are NOT the H4 cross.** `{method}` trained on {motion} deck "
+            "motion only (`run_training_motion`); here it is flown on the frozen JONSWAP `id` "
+            "list (`eval_deck_motion`), which is its Gate 6 `id` result. The sinusoid-test "
+            "arm of H4 is Phase 7 and is not in this file. Its `in-dist` column refers to "
+            "realization keys (its sinusoids were matched to development-pool realizations), "
+            "not to the motion it saw."
+        )
+    lines += [
+        f"- **Unequal training budgets:** {budgets}. P3-D1 §5 sets them so; every "
+        "reading against `sac` carries that confound.",
+        "- `IQM` is rliable's interquartile mean of the per-seed success rates of the cell "
+        "(with 5 seeds, the mean of the middle 3); its CI is the stratified bootstrap of "
+        "P3-D1 §4 (2 000 replicates, seed 20260926, seeds resampled within the cell, cells "
+        "never resampled). One cell is one task: nothing is pooled across sea states. "
+        "That CI reflects seed-to-seed variation only, not episode sampling: when every seed "
+        "scores the same it collapses to a point (e.g. [100.0, 100.0]), and each seed's Wilson "
+        "CI is then the episode-level uncertainty.",
+    ]
+    if sources:
+        carried = "; ".join(
+            ", ".join(f"`{m}`" for m, s in source_of.items() if s == src) + f" from `results/{src}`"
+            for src in sources
+        )
+        lines.append(
+            f"- Earlier learned methods are **carried, not re-flown** ({carried}): line-for-line "
+            "copies of that run's `summary.csv`, `seeds.csv` and `aggregate.csv` lines "
+            "(`carried_learned_*.csv`), checked against its `episodes.csv` (identical listed "
+            "episodes per seed, summary re-derived) and with seeds/aggregates re-derived byte "
+            "for byte. They were flown at the commit in that run's `run_info.json`."
+        )
+    lines += [
+        "- Baselines are **carried, not re-run**: their rows are line-for-line copies of the "
+        "committed summaries named in each label (`carried_summary_*.csv`). They are "
+        "deterministic and have one run (`seed` `–`).",
+        "- **`id` SS6 is outside every method's training distribution**: no learned method "
+        "trained on SS6 (curriculum SS3 → SS5) and the baselines were tuned on SS3–SS5; the "
+        "`in-dist` column is 0.000 there. At SS3–SS5, `in-dist` < 1 because 90 deg-heading "
+        "episodes are outside the development pool (P3-D2).",
+        "- `oracle_gated` is privileged: it reads the true future deck motion. It is a "
+        "commit-timing oracle, not a bound on success, and never a deployable result.",
+        "- **Measurement caveats (P5-D14; `results/audit/`)**, both frozen definitions applied "
+        "to every method alike. (1) The recorded closing speed is read after the first contact "
+        "substep's solver impulse, about 7 % below the speed one substep earlier (median ratio "
+        "0.92–0.94 for every method P5-D14 measured), so every closing speed here, p95 "
+        "included, understates impact speed by about that much. (2) Penetration is flagged at "
+        "any contact substep (the code), not only at first contact as `success.yaml`'s comment "
+        "says; `tunnel` counts follow the code. P5-D14 found that up to 41 `sac` successes "
+        "(1 / 3 / 13 / 24 at SS3–SS6, per 1 000 seed-episodes), 2 `ppo` successes (SS6) and "
+        "1 `pid_feedforward_lowvz_cut` success (SS6) may depend on the overlap. The methods "
+        "flown in this file have not been audited for it, so no such bound exists for them.",
+        "- No hypothesis (H1–H5) is scored here and no method contrast is tested; the spread "
+        "and aggregates are descriptive, and any comparison between rows is an unpaired "
+        "reading of the tables.",
+        "- Rendered from `summary.csv`, `seeds.csv`, `aggregate.csv`, `carried_summary_*.csv`"
+        + (" and `carried_learned_*.csv`" if sources else "")
+        + " by `rld.eval.learned`; do not edit by hand.",
+        "",
+    ]
+    return lines
+
+
+def _baseline_label(method: str, privileged: bool, source: str) -> str:
+    """Return a carried baseline's label: registry label, 'carried', its source."""
+    return f"{method_label(method, privileged)} [baseline, carried from `results/{source}`]"
+
+
+def render_learned(out_dir: Path, title: str) -> str:
+    """Render ``success_vs_seastate.md`` from the CSVs in ``out_dir`` and nothing else.
+
+    Reads ``summary.csv``, ``seeds.csv``, ``aggregate.csv`` and every
+    ``carried_summary_*.csv``. Sections: caveats and notes; the headline success table per
+    sea state (every learned seed with its Wilson CI and k/N, the IQM row with its
+    stratified-bootstrap CI, the seed range, then each carried baseline); the aggregates;
+    the seed-to-seed spread; the full outcome breakdown and touchdown audit for every
+    (method, seed, sea state) including the baselines; termination-reason counts.
+
+    Args:
+        out_dir: The directory holding the CSVs.
+        title: The document title.
+
+    Returns:
+        The markdown text.
+
+    Raises:
+        ValueError: If the text contains a forbidden phrase (P3-D4).
+    """
+    own_summary = read_rows(out_dir / "summary.csv")
+    c_summary, c_spread, c_agg, source_of = _carried_learned(out_dir)
+    phase6 = bool(source_of) or "run_policy_class" in own_summary[0]
+    summary = own_summary + c_summary
+    spread = read_rows(out_dir / "seeds.csv") + c_spread
+    agg = read_rows(out_dir / "aggregate.csv") + c_agg
+    carried = _carried(out_dir)
+    methods = list(dict.fromkeys(r["method"] for r in summary))
+    regimes = list(dict.fromkeys(r["regime"] for r in summary))
+    pads = list(dict.fromkeys(r["pad"] for r in summary))
+    base_methods = list(dict.fromkeys(r["method"] for _, r in carried))
+    by_method = {m: [r for r in summary if r["method"] == m] for m in methods}
+    agg_by = {
+        (r["method"], r["pad"], r["regime"], r["ss"], r["metric"], r["statistic"]): r for r in agg
+    }
+    spread_by = {(r["method"], r["pad"], r["regime"], r["ss"]): r for r in spread}
+    carried_by = {(r["method"], _pad(r), r["regime"], r["ss"]): (s, r) for s, r in carried}
+
+    lines: list[str] = [f"# {title}", ""]
+    lines += [f"- {c}" for c in CAVEATS]
+    lines += _notes_phase6(by_method, source_of) if phase6 else _notes_e05(by_method)
     for pad in pads:
         for regime in regimes:
             sea_states = list(
@@ -1089,7 +1613,7 @@ def render_learned(out_dir: Path, title: str) -> str:
             lines += ["|---|---|" + "---|" * len(sea_states)]
             for method in methods:
                 recs = [r for r in by_method[method] if r["regime"] == regime and r["pad"] == pad]
-                label = _learned_label(method, recs)
+                label = _learned_label(method, recs, source_of.get(method))
                 by_ss_seed = {(r["ss"], r["run_seed"]): r for r in recs}
                 seeds = list(dict.fromkeys(r["run_seed"] for r in recs))
                 cells = []
@@ -1167,7 +1691,8 @@ def render_learned(out_dir: Path, title: str) -> str:
             seed_cols = sorted(
                 {
                     c.removeprefix("success_rate_seed")
-                    for c in spread[0]
+                    for rec in spread
+                    for c in rec
                     if c.startswith("success_rate_seed")
                 },
                 key=int,
@@ -1187,10 +1712,10 @@ def render_learned(out_dir: Path, title: str) -> str:
                         lines.append(f"| {method} | {ss} | missing |||||||||| ")
                         continue
                     by_seed = " / ".join(
-                        _pct(as_float(s[f"success_rate_seed{k}"])) for k in seed_cols
+                        _pct(as_float(s.get(f"success_rate_seed{k}", "nan"))) for k in seed_cols
                     )
                     p95s = " / ".join(
-                        _num(as_float(s[f"{P95_COLUMN}_seed{k}"]), 3) for k in seed_cols
+                        _num(as_float(s.get(f"{P95_COLUMN}_seed{k}", "nan")), 3) for k in seed_cols
                     )
                     lines.append(
                         f"| {method} | {ss} | {by_seed} | {_pct(as_float(s['success_min']))} | "
@@ -1312,6 +1837,34 @@ DEFAULT_TITLE = (
 )
 
 
+def _parse_carry_learned(items: Sequence[str] | None) -> dict[Path, tuple[str, ...]]:
+    """Parse ``SOURCE_DIR=METHOD[,METHOD...]`` for earlier learned methods; ``None``: none."""
+    out: dict[Path, tuple[str, ...]] = {}
+    for item in items or ():
+        src, sep, methods = item.partition("=")
+        names = tuple(m for m in methods.split(",") if m)
+        if not sep or not names:
+            raise SystemExit(f"--carry-learned {item!r}: expected SOURCE_DIR=METHOD[,METHOD...]")
+        out[Path(src).resolve()] = names
+    return out
+
+
+def _title(out_dir: Path, given: str | None) -> str:
+    """Return ``given``, else the title of an existing markdown in ``out_dir``, else the default.
+
+    ``--render-only`` and ``--check`` thereby reproduce a file under the title it was written
+    with, without retyping it.
+    """
+    if given is not None:
+        return given
+    path = out_dir / MARKDOWN_NAME
+    if path.exists():
+        first = path.read_text(encoding="utf-8").split("\n", 1)[0]
+        if first.startswith("# "):
+            return first[2:]
+    return DEFAULT_TITLE
+
+
 def _parse_carry(items: Sequence[str] | None) -> dict[Path, tuple[str, ...]]:
     """Parse ``SOURCE_DIR=METHOD[,METHOD...]``; ``None`` gives :data:`DEFAULT_CARRY`."""
     if items is None:
@@ -1347,7 +1900,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="SOURCE_DIR=METHOD[,METHOD...]",
         help="baselines to carry (default: results/e01 five, results/e01_lowvz_cut lowvz_cut)",
     )
-    parser.add_argument("--title", default=DEFAULT_TITLE)
+    parser.add_argument(
+        "--carry-learned",
+        nargs="+",
+        default=None,
+        metavar="SOURCE_DIR=METHOD[,METHOD...]",
+        help="earlier learned methods to carry from an rld.eval.learned output (default none)",
+    )
+    parser.add_argument(
+        "--title",
+        default=None,
+        help="markdown title (default: the existing markdown's, else the e05 title)",
+    )
     parser.add_argument("--render-only", action="store_true", help="re-render the markdown")
     parser.add_argument(
         "--check",
@@ -1383,6 +1947,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     args = parse_args(argv)
     out_dir: Path = args.out_dir
+    if args.render_only or args.check:
+        args.title = _title(out_dir, args.title)
+    elif args.title is None:
+        args.title = DEFAULT_TITLE
     if args.render_only:
         (out_dir / MARKDOWN_NAME).write_text(render_learned(out_dir, args.title), encoding="utf-8")
         return 0
@@ -1417,13 +1985,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         [inspect_run(name, path, args.ckpt) for name, paths in learned for path in paths]
     )
     cfgs = load_eval_configs()
+    runs, policy_facts = check_policies(runs, cfgs)
     provenance = live_provenance(cfgs, args.episodes_dir)
     carry = _parse_carry(args.carry)
+    carry_learn = _parse_carry_learned(args.carry_learned)
+    flown_methods = {r.method for r in runs}
+    for methods in carry_learn.values():
+        if flown_methods & set(methods):
+            raise SystemExit(f"--carry-learned: {sorted(flown_methods & set(methods))} also flown")
     carry_baselines(out_dir, carry, episodes, provenance, write=False)
+    carry_learned(out_dir, carry_learn, episodes, provenance, write=False)
     for run in runs:
         print(
             f"{run.method} seed {run.seed}: {run.label_dir()} ckpt {run.ckpt} "
-            f"({run.ckpt_steps} steps), trained at {run.train_git_sha[:7]}",
+            f"({run.ckpt_steps} steps), trained at {run.train_git_sha[:7]}, "
+            f"{run.policy_class}, feed={run.needs_motion_feed}, motion={run.training_motion}",
             flush=True,
         )
     print(f"flying {len(runs)} runs x {len(episodes)} episodes, {args.workers} workers", flush=True)
@@ -1439,9 +2015,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     # 4. Write.
     out_dir.mkdir(parents=True, exist_ok=True)
     carried = carry_baselines(out_dir, carry, episodes, provenance)
+    carried_learned = carry_learned(out_dir, carry_learn, episodes, provenance)
     hashes = write_learned(out_dir, rows, runs, provenance, args.title)
     for name in (f"{CARRIED_PREFIX}{src.name}.csv" for src in carry):
         hashes[name] = _sha256(out_dir / name)
+    for src in carry_learn:
+        for kind in CARRIED_LEARNED_PREFIX:
+            path = _carried_learned_path(out_dir, kind, src.name)
+            hashes[path.name] = _sha256(path)
     check = rederive(out_dir, args.title)
     env = environment_provenance(REPO_ROOT)
     run_info = {
@@ -1476,14 +2057,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "train_git_dirty_paths": list(r.train_git_dirty_paths),
                 "resumed_from": r.resumed_from,
                 **dict(r.digests),
+                "policy_class": r.policy_class,
+                "needs_motion_feed": r.needs_motion_feed,
+                "training_motion": r.training_motion,
+                "components": dict(r.components),
             }
             for r in runs
         ],
+        "policy_check": policy_facts,
         "policy_path": (
             "rld.eval.runner.callable_spec(method, functools.partial("
-            "rld.rl.train.build_policy, run_dir=<run>, ckpt=<ckpt>), run_seed=<training seed>)"
+            "rld.rl.train.build_policy, run_dir=<run>, ckpt=<ckpt>), run_seed=<training seed>, "
+            "needs_motion_feed=rld.rl.train.run_needs_motion_feed(<run>))"
         ),
+        "title": args.title,
         "carried": carried,
+        "carried_learned": carried_learned,
         "rederived_byte_identical": check,
         "files_sha256": hashes,
         "bootstrap": {"reps": STRATIFIED_REPS, "seed": DEFAULT_BOOTSTRAP_SEED},
