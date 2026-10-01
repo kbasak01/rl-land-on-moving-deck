@@ -545,13 +545,16 @@ baseline when the residual is zeroed (test).
 - `ppo_sinusoid` and `ppo` are both 200/200 on JONSWAP `id` SS5 in every seed. So at `id` SS5,
   drop_sin − drop_jon ≤ 0 whatever the sinusoid leg shows, and H4 cannot be supported there.
 - **User decision (2026-10-01, P6-D6): H4 stays at `id` SS5 as pre-registered.** Score it as
-  written. The novelty claim is withdrawn in the README (D0.4), and the transfer is reported as
-  the finding. The H4 cross is still flown in full and reported.
+  written. The novelty claim is withdrawn in the README (D0.4; also P3-D1 §8 if the CI includes
+  0), and the transfer is reported as the finding. The H4 cross is still flown in full and reported.
 
 (b) **Evaluation-side work this phase needs.**
 - *Sinusoid test motion.* `rld.eval.envs.motion_for` builds only JONSWAP and static motion. The H4
-  cross needs a sinusoid test leg on the same lists: per-episode phases from the episode seed and
-  committed RMS, matching `rld.rl.motion`.
+  cross needs a sinusoid test leg on the same lists, matching `rld.rl.motion`:
+  - amplitudes √2 × the committed RMS;
+  - the realization's peak encounter period;
+  - per-episode phases from the episode seed.
+  Record this definition in `docs/protocol.md` **before the first sinusoid flight**.
 - *Feed methods.* `ppo_forecast` and `residual_ppo_forecast` need the runner's ship-motion feed.
   `rld.eval.learned` already passes it (P6-D4). The static list cannot feed them.
 - *Relative-p95.* The paired relative-p95 statistic (P3-D1 §4) is not implemented yet.
@@ -565,7 +568,9 @@ baseline when the residual is zeroed (test).
   bounce-grace rule, the ~7 % closing-speed understatement, and tunnelling counted at any contact
   substep.
 - P6-D5's tunnelling bound: 3 / 1 / 0 / 3 SS6 successes per 1 000.
-- All hard landings in e06 are deck-tilt events (P6-D5).
+- All hard landings of the four Phase 6 methods, `ppo` and `pid_feedforward` in e06 are
+  deck-tilt events (P6-D5). `sac`'s and `pid_track_descend`'s are mostly speed-driven: 352 of
+  378 and 27 of 33 exceed 0.5 m/s.
 
 (d) **λ sensitivity runs on "the best two methods".** Fix the rule that picks them (metric, cell,
 tie-break) in `docs/protocol.md` before reading any Phase 7 number.
