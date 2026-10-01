@@ -3141,6 +3141,211 @@ so 4 runs at once):
 
 That is 20 runs × 10 M steps, about 20–25 h. The sweep IDs are in `artifacts/runs/_sweeps/`.
 
+### P6-D3 — Phase 6 sweeps complete; learning curves (2026-10-01)
+
+*Runs.* All 20 runs are `done`:
+- `artifacts/runs/{residual_ppo,ppo_forecast,residual_ppo_forecast,ppo_sinusoid}/{0..4}`, 10 010 624
+  steps each;
+- every one trained at `6cedd5d` with `git_dirty` false, and `resumed_from` null for all;
+- no run failed, stalled or was dropped.
+
+The sweep ran from 2026-09-30 17:56 to 2026-10-01 15:26 UTC, about 21.5 h, with 4 runs at a time.
+
+| method | wall per seed | fps |
+|---|---|---|
+| `residual_ppo` | 3.23–3.28 h | 847–861 |
+| `ppo_forecast` | 5.52–5.67 h | 491–504 |
+| `residual_ppo_forecast` | 5.28–5.39 h | 516–526 |
+| `ppo_sinusoid` | 2.15–2.54 h | 1 095–1 291 |
+
+- The forecaster's per-step cost (P6-D1) makes the forecast runs about 1.7× slower.
+- `ppo_sinusoid` seeds 3–4 ran with fewer neighbours, which is why they were faster.
+
+*Curriculum.* Every run reached SS5.
+- SS4 at 0.4 M steps and SS5 at 0.8 M steps, except `ppo_forecast` seeds 2–3 and `ppo_sinusoid`
+  seed 4, which promoted at 0.6 M and 1.0 M.
+- The early fall in the residual methods' training return (about 40.5 → 38.9 over the first 3 M
+  steps) begins at these promotions: harder sea states give lower returns. Return then recovers
+  to about 39.6.
+
+*Learning curves* (`results/e06/`, 5 seeds, mean ± SD with ddof = 1, from
+`scripts/export_learning_curves.py`; SHA-256):
+
+| file | SHA-256 |
+|---|---|
+| `learning_curves_residual_ppo.csv` / `.png` | `ba279218163ac6b5708fca680496423023a62fdea005d5f0f5f8c1c46dd438ca` / `e08536585710dcc0ae0df1a6cbfe9da1076baca624a60bf62e8b7aeaae95875a` |
+| `learning_curves_ppo_forecast.csv` / `.png` | `1721dcc620f2be5b905d0b7c46d1df5cdb9422985a266109a44951b9e6cc19ac` / `4041bfc366067200050172b84578d1a10bf72a30b469a118a785d815c38e1dbd` |
+| `learning_curves_residual_ppo_forecast.csv` / `.png` | `0bb8291f63017d34158cd89e85df7a39ccbc21d37cb1b8cd46be694d2fd7bf82` / `2320b07de377e11a5fdc4daff7e68e9c0644c2261382119fc85ffbada44f605c` |
+| `learning_curves_ppo_sinusoid.csv` / `.png` | `06f7e5397c78f1a6b969cf5e43f7e4d5282b2961fcf5b4548e4c075e787c54d5` / `480ec2e484ba287bb29af6d580835abaddbf41ee9044b7d8189cf20e3e17c354` |
+
+Tune-pool readings, which are not results:
+- the residual methods stay at about 1.000 tune success throughout;
+- `ppo_forecast` reaches about 1.0 by about 1 M steps;
+- the final evals are 0.994–1.000 for every run;
+- `ppo_sinusoid`'s curve is on **sinusoid** motion (P6-D1).
+
+### P6-D4 — Phase 6 final checkpoints on the frozen id list: e06 (2026-10-01)
+
+*What was flown.* The `final/` checkpoint of each of the 20 Phase 6 runs on `results/episodes/id.parquet`
+(SS3–SS6, N = 200 per cell, aft pad): **16 000 episodes**, none skipped.
+- The path is the same as P5-D13: `rld.eval.learned`, chunked `run_matrix`, chunk 25, 24 workers,
+  OMP/MKL = 1. The flight took 403.9 s.
+- `make_episodes.py --check` ran first: 10/10 OK, MANIFEST `e6f30e55…`, `id` file `919be99d…`,
+  content `ea38d8a5…`.
+- *Policy path.* `build_policy` returns `ResidualPolicy` (`residual_ppo`), `ForecastPolicy`
+  (`ppo_forecast`), `ResidualForecastPolicy` (`residual_ppo_forecast`) or `LearnedPolicy`
+  (`ppo_sinusoid`).
+  - Every policy is deterministic, with `VecNormalize` frozen, and none is privileged.
+  - The two forecast methods receive the runner's past-only `ShipMotionFeed`
+    (`needs_motion_feed` from `run_needs_motion_feed`).
+  - A pre-flight `check_policies` asserts class, feed flag, privilege and input size (25 or 31).
+- **`ppo_sinusoid` flies JONSWAP here.** These rows are its Gate 6 `id` result, **not** the H4
+  cross, which is Phase 7.
+- *Command.* `python -m rld.eval.learned --learned residual_ppo=…/0,…,4 ppo_forecast=…
+  residual_ppo_forecast=… ppo_sinusoid=… --ckpt final --list id --out-dir results/e06 --workers 24
+  --carry-learned results/e05=ppo,sac`.
+
+*Provenance.*
+- HEAD `7d6fc64`, `git_dirty` true. The dirty paths are only the eval-side `src/rld/eval/learned.py`
+  and `tests/test_eval_learned.py`, committed unchanged right after as `0e49f39`. This is the same
+  gap as P5-D13, and the audit's re-flights through committed code close it (P6-D5).
+- 100 checkpoint files were hashed before and after the flight and did not change: the 20 runs'
+  `model.zip`, `vecnormalize.pkl`, `checkpoint.json` and `config.yaml`, plus the 10 Phase 5
+  checkpoints.
+- **Carried rows.**
+  - The six baselines come from e01 and e01_lowvz_cut, line for line, as in P5-D13.
+  - `ppo` and `sac` come from e05 (`carried_learned_{summary,seeds,aggregate}_e05.csv`).
+  - Every carried line is byte-identical to its source, and the sources flew the identical
+    episodes.
+  - Re-summarising the source episodes reproduces the source summaries.
+  - e05 `--check` is still byte-identical after the eval-side change.
+  - As a scratch check, 80 e05 rows re-flown with today's code are 80/80 byte-identical.
+- **`--check`** (re-run by the main thread): `summary.csv`, `seeds.csv`, `aggregate.csv`, both
+  carried-learned derived files and `success_vs_seastate.md` are all byte-identical.
+
+**Headline: `id`, aft pad, success per sea state.**
+- Learned rows show the rliable IQM across 5 seeds (%), with the stratified-bootstrap 95 % CI
+  (P3-D1 §4: 2 000 replicates, seed 20260926), then the per-seed range.
+- Baselines show % [Wilson 95 % CI] k/200.
+- Success is not pooled across sea states.
+- SS6 is outside every method's training distribution.
+
+| method | SS3 | SS4 | SS5 | SS6 (out of distribution) |
+|---|---|---|---|---|
+| `residual_ppo` | 100.0 [100.0, 100.0]; 100.0–100.0 | 100.0 [100.0, 100.0]; 100.0–100.0 | 99.5 [99.5, 99.8]; 99.5–100.0 | 96.2 [95.7, 97.8]; 95.5–98.5 |
+| `ppo_forecast` (feed) | 100.0 [100.0, 100.0]; 100.0–100.0 | 100.0 [100.0, 100.0]; 100.0–100.0 | 100.0 [100.0, 100.0]; 100.0–100.0 | 98.0 [97.5, 98.5]; 97.5–98.5 |
+| `residual_ppo_forecast` (feed) | 100.0 [100.0, 100.0]; 100.0–100.0 | 100.0 [100.0, 100.0]; 100.0–100.0 | 99.5 [99.5, 99.5]; 99.5–99.5 | 96.8 [96.5, 98.0]; 96.5–98.5 |
+| `ppo_sinusoid` (JONSWAP `id`; not H4) | 100.0 [100.0, 100.0]; 100.0–100.0 | 100.0 [100.0, 100.0]; 100.0–100.0 | 100.0 [100.0, 100.0]; 100.0–100.0 | 97.3 [96.7, 97.8]; 96.5–98.0 |
+| `ppo` (carried, e05) | 100.0 [100.0, 100.0]; 100.0–100.0 | 100.0 [100.0, 100.0]; 100.0–100.0 | 100.0 [100.0, 100.0]; 100.0–100.0 | 98.2 [98.0, 98.5]; 98.0–98.5 |
+| `sac` (carried, e05; 2 M steps) | 99.8 [98.8, 100.0]; 98.5–100.0 | 98.2 [96.3, 99.0]; 96.0–99.0 | 87.0 [81.7, 90.3]; 80.0–91.0 | 72.5 [60.2, 79.3]; 55.5–81.5 |
+| `pid_track_descend` | 100.0 [98.1, 100.0] 200 | 96.0 [92.3, 98.0] 192 | 85.0 [79.4, 89.3] 170 | 80.0 [73.9, 85.0] 160 |
+| `pid_feedforward` | 100.0 [98.1, 100.0] 200 | 100.0 [98.1, 100.0] 200 | 99.0 [96.4, 99.7] 198 | 90.5 [85.6, 93.8] 181 |
+| `pid_feedforward_lowvz` | 100.0 [98.1, 100.0] 200 | 98.0 [95.0, 99.2] 196 | 95.5 [91.7, 97.6] 191 | 85.0 [79.4, 89.3] 170 |
+| `pid_feedforward_lowvz_cut` | 100.0 [98.1, 100.0] 200 | 98.5 [95.7, 99.5] 197 | 98.0 [95.0, 99.2] 196 | 88.0 [82.8, 91.8] 176 |
+| `gated` | 100.0 [98.1, 100.0] 200 | 98.5 [95.7, 99.5] 197 | 89.5 [84.5, 93.0] 179 | 63.0 [56.1, 69.4] 126 |
+| `oracle_gated` (privileged; commit-timing oracle) | 100.0 [98.1, 100.0] 200 | 98.5 [95.7, 99.5] 197 | 89.0 [83.9, 92.6] 178 | 64.5 [57.7, 70.8] 129 |
+
+- *Per-seed SS6 counts* (of 200, seeds 0–4; per-seed Wilson CIs are in `success_vs_seastate.md`):
+  - `residual_ppo` 192 / 197 / 193 / 192 / 191;
+  - `ppo_forecast` 196 / 197 / 195 / 195 / 197;
+  - `residual_ppo_forecast` 197 / 193 / 194 / 193 / 194;
+  - `ppo_sinusoid` 196 / 195 / 194 / 195 / 193.
+- *Optimality gap at SS6* (points): `residual_ppo` 3.5 [2.4, 4.2], `ppo_forecast` 2.0 [1.6, 2.4],
+  `residual_ppo_forecast` 2.9 [2.2, 3.4], `ppo_sinusoid` 2.7 [2.3, 3.2].
+- *What the seed CI is.* It reflects seed variation only. Where every seed scores 200/200 it
+  collapses, and the episode-level uncertainty is then each seed's Wilson CI, [98.1, 100.0].
+- **No contrast is tested here.** Every comparison below is an unpaired reading of the tables. H1b
+  (`residual_ppo` vs `pid_feedforward` at SS6), H2 and H3 are Phase 7's paired tests.
+
+**Closing speed** (p95 along the deck normal, m/s model scale). Learned rows show the IQM of the
+per-seed p95s [CI]. These are descriptive, not P3-D1 §4's pooled relative-p95 statistic, and the
+recorded value understates impact speed by about 7 % (P5-D14).
+
+| method | SS3 | SS4 | SS5 | SS6 |
+|---|---|---|---|---|
+| `residual_ppo` | 0.269 [0.267, 0.271] | 0.271 [0.266, 0.273] | 0.277 [0.272, 0.279] | 0.283 [0.281, 0.287] |
+| `ppo_forecast` | 0.268 [0.262, 0.271] | 0.269 [0.264, 0.271] | 0.272 [0.268, 0.275] | 0.281 [0.272, 0.295] |
+| `residual_ppo_forecast` | 0.277 [0.274, 0.281] | 0.279 [0.275, 0.281] | 0.278 [0.276, 0.280] | 0.278 [0.274, 0.280] |
+| `ppo_sinusoid` | 0.274 [0.270, 0.277] | 0.275 [0.271, 0.279] | 0.282 [0.278, 0.285] | 0.288 [0.282, 0.292] |
+| `ppo` | 0.265 [0.263, 0.266] | 0.267 [0.264, 0.270] | 0.271 [0.267, 0.275] | 0.278 [0.274, 0.285] |
+| `sac` | 0.392 [0.369, 0.433] | 0.437 [0.406, 0.478] | 0.595 [0.562, 0.619] | 0.668 [0.590, 0.778] |
+| `pid_feedforward` | 0.219 | 0.226 | 0.262 | 0.264 |
+| `pid_feedforward_lowvz` (H1a reference) | 0.127 | 0.139 | 0.188 | 0.181 |
+| `pid_feedforward_lowvz_cut` | 0.127 | 0.139 | 0.188 | 0.181 |
+| `pid_track_descend` | 0.308 | 0.412 | 0.525 | 0.502 |
+| `gated` | 0.217 | 0.229 | 0.250 | 0.267 |
+| `oracle_gated` (privileged) | 0.220 | 0.236 | 0.252 | 0.254 |
+
+**Outcome breakdown where the new methods lose** (counts per 1 000 seed-episodes; every cell's six
+fractions sum to 1; anything not listed is 0).
+
+| method | SS5 | SS6 | tunnelling > 5 mm (of 4 000) | max depth |
+|---|---|---|---|---|
+| `residual_ppo` | 4 `hard_landing` | 24 `hard_landing`, 11 `bounce` | 7 | 6.17 mm |
+| `ppo_forecast` | 0 | 18 `hard_landing`, 2 `bounce` | 10 | 6.21 mm |
+| `residual_ppo_forecast` | 5 `hard_landing` | 25 `hard_landing`, 4 `bounce` | 3 | 5.65 mm |
+| `ppo_sinusoid` | 0 | 25 `hard_landing`, 2 `bounce` | 11 | 7.12 mm |
+
+- In all 80 new cells there are **0** `crash`, `off_pad` and `timeout`. Detector disagreement is
+  0 / 16 000.
+- *Post hoc.* Every `hard_landing` of the four new methods (and of `ppo`) breaks the 15°
+  relative-tilt limit, not the 0.5 m/s limit; P2-D5 folds tilt into `hard_landing`. The largest
+  closing speed in any of them is 0.390 m/s.
+- Both residual methods lose exactly one SS5 episode, the same one: `id` SS5 #45, with the deck at
+  20.4° at touchdown. `pid_feedforward` loses it too.
+
+**Seed-to-seed spread** (`seeds.csv`; sample SD, ddof = 1).
+- Success SD is 0.0 points at SS3–SS4 for all four new methods.
+- At SS5 it is 0.22 for `residual_ppo` and 0.0 for the others.
+- At SS6: `residual_ppo` 1.17, `ppo_forecast` 0.50, `residual_ppo_forecast` 0.82,
+  `ppo_sinusoid` 0.57 (for comparison, `ppo` 0.27 and `sac` 9.65).
+- p95 SD is 0.002–0.005 m/s, except `ppo_forecast` at SS6 with 0.012 (per-seed 0.271–0.295).
+- No seed is an outlier.
+
+**Readings.** These are unpaired and untested, and are reported, not acted on.
+1. **At SS6, every seed of all four new methods (95.5–98.5 %) is above `pid_feedforward`'s single
+   run** (90.5 % [85.6, 93.8]); its Wilson upper bound is below every new-method seed. Every
+   RL-vs-PID gap carries two facts from the Phase 6 "Before you start" note (c):
+   - the learned methods land with a two-phase descent that the PID tuning space cannot express;
+   - 11 of `pid_feedforward`'s 19 SS6 losses are `bounce`, a class driven by the 50 ms grace rule
+     (P5-D1). The new methods' SS6 bounces are 2–11 per 1 000.
+2. **None of the four is above `ppo`.** At SS6, the seed-bootstrap CIs of `residual_ppo` and
+   `ppo_sinusoid` lie wholly below `ppo`'s, and `ppo_forecast`'s overlaps it. Phase 7 tests these
+   contrasts.
+3. **The residual policies no longer behave like their base.**
+   - Median time to touchdown is 1.94–2.01 s, against 4.4–4.6 s for `pid_feedforward`.
+   - p50 closing speed is 0.247–0.263 m/s, against about 0.19 m/s.
+   - Their p95 is above `pid_feedforward`'s in every cell, and well above the H1a reference
+     `pid_feedforward_lowvz` (0.188 m/s at SS5).
+   - H1a is scored only in Phase 7, but this table gives no sign of the ≥ 15 % reduction H1a
+     predicts. The post-contact throttle-cut confound is checked per residual seed in P6-D5.
+4. **`ppo_sinusoid` on JONSWAP `id` is within about 1 point of `ppo`** (100 % at SS3–SS5, 97.3 % at
+   SS6). Training on sinusoids alone shows no visible penalty on this list. That is not H4, which
+   compares *drops* across both test motions in Phase 7, but it bears on it.
+5. **The forecast block brings no visible gain.** `ppo_forecast` matches `ppo` (both 100 % at
+   SS5; 98.0 vs 98.2 at SS6), and its p95 is the same to within 0.003 m/s. Both P6-D1 caveats
+   apply. H3 is Phase 7's.
+6. **Tunnelling.** `ppo_sinusoid`'s 7.12 mm maximum is just above the 7.03 mm `lowvz_cut` reference
+   that P5-D14 used as a limit. Its rates are 0.075–0.28 % of 4 000. The mechanism is in P6-D5.
+
+*Artifacts, in `results/e06/` (SHA-256).*
+
+| file | SHA-256 |
+|---|---|
+| `episodes.csv` (16 000 rows) | `eb832a557691f920d24fd5cde407df5ca35162f941ac705d1bcf76545803f358` |
+| `summary.csv` (80 rows) | `7aa5c49b4e692432462cd53417bc9563f1fdefb9279fae969b2b26d13b5310a3` |
+| `seeds.csv` (16 rows) | `02e816c7bc4e334ae7823e8662f583d51a303425b055f4479b8dda2fef56dc16` |
+| `aggregate.csv` (48 rows) | `6974e3896efe504fabc3553510afa123d49c731d8dd3bd33ed285e9bbe550d79` |
+| `success_vs_seastate.md` | `8d6ff5721a8bed2de1440da023023820e460f6a4051fb9f953ac167888200cdb` |
+| `carried_summary_e01.csv` | `27da5b6f8db170cbcb0c794c039113018d82242b2beb9470a8149f8823b2d277` |
+| `carried_summary_e01_lowvz_cut.csv` | `39101ccbf2df946ac838bb635f3e295d58d1008ef175987d4301f25cdcda9594` |
+| `carried_learned_summary_e05.csv` | `a2a0f50f77012a4488c6c28939a170725ed95453d2a9589f10612a7a1d6192f2` |
+| `carried_learned_seeds_e05.csv` | `cf61ce010b08535fabe96996cd5e8259ac04578cbf4bc95c8fcfe6a7883c1613` |
+| `carried_learned_aggregate_e05.csv` | `ded3cdd53290d025f60c81a029d8545dcaf6d99babe204dd03d842acfa2874b9` |
+
+`run_info.json` holds the non-deterministic facts and is not hashed here. No hypothesis is scored,
+and P3-D1 is unchanged.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|
