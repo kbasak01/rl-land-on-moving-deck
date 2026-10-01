@@ -40,7 +40,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 import numpy as np
 import pybullet as pyb
@@ -51,7 +51,7 @@ from rld.envs.landing_env import ACTION_DIM, DeckLandingAviary
 from rld.envs.platform import LazyDeckTrajectory
 from rld.envs.touchdown import analytic_clearance_m, relative_tilt_deg
 from rld.eval.envs import EvalConfigs, load_eval_configs, motion_for, pad_offset_for
-from rld.eval.runner import RECORD_COLUMNS, controller_spec
+from rld.eval.runner import RECORD_COLUMNS, _advance_feed, _make_feed, controller_spec
 
 __all__ = [
     "BOOT_REPS",
@@ -97,7 +97,8 @@ DISAGREE_MAX: float = 0.01
 #: Check 4: minimum learned |Q5 - Q1| success gap, and failures needed to test at all.
 QUINTILE_MIN_GAP: float = 0.10
 QUINTILE_MIN_FAILURES: int = 10
-#: Check 4: number of tests the Bonferroni adjustment covers (2 methods x 4 SS x 3 vars).
+#: Check 4: number of tests the Bonferroni adjustment covers (2 methods x 4 SS x 3 vars) in
+#: Phase 5; Phase 6 applies the same rule to its 4 methods (48, :attr:`AuditSpec.quintile_tests`).
 QUINTILE_TESTS: int = 24
 #: Check 5: pre-contact norm-cap fraction floor and margin over ``pid_feedforward``.
 SAT_PRE_MAX: float = 0.10
@@ -130,6 +131,45 @@ NORM_EPS: float = 1e-9
 LEARNED_METHODS: tuple[str, ...] = ("ppo", "sac")
 BASELINE_REFLY: str = "pid_feedforward"
 LOWVZ_CUT: str = "pid_feedforward_lowvz_cut"
+#: The four Phase 6 methods, in the pre-stated table order (``results/audit/e06/README.md``).
+PHASE6_METHODS: tuple[str, ...] = (
+    "residual_ppo",
+    "ppo_forecast",
+    "residual_ppo_forecast",
+    "ppo_sinusoid",
+)
+#: Phase 6 check 1b-fine: number of equal training-step bins (1 % each).
+N_BINS_FINE: int = 100
+#: Phase 6 check 10: the forecast block's replacements in set C, in the pre-stated order.
+ABLATIONS: tuple[str, ...] = ("mean", "zeros")
+
+
+@dataclass(frozen=True)
+class AuditSpec:
+    """Which learned flight the audit reads, and whether the Phase 6 additions run.
+
+    Attributes:
+        tag: The learned flight's ``results/<tag>`` directory and its column prefix.
+        methods: The audited learned methods, in table order (their index seeds the
+            bootstraps, as pre-stated).
+        phase6: Whether the Phase 6 checks (1b-fine, per-seed 6, 9-12) and re-flight sets
+            H and C run (``results/audit/e06/README.md``).
+    """
+
+    tag: str
+    methods: tuple[str, ...]
+    phase6: bool = False
+
+    @property
+    def quintile_tests(self) -> int:
+        """Bonferroni family size of check 4: methods x sea states x 3 variables."""
+        return len(self.methods) * len(SEA_STATES) * 3
+
+
+#: The Phase 5 audit (``results/audit``), unchanged.
+PHASE5 = AuditSpec("e05", LEARNED_METHODS)
+#: The Phase 6 audit (``results/audit/e06``).
+PHASE6 = AuditSpec("e06", PHASE6_METHODS, phase6=True)
 
 #: Extra committed columns checked, beside :data:`RECORD_COLUMNS`, on every re-flight.
 _EXTRA_CHECKED: tuple[str, ...] = (
@@ -528,11 +568,28 @@ class PolicySource:
         method: Method label as in the committed tables.
         run_seed: The training seed (0 for a controller).
         run_dir: The run directory, or ``None`` for a controller.
+        ablate: Phase 6 set C only: replace the forecast block of a forecast run's network
+            input by its training mean (``"mean"``) or by zeros (``"zeros"``); ``None``
+            flies the committed policy unchanged.
     """
 
     method: str
     run_seed: int
     run_dir: str | None = None
+    ablate: str | None = None
+
+    def needs_feed(self) -> bool:
+        """Whether the runner would hand this policy a past-only ship-motion feed.
+
+        Returns:
+            :func:`rld.rl.train.run_needs_motion_feed` for a run; the registry flag for a
+            controller.
+        """
+        if self.run_dir is None:
+            return bool(controller_spec(self.method).needs_motion_feed)
+        from rld.rl.train import run_needs_motion_feed  # heavy: only in re-flight workers
+
+        return run_needs_motion_feed(Path(self.run_dir))
 
     def build(self, cfgs: EvalConfigs) -> Any:
         """Build the policy exactly as the committed flight did.
@@ -620,6 +677,27 @@ class AuditAviary(DeckLandingAviary):
     def deck_vz_now(self) -> float:
         """Return the analytic deck v_z at the current substep, m/s world."""
         return float(self._deck_sample().velocity_m_s[2])
+
+    def tilts_now(self) -> tuple[float, float, float, float]:
+        """Return the attitudes at the current substep (read-only).
+
+        Returns:
+            ``(drone absolute tilt, deck tilt, relative tilt, deck-normal rate)``: the
+            first three in degrees (drone body z vs world up; deck normal vs world up;
+            drone body z vs deck normal), the last ``|omega_deck x n|`` in degrees per
+            second model scale (analytic).
+        """
+        deck = self._deck_sample()
+        n = np.asarray(deck.normal, dtype=np.float64)
+        n = n / float(np.linalg.norm(n))
+        rot = self._drone_rotation(np.asarray(self.quat[0], dtype=np.float64))
+        omega = np.asarray(deck.angular_velocity_rad_s, dtype=np.float64)
+        return (
+            relative_tilt_deg(rot[:, 2], np.array([0.0, 0.0, 1.0])),
+            float(deck.tilt_deg),
+            relative_tilt_deg(rot[:, 2], n),
+            math.degrees(float(np.linalg.norm(np.cross(omega, n)))),
+        )
 
     def substep_now(self) -> int:
         """Return the current physics substep index."""
@@ -930,14 +1008,209 @@ class FlightTask:
     Attributes:
         source: The policy.
         episodes: The listed episodes, each with the sets (``S``, ``T``) it belongs to.
-        committed: Committed text rows keyed like the episodes, for the reproduction check.
-        logs_dir: Where to save substep logs of ``T`` episodes (scratch), or ``None``.
+        committed: Committed text rows keyed like the episodes, for the reproduction check;
+            ``None`` entries (Phase 6 set C only) are not checked.
+        logs_dir: Where to save substep logs of ``T`` (and ``H``) episodes (scratch), or
+            ``None``.
+        extras: Phase 6: also log :data:`XSTEP_COLS` per control step through read-only
+            hooks and summarise them (:func:`rld.rl.audit_phase6.summarise_extras`).
     """
 
     source: PolicySource
     episodes: tuple[tuple[ListedEpisode, str], ...]
-    committed: tuple[Mapping[str, str], ...]
+    committed: tuple[Mapping[str, str] | None, ...]
     logs_dir: str | None
+    extras: bool = False
+
+
+#: Phase 6 per-control-step log columns (``FlightTask.extras``), read before the step:
+XSTEP_COLS: tuple[str, ...] = (
+    "abs_tilt_deg",  # drone body z vs world up, degrees
+    "deck_tilt_deg",  # deck normal vs world up, degrees
+    "rel_tilt_deg",  # drone body z vs deck normal, degrees
+    "deck_normal_rate_deg_s",  # |omega_deck x n|, deg/s, analytic
+    "base_ax",  # residual base action (normalised), NaN for a non-residual policy
+    "base_ay",
+    "base_az",
+    "base_sp_x_m_s",  # the env's setpoint for the base action alone (clip + norm cap), m/s
+    "base_sp_y_m_s",
+    "base_sp_z_m_s",
+    "pi_x",  # the network's clipped deterministic output (normalised), NaN for a controller
+    "pi_y",
+    "pi_z",
+    "d_open_mean_m_s",  # forecast runs: |v_sp(block -> training mean) - v_sp|, m/s; else NaN
+    "d_open_zero_m_s",  # forecast runs: |v_sp(block -> zeros) - v_sp|, m/s; else NaN
+)
+_X = {name: i for i, name in enumerate(XSTEP_COLS)}
+
+
+def _install_ablation(policy: Any, ablate: str, n_obs: int) -> None:
+    """Set C: replace the forecast block of every network input (scratch-only hook).
+
+    Args:
+        policy: A forecast policy (``needs_motion_feed``), built by ``build_policy``.
+        ablate: ``"mean"`` (the run's ``VecNormalize`` training mean of the block, so the
+            normalised block is exactly 0) or ``"zeros"`` (raw zeros: pad z 0 m, v_z 0 m/s).
+        n_obs: Entries of the environment observation (the block follows them).
+
+    Raises:
+        ValueError: On an unknown replacement or a policy without a block.
+    """
+    if not bool(getattr(policy, "needs_motion_feed", False)):
+        raise ValueError(f"{policy.name}: no forecast block to replace")
+    size = 2 * len(policy.leads_full_s)
+    if ablate == "mean":
+        repl = np.asarray(policy.normalizer.obs_rms.mean, dtype=np.float64)[n_obs:]
+    elif ablate == "zeros":
+        repl = np.zeros(size, dtype=np.float64)
+    else:
+        raise ValueError(f"unknown ablation {ablate!r}")
+    if repl.shape != (size,):
+        raise ValueError(f"block replacement shape {repl.shape} != ({size},)")
+    original = policy.policy_input
+
+    def replaced(obs: FloatArray) -> FloatArray:
+        # float64 keeps the training mean exact, so (x - mean) is exactly 0 in the normaliser.
+        x = np.asarray(original(obs), dtype=np.float64).copy()
+        x[n_obs:] = repl
+        return x
+
+    setattr(policy, "policy_input", replaced)  # noqa: B010 -- instance hook, scratch only
+
+
+def _install_recorders(policy: Any, rec: dict[str, FloatArray]) -> None:
+    """Record what a learned policy computed this step, without recomputing anything.
+
+    Wraps (on the instance) ``network_action`` (the clipped network output ``pi``),
+    ``policy_input`` (the network's raw input ``x``) and, for a residual policy, its base
+    controller's ``act`` (``a_base``). Each wrapper calls the committed method once and
+    stores a copy of its return value; nothing else changes.
+
+    Args:
+        policy: The policy ``build_policy`` returned.
+        rec: Filled with ``"pi"``, ``"x"`` and ``"base"`` at every ``act``.
+    """
+    net = policy.network_action
+    pin = policy.policy_input
+
+    def network_action(obs: FloatArray) -> FloatArray:
+        out = net(obs)
+        rec["pi"] = np.array(out, dtype=np.float64, copy=True)
+        return cast(FloatArray, out)
+
+    def policy_input(obs: FloatArray) -> FloatArray:
+        out = pin(obs)
+        rec["x"] = np.array(out, copy=True)
+        return cast(FloatArray, out)
+
+    setattr(policy, "network_action", network_action)  # noqa: B010
+    setattr(policy, "policy_input", policy_input)  # noqa: B010
+    base = getattr(policy, "base", None)
+    if base is not None:
+        base_act = base.act
+
+        def act(obs: FloatArray) -> FloatArray:
+            out = base_act(obs)
+            rec["base"] = np.array(np.asarray(out), dtype=np.float64, copy=True)
+            return cast(FloatArray, out)
+
+        setattr(base, "act", act)  # noqa: B010
+
+
+def _network_alt(policy: Any, x: FloatArray, n_obs: int, repl: FloatArray) -> FloatArray:
+    """The network's deterministic output on ``x`` with the block replaced (check 10a).
+
+    The same arithmetic as :meth:`rld.rl.policy.LearnedPolicy.network_action`: frozen
+    normaliser, batch of 1, deterministic mean, clipped to ``[-1, 1]``.
+
+    Args:
+        policy: A forecast policy.
+        x: The factual network input of this step.
+        n_obs: Entries of the environment observation.
+        repl: The replacement block (float64).
+
+    Returns:
+        ``(3,)`` float32.
+    """
+    x2 = np.asarray(x, dtype=np.float64).copy()
+    x2[n_obs:] = repl
+    z = np.asarray(policy.normalizer.normalize_obs(x2.reshape(1, -1)), dtype=np.float32)
+    action, _ = policy.model.predict(z, deterministic=True)
+    out: FloatArray = np.clip(np.asarray(action, dtype=np.float32).reshape(-1), -1.0, 1.0)
+    return out
+
+
+def _extras_row(
+    policy: Any,
+    rec: Mapping[str, FloatArray],
+    tilts: tuple[float, float, float, float],
+    action: FloatArray,
+    setpoint: FloatArray,
+    alt_blocks: Mapping[str, FloatArray],
+    n_obs: int,
+    alpha: float,
+    env: AuditAviary,
+) -> tuple[float, ...]:
+    """One :data:`XSTEP_COLS` row, from what the policy computed this step.
+
+    The hooks' records must recompose the executed action bit for bit (the residual
+    composition for a residual policy, the network output itself for a pure one), or the
+    audit stops: that is the check that the hooks read what was flown.
+
+    Args:
+        policy: The flying policy.
+        rec: The hooks' records of this ``act`` (empty for a controller).
+        tilts: :meth:`AuditAviary.tilts_now` before the step.
+        action: The policy's returned action this step.
+        setpoint: The env's setpoint for it, m/s world.
+        alt_blocks: Replacement blocks for check 10a (empty for a feed-free policy).
+        n_obs: Entries of the environment observation.
+        alpha: Residual scale (NaN for a non-residual policy).
+        env: The environment (its setpoint rule).
+
+    Returns:
+        The row.
+
+    Raises:
+        ReproductionError: If the records do not recompose the executed action.
+    """
+    nan = float("nan")
+    base = rec.get("base")
+    pi = rec.get("pi")
+    x = rec.get("x")
+    if pi is not None:
+        if base is not None:
+            from rld.rl.residual import compose_residual  # heavy (torch): workers only
+
+            again = np.asarray(compose_residual(base, pi, alpha), dtype=np.float64)
+        else:
+            again = np.asarray(pi, dtype=np.float64)
+        if not np.array_equal(again, np.asarray(action, dtype=np.float64)):
+            raise ReproductionError(f"hook records {again} do not recompose action {action}")
+    deltas: list[float] = []
+    for key in ABLATIONS:
+        if key in alt_blocks and x is not None:
+            a_alt = _network_alt(policy, x, n_obs, alt_blocks[key])
+            if base is not None:
+                from rld.rl.residual import compose_residual
+
+                a_alt = compose_residual(base, a_alt, alpha)
+            sp_alt = env.velocity_setpoint_m_s(np.asarray(a_alt, dtype=np.float64))
+            deltas.append(float(np.linalg.norm(sp_alt - setpoint)))
+        else:
+            deltas.append(nan)
+    base_sp = (
+        (nan,) * 3
+        if base is None
+        else tuple(float(v) for v in env.velocity_setpoint_m_s(np.asarray(base)))
+    )
+    return (
+        *tilts,
+        *((nan,) * 3 if base is None else (float(v) for v in base)),
+        *base_sp,
+        *((nan,) * 3 if pi is None else (float(v) for v in pi)),
+        *deltas,
+    )
 
 
 def fly_chunk(task: FlightTask) -> list[dict[str, Any]]:
@@ -973,7 +1246,27 @@ def fly_chunk(task: FlightTask) -> list[dict[str, Any]]:
         reward_cfg=cfgs.reward,
         episode_seed=first.episode_seed,
     )
-    policy: _Policy = task.source.build(cfgs)
+    policy: Any = task.source.build(cfgs)
+    # The runner's rule (rld.eval.runner.run_chunk): a feed exactly when the spec says so,
+    # and the policy's own flag must agree.
+    feed_needed = task.source.needs_feed()
+    if bool(getattr(policy, "needs_motion_feed", False)) != feed_needed:
+        raise ReproductionError(f"{task.source.method}: policy feed flag != run's")
+    n_obs = int(np.asarray(env.observation_space.shape)[0])
+    if task.source.ablate is not None:
+        _install_ablation(policy, task.source.ablate, n_obs)
+    rec: dict[str, FloatArray] = {}
+    learned = task.source.run_dir is not None
+    if task.extras and learned:
+        _install_recorders(policy, rec)
+    alt_blocks: dict[str, FloatArray] = {}
+    if task.extras and feed_needed:
+        size = 2 * len(policy.leads_full_s)
+        alt_blocks = {
+            "mean": np.asarray(policy.normalizer.obs_rms.mean, dtype=np.float64)[n_obs:],
+            "zeros": np.zeros(size, dtype=np.float64),
+        }
+    alpha = float(getattr(policy, "alpha", float("nan")))
     max_steps = int(round(cfgs.landing.total_len_s * cfgs.landing.ctrl_freq_hz)) + 1
     dt = cfgs.landing.physics_dt_s
     weight = float(env.M) * float(env.G)
@@ -996,13 +1289,29 @@ def fly_chunk(task: FlightTask) -> list[dict[str, Any]]:
             pos = tuple(float(v) for v in np.asarray(env.pos[0], dtype=np.float64).reshape(3))
             if float(env.record.t0_model_s) != listed.t0_model_s or pos != listed.init_xyz_m:
                 raise ReproductionError(f"{listed.ss}/{listed.index}: reset differs from list")
-            policy.reset(listed.episode_seed, None)
+            t0 = float(env.record.t0_model_s)
+            feed = _make_feed(env, cfgs, t0) if feed_needed else None
+            if feed is None:
+                policy.reset(listed.episode_seed, None)
+            else:
+                policy.reset(listed.episode_seed, None, feed)
             actions: list[FloatArray] = []
             step_log: list[tuple[float, ...]] = []
-            for _ in range(max_steps):
+            x_log: list[tuple[float, ...]] = []
+            for k in range(max_steps):
+                if feed is not None:
+                    _advance_feed(feed, env, t0, k)
+                rec.clear()
+                tilts = env.tilts_now() if task.extras else None
                 action = np.asarray(policy.act(obs), dtype=np.float64)
                 clipped = np.clip(action, -1.0, 1.0)
                 setpoint = env.velocity_setpoint_m_s(clipped)
+                if tilts is not None:
+                    x_log.append(
+                        _extras_row(
+                            policy, rec, tilts, action, setpoint, alt_blocks, n_obs, alpha, env
+                        )
+                    )
                 step_log.append(
                     (
                         env.substep_now() * dt,
@@ -1032,7 +1341,7 @@ def fly_chunk(task: FlightTask) -> list[dict[str, Any]]:
                 ),
             }
             text = record_text(record, actions, extra)
-            diff = [c for c, v in text.items() if committed[c] != v]
+            diff = [] if committed is None else [c for c, v in text.items() if committed[c] != v]
             if diff:
                 raise ReproductionError(
                     f"{task.source.method} s{task.source.run_seed} {listed.ss}/{listed.index}: "
@@ -1052,15 +1361,32 @@ def fly_chunk(task: FlightTask) -> list[dict[str, Any]]:
                 grace_s=float(cfgs.success.contact_loss_grace_s),
                 hard_landing_m_s=float(cfgs.success.rel_vertical_velocity_max_m_s),
             )
-            if task.logs_dir is not None and "T" in sets:
+            xsteps = np.asarray(x_log, dtype=np.float64).reshape(-1, len(XSTEP_COLS))
+            if task.logs_dir is not None and ("T" in sets or "H" in sets):
                 name = f"{task.source.method}_s{task.source.run_seed}_{listed.ss}_{listed.index}"
-                np.savez_compressed(
-                    Path(task.logs_dir) / f"{name}.npz",
-                    steps=steps,
-                    sub=sub,
-                    step_cols=np.asarray(STEP_COLS),
-                    sub_cols=np.asarray(SUB_COLS),
+                arrays: dict[str, Any] = {
+                    "steps": steps,
+                    "sub": sub,
+                    "step_cols": np.asarray(STEP_COLS),
+                    "sub_cols": np.asarray(SUB_COLS),
+                }
+                if task.extras:
+                    arrays |= {"xsteps": xsteps, "xstep_cols": np.asarray(XSTEP_COLS)}
+                np.savez_compressed(Path(task.logs_dir) / f"{name}.npz", **arrays)
+            if task.extras:
+                from rld.rl.audit_phase6 import summarise_extras
+
+                summary |= summarise_extras(
+                    steps,
+                    xsteps,
+                    record,
+                    v_max_m_s=float(cfgs.landing.v_max_m_s),
+                    alpha=alpha,
                 )
+                summary["_steps"] = steps
+                summary["_xsteps"] = xsteps
+            if task.extras or task.source.ablate is not None:
+                summary["_text"] = text
             rows.append(
                 {
                     "sets": sets,
@@ -1083,7 +1409,7 @@ def fly_chunk(task: FlightTask) -> list[dict[str, Any]]:
                         if record["td_t_episode_analytic_s"] is None
                         else float(record["td_t_episode_analytic_s"])
                     ),
-                    "reproduced": True,
+                    "reproduced": committed is not None,
                     **summary,
                 }
             )
@@ -1155,11 +1481,14 @@ class Inputs:
     Attributes:
         cfgs: Committed configs.
         listed: ``id`` list rows keyed by ``(ss, index)``.
-        e05: e05 text rows.
+        e05: The audited learned flight's text rows (``results/<spec.tag>/episodes.csv``;
+            e05 in Phase 5, e06 in Phase 6).
         e01: e01 ``id`` text rows.
         cut: e01_lowvz_cut ``id`` rows of ``pid_feedforward_lowvz_cut``.
         cut_all: every e01_lowvz_cut row of ``pid_feedforward_lowvz_cut`` (all 14 cells).
         runs: method to run directories, seed order.
+        ppo_e05: Phase 6 only: ``ppo``'s e05 rows (check 11 and set H); empty in Phase 5.
+        ppo_runs: Phase 6 only: ``ppo``'s run directories, seed order.
     """
 
     cfgs: EvalConfigs
@@ -1169,15 +1498,20 @@ class Inputs:
     cut: list[dict[str, str]]
     cut_all: list[dict[str, str]]
     runs: dict[str, list[Path]]
+    ppo_e05: list[dict[str, str]]
+    ppo_runs: list[Path]
 
 
-def load_inputs(repo: Path, listed_rows: Sequence[ListedEpisode]) -> Inputs:
+def load_inputs(
+    repo: Path, listed_rows: Sequence[ListedEpisode], spec: AuditSpec = PHASE5
+) -> Inputs:
     """Load the committed inputs (read-only).
 
     Args:
         repo: Repository root.
         listed_rows: The ``id`` list's 800 rows, already checked against the manifest by
             the caller.
+        spec: Which learned flight and methods.
 
     Returns:
         The :class:`Inputs`.
@@ -1193,7 +1527,9 @@ def load_inputs(repo: Path, listed_rows: Sequence[ListedEpisode]) -> Inputs:
         or any(r.pad != "aft" for r in listed_rows)
     ):
         raise ValueError("listed_rows must be the id list: 200 aft episodes per SS3-SS6")
-    e05 = read_rows(repo / "results" / "e05" / "episodes.csv")
+    e05 = read_rows(repo / "results" / spec.tag / "episodes.csv")
+    if {r["method"] for r in e05} != set(spec.methods):
+        raise ValueError(f"results/{spec.tag} methods != {spec.methods}")
     e01 = [r for r in read_rows(repo / "results" / "e01" / "episodes.csv") if r["regime"] == "id"]
     cut_all = [
         r
@@ -1201,10 +1537,15 @@ def load_inputs(repo: Path, listed_rows: Sequence[ListedEpisode]) -> Inputs:
         if r["method"] == LOWVZ_CUT
     ]
     cut = [r for r in cut_all if r["regime"] == "id"]
-    runs = {
-        m: [repo / "artifacts" / "runs" / m / str(s) for s in range(5)] for m in LEARNED_METHODS
-    }
-    return Inputs(load_eval_configs(), listed, e05, e01, cut, cut_all, runs)
+    runs = {m: [repo / "artifacts" / "runs" / m / str(s) for s in range(5)] for m in spec.methods}
+    ppo_e05: list[dict[str, str]] = []
+    ppo_runs: list[Path] = []
+    if spec.phase6:
+        ppo_e05 = [
+            r for r in read_rows(repo / "results" / "e05" / "episodes.csv") if r["method"] == "ppo"
+        ]
+        ppo_runs = [repo / "artifacts" / "runs" / "ppo" / str(s) for s in range(5)]
+    return Inputs(load_eval_configs(), listed, e05, e01, cut, cut_all, runs, ppo_e05, ppo_runs)
 
 
 def _cell_rows(
@@ -1248,7 +1589,11 @@ def _cell_rows(
 
 
 def _training_row(
-    episodes: Sequence[Mapping[str, Any]], bins: Sequence[Mapping[str, Any]], total: int, thr: float
+    episodes: Sequence[Mapping[str, Any]],
+    bins: Sequence[Mapping[str, Any]],
+    total: int,
+    thr: float,
+    fine_prefix: str = "train_posthoc_",
 ) -> dict[str, Any]:
     """Wide training columns for one run.
 
@@ -1257,6 +1602,8 @@ def _training_row(
         bins: Its :func:`training_bins` rows.
         total: Its total steps.
         thr: Tunnelling threshold, metres.
+        fine_prefix: Prefix of the 1 %-bin columns: post hoc in Phase 5, pre-stated
+            (``train_``) in Phase 6.
 
     Returns:
         ``train_*`` columns.
@@ -1281,8 +1628,8 @@ def _training_row(
         ),
         "train_timeout_frac_max_bin": fracs[worst],
         "train_timeout_max_bin_index": worst,
-        "train_posthoc_timeout_frac_max_bin100": fine_fracs[fine_worst],
-        "train_posthoc_timeout_max_bin100_index": fine_worst,
+        f"{fine_prefix}timeout_frac_max_bin100": fine_fracs[fine_worst],
+        f"{fine_prefix}timeout_max_bin100_index": fine_worst,
         "train_tunnelled_n_final10": fd["tunnelled_n"],
         "train_tunnel_rate_final10": _frac(fd["tunnelled_n"], len(final)),
         "train_depth_p99_mm_final10": fd["p99_mm"],
@@ -1375,16 +1722,18 @@ def run_audit(
     workers: int,
     listed_rows: Sequence[ListedEpisode],
     chunk: int = 10,
+    spec: AuditSpec = PHASE5,
 ) -> dict[str, str]:
     """Run every check and write ``results/audit``'s CSVs.
 
     Args:
         repo: Repository root.
         listed_rows: The ``id`` list's rows (see :func:`load_inputs`).
-        out_dir: Output directory (``results/audit``).
+        out_dir: Output directory (``results/audit``; ``results/audit/e06`` in Phase 6).
         scratch: Scratch directory for substep logs (never under ``results/``).
         workers: Worker processes for the re-flight and the deck lookups.
         chunk: Episodes per re-flight task.
+        spec: :data:`PHASE5` (default; its outputs are unchanged) or :data:`PHASE6`.
 
     Returns:
         File name to the text written.
@@ -1394,12 +1743,15 @@ def run_audit(
     """
     if scratch.resolve().is_relative_to((repo / "results").resolve()):
         raise ValueError("scratch logs never go under results/")
-    inp = load_inputs(repo, listed_rows)
+    inp = load_inputs(repo, listed_rows, spec)
     thr = float(inp.cfgs.success.tunnelling_penetration_m)
     written: dict[str, str] = {}
+    methods = spec.methods
+    tag = spec.tag
+    fine_prefix = "train_" if spec.phase6 else "train_posthoc_"
 
     # ---------------------------------------------------------------- training (checks 1-3)
-    per_run: dict[str, list[dict[str, Any]]] = {m: [] for m in LEARNED_METHODS}
+    per_run: dict[str, list[dict[str, Any]]] = {m: [] for m in methods}
     bin_rows: list[dict[str, Any]] = []
     train_eps: dict[tuple[str, int], list[dict[str, Any]]] = {}
     train_meta: dict[tuple[str, int], int] = {}
@@ -1411,28 +1763,32 @@ def run_audit(
             train_eps[(method, seed)] = eps
             train_meta[(method, seed)] = total
             per_run[method].append(
-                {"method": method, "run_seed": seed, **_training_row(eps, bins, total, thr)}
+                {
+                    "method": method,
+                    "run_seed": seed,
+                    **_training_row(eps, bins, total, thr, fine_prefix),
+                }
             )
     written["training_bins.csv"] = write_csv(
         out_dir / "training_bins.csv", bin_rows, _columns(bin_rows)
     )
-    # Post-hoc (not a pre-stated check): the same series at 1 % resolution.
+    # The same series at 1 % resolution: post hoc in Phase 5, pre-stated check 1b-fine in
+    # Phase 6.
     fine_rows = [
         {"method": method, "run_seed": seed, **b}
         for (method, seed), eps in train_eps.items()
-        for b in training_bins(eps, train_meta[(method, seed)], thr, n_bins=100)
+        for b in training_bins(eps, train_meta[(method, seed)], thr, n_bins=N_BINS_FINE)
     ]
-    written["training_bins_fine_posthoc.csv"] = write_csv(
-        out_dir / "training_bins_fine_posthoc.csv", fine_rows, _columns(fine_rows)
-    )
+    fine_name = "training_bins_fine.csv" if spec.phase6 else "training_bins_fine_posthoc.csv"
+    written[fine_name] = write_csv(out_dir / fine_name, fine_rows, _columns(fine_rows))
 
     # ---------------------------------------------------------------- e05 cells (checks 1-3)
     e05_by: dict[tuple[str, int], list[dict[str, str]]] = {}
     for r in inp.e05:
         e05_by.setdefault((r["method"], int(r["run_seed"])), []).append(r)
-    for method in LEARNED_METHODS:
+    for method in methods:
         for row in per_run[method]:
-            row.update(_cell_rows(e05_by[(method, int(row["run_seed"]))], thr))
+            row.update(_cell_rows(e05_by[(method, int(row["run_seed"]))], thr, tag))
     base_rows: list[dict[str, Any]] = []
     for method in (
         "pid_track_descend",
@@ -1481,11 +1837,14 @@ def run_audit(
 
     # ---------------------------------------------------------------- re-flight
     sample = sample_indices()
-    committed_e05 = {
-        (r["method"], int(r["run_seed"]), r["ss"], int(r["index"])): r for r in inp.e05
+    # Committed rows by (method, seed, SS, index): the audited flight, ppo's e05 (Phase 6
+    # set H), and the e01 / e01_lowvz_cut baselines (seed 0). Methods never collide.
+    committed: dict[tuple[str, int, str, int], Mapping[str, str]] = {
+        (r["method"], int(r["run_seed"]), r["ss"], int(r["index"])): r
+        for r in (*inp.e05, *inp.ppo_e05)
     }
-    committed_base = {(r["method"], 0, r["ss"], int(r["index"])): r for r in inp.e01}
-    committed_base.update({(LOWVZ_CUT, 0, r["ss"], int(r["index"])): r for r in inp.cut})
+    committed.update({(r["method"], 0, r["ss"], int(r["index"])): r for r in inp.e01})
+    committed.update({(LOWVZ_CUT, 0, r["ss"], int(r["index"])): r for r in inp.cut})
     plan: dict[tuple[str, int], dict[tuple[str, int], set[str]]] = {}
     sources: dict[tuple[str, int], PolicySource] = {}
     for method, dirs in inp.runs.items():
@@ -1498,34 +1857,83 @@ def run_audit(
             for r in e05_by[(method, seed)]:
                 if _b(r["tunnelled"]) or _b(r["detectors_disagree"]):
                     sel.setdefault((r["ss"], int(r["index"])), set()).add("T")
+                if spec.phase6 and r["outcome"] == "hard_landing":
+                    sel.setdefault((r["ss"], int(r["index"])), set()).add("H")
     sources[(BASELINE_REFLY, 0)] = PolicySource(BASELINE_REFLY, 0)
     plan[(BASELINE_REFLY, 0)] = {(ss, i): {"S"} for ss, idxs in sample.items() for i in idxs}
     sources[(LOWVZ_CUT, 0)] = PolicySource(LOWVZ_CUT, 0)
     plan[(LOWVZ_CUT, 0)] = {
         (r["ss"], int(r["index"])): {"T"} for r in inp.cut if _b(r["tunnelled"])
     }
+    if spec.phase6:
+        # Check 6: lowvz_cut on sample S. Set H: every ppo (e05) and pid_feedforward (e01)
+        # hard landing.
+        for ss, idxs in sample.items():
+            for i in idxs:
+                plan[(LOWVZ_CUT, 0)].setdefault((ss, i), set()).add("S")
+        for r in inp.e01:
+            if r["method"] == BASELINE_REFLY and r["outcome"] == "hard_landing":
+                plan[(BASELINE_REFLY, 0)].setdefault((r["ss"], int(r["index"])), set()).add("H")
+        for seed, run_dir in enumerate(inp.ppo_runs):
+            hard = {
+                (r["ss"], int(r["index"])): {"H"}
+                for r in inp.ppo_e05
+                if int(r["run_seed"]) == seed and r["outcome"] == "hard_landing"
+            }
+            if hard:
+                sources[("ppo", seed)] = PolicySource("ppo", seed, str(run_dir))
+                plan[("ppo", seed)] = hard
     scratch.mkdir(parents=True, exist_ok=True)
     flight_tasks: list[FlightTask] = []
     for key, sel in plan.items():
         src = sources[key]
         ordered = sorted(sel, key=lambda k: (SEA_STATES.index(k[0]), k[1]))
-        table = committed_e05 if src.run_dir is not None else committed_base
         for i in range(0, len(ordered), chunk):
             part = ordered[i : i + chunk]
             flight_tasks.append(
                 FlightTask(
                     source=src,
                     episodes=tuple((inp.listed[k], "".join(sorted(sel[k]))) for k in part),
-                    committed=tuple(table[(src.method, src.run_seed, k[0], k[1])] for k in part),
+                    committed=tuple(
+                        committed[(src.method, src.run_seed, k[0], k[1])] for k in part
+                    ),
                     logs_dir=str(scratch),
+                    extras=spec.phase6,
                 )
             )
+    if spec.phase6:
+        # Set C: sample S with the forecast block replaced (not reproduction-checked).
+        s_keys = [(ss, i) for ss in SEA_STATES for i in sample[ss]]
+        for method, dirs in inp.runs.items():
+            for seed, run_dir in enumerate(dirs):
+                if not PolicySource(method, seed, str(run_dir)).needs_feed():
+                    continue
+                for ablate in ABLATIONS:
+                    src = PolicySource(method, seed, str(run_dir), ablate)
+                    for i in range(0, len(s_keys), chunk):
+                        part = s_keys[i : i + chunk]
+                        flight_tasks.append(
+                            FlightTask(
+                                source=src,
+                                episodes=tuple((inp.listed[k], "C") for k in part),
+                                committed=tuple(None for _ in part),
+                                logs_dir=None,
+                            )
+                        )
     with mp.get_context("spawn").Pool(processes=min(workers, len(flight_tasks))) as pool:
-        flights = [f for rows in pool.imap(fly_chunk, flight_tasks, chunksize=1) for f in rows]
+        all_flights = [f for rows in pool.imap(fly_chunk, flight_tasks, chunksize=1) for f in rows]
+    flights = [f for f in all_flights if f["sets"] != "C"]
+    counterfactual = [f for f in all_flights if f["sets"] == "C"]
+    for f, ab in zip(
+        counterfactual,
+        [t.source.ablate for t in flight_tasks for _ in t.episodes if t.source.ablate],
+        strict=True,
+    ):
+        f["ablate"] = ab
     # The analytic deck lookup must equal the flown deck at every re-flown touchdown.
     for f in flights:
         if not math.isnan(float(f["td_t_episode_s"])) and f["method"] in (
-            *LEARNED_METHODS,
+            *methods,
             BASELINE_REFLY,
         ):
             v = deck_vz[(f["ss"], int(f["index"]), float(f["td_t_episode_s"]))]
@@ -1544,7 +1952,7 @@ def run_audit(
 
     # Descent profile (check 7): median setpoint z and drone v_z by control steps before touchdown.
     prof_rows: list[dict[str, Any]] = []
-    for method in (*LEARNED_METHODS, BASELINE_REFLY):
+    for method in (*methods, BASELINE_REFLY):
         pts = [p for f in fl(method, None, "S") for p in f["_profile"]]
         for kb in range(0, 61):
             sel_pts = [p for p in pts if p[0] == kb]
@@ -1633,7 +2041,7 @@ def run_audit(
     # Tunnelling rate by closing-speed bin (check 2b), full e05 population and baselines.
     cs_rows: list[dict[str, Any]] = []
     groups: list[tuple[str, list[Mapping[str, str]]]] = [
-        (m, [r for r in inp.e05 if r["method"] == m]) for m in LEARNED_METHODS
+        (m, [r for r in inp.e05 if r["method"] == m]) for m in methods
     ]
     groups += [
         (BASELINE_REFLY, [r for r in inp.e01 if r["method"] == BASELINE_REFLY]),
@@ -1681,8 +2089,8 @@ def run_audit(
         "t0_model_s": lambda e: e.t0_model_s,
     }
     test_index = 0
-    alphas = (0.05, 0.05 / QUINTILE_TESTS)
-    for m_i, method in enumerate(LEARNED_METHODS):
+    alphas = (0.05, 0.05 / spec.quintile_tests)
+    for m_i, method in enumerate(methods):
         succ: dict[tuple[str, int], list[float]] = {}
         for r in inp.e05:
             if r["method"] == method:
@@ -1742,8 +2150,8 @@ def run_audit(
                         "flagged": flagged,
                     }
                 )
-    if test_index != QUINTILE_TESTS:
-        raise AssertionError(f"{test_index} quintile tests != pre-stated {QUINTILE_TESTS}")
+    if test_index != spec.quintile_tests:
+        raise AssertionError(f"{test_index} quintile tests != pre-stated {spec.quintile_tests}")
     written["quintiles.csv"] = write_csv(out_dir / "quintiles.csv", q_rows, _columns(q_rows))
     written["quintile_contrasts.csv"] = write_csv(
         out_dir / "quintile_contrasts.csv", c_rows, _columns(c_rows)
@@ -1751,7 +2159,7 @@ def run_audit(
 
     # Training quintiles (descriptive): final-10 % training episodes, quintiles per SS.
     tq_rows: list[dict[str, Any]] = []
-    for method in LEARNED_METHODS:
+    for method in methods:
         final = [
             e
             for s in range(5)
@@ -1796,7 +2204,7 @@ def run_audit(
     for r in inp.e05:
         e05_idx.setdefault((r["method"], r["ss"], int(r["index"])), []).append(r)
     origin_z = float(inp.cfgs.landing.platform.deck_origin_m[2])
-    for m_i, method in enumerate(LEARNED_METHODS):
+    for m_i, method in enumerate(methods):
         for s_i, ss in enumerate(SEA_STATES):
             per_ep: list[tuple[float, float]] = []
             all_l: list[float] = []
@@ -1850,7 +2258,7 @@ def run_audit(
     )
 
     # ---------------------------------------------------------------- per-run wide rows
-    for method in LEARNED_METHODS:
+    for method in methods:
         for row in per_run[method]:
             seed = int(row["run_seed"])
             row.update(_refly_row(fl(method, seed, "S")))
@@ -1861,7 +2269,7 @@ def run_audit(
                         [r for r in inp.e05 if int(r["run_seed"]) == seed], method, ss
                     )
                 ]
-                row[f"e05_deck_vz_td_mean_{ss}"] = float(np.mean(vals)) if vals else float("nan")
+                row[f"{tag}_deck_vz_td_mean_{ss}"] = float(np.mean(vals)) if vals else float("nan")
             t_eps = [f for f in tunnelled if f["method"] == method and f["run_seed"] == seed]
             row.update(_tunnel_row(t_eps))
         pooled: dict[str, Any] = {"method": method, "run_seed": "pooled"}
@@ -1901,11 +2309,11 @@ def run_audit(
                 "train_disagree_n_final10": sum(bool(e["detectors_disagree"]) for e in final_all),
             }
         )
-        pooled.update(_cell_rows([r for r in inp.e05 if r["method"] == method], thr))
+        pooled.update(_cell_rows([r for r in inp.e05 if r["method"] == method], thr, tag))
         pooled.update(_refly_row(fl(method, None, "S")))
         for ss in SEA_STATES:
             vals = [deck_vz[(ss, i, t)] for (i, t) in _td_keys(inp.e05, method, ss)]
-            pooled[f"e05_deck_vz_td_mean_{ss}"] = float(np.mean(vals))
+            pooled[f"{tag}_deck_vz_td_mean_{ss}"] = float(np.mean(vals))
         pooled.update(_tunnel_row([f for f in tunnelled if f["method"] == method]))
         per_run[method].append(pooled)
         rows = list(per_run[method])
@@ -1921,8 +2329,25 @@ def run_audit(
     written["baselines.csv"] = write_csv(out_dir / "baselines.csv", base_rows, _columns(base_rows))
 
     # ---------------------------------------------------------------- verdicts
-    outliers = _outliers(per_run)
-    verdicts = _verdicts(per_run, base_rows, c_rows, cut_all_depth, outliers)
+    outliers = _outliers(per_run, tag)
+    verdicts = _verdicts(per_run, base_rows, c_rows, cut_all_depth, outliers, tag)
+    if spec.phase6:
+        from rld.rl.audit_phase6 import Phase6Context, phase6_outputs
+
+        verdicts += phase6_outputs(
+            Phase6Context(
+                repo=repo,
+                out_dir=out_dir,
+                spec=spec,
+                inp=inp,
+                thr=thr,
+                per_run=per_run,
+                fine_rows=fine_rows,
+                flights=flights,
+                counterfactual=counterfactual,
+                written=written,
+            )
+        )
     written["verdicts.csv"] = write_csv(out_dir / "verdicts.csv", verdicts, _columns(verdicts))
     written["seed_outliers.csv"] = write_csv(
         out_dir / "seed_outliers.csv", outliers, _columns(outliers)
@@ -1978,6 +2403,7 @@ def _verdicts(
     c_rows: Sequence[Mapping[str, Any]],
     cut_all: Mapping[str, float],
     outliers: Sequence[Mapping[str, Any]],
+    tag: str = "e05",
 ) -> list[dict[str, Any]]:
     """Apply the pre-stated rules (README, section "Pre-stated thresholds").
 
@@ -1987,6 +2413,7 @@ def _verdicts(
         c_rows: Quintile contrasts.
         cut_all: ``pid_feedforward_lowvz_cut`` depth stats over its 14 cells.
         outliers: :func:`_outliers` rows (check 8).
+        tag: The learned flight (column prefix and statistic wording).
 
     Returns:
         One row per (check, method): the statistic, its threshold and the verdict.
@@ -2032,27 +2459,27 @@ def _verdicts(
             f">= {TIMEOUT_BIN_MAX}",
             worst_bin >= TIMEOUT_BIN_MAX,
         )
-        cell_max = max(float(r[f"e05_timeout_frac_{ss}"]) for r in runs for ss in SEA_STATES)
+        cell_max = max(float(r[f"{tag}_timeout_frac_{ss}"]) for r in runs for ss in SEA_STATES)
         above_gated = [
             ss
             for ss in SEA_STATES
-            if float(pooled[f"e05_timeout_frac_{ss}"])
+            if float(pooled[f"{tag}_timeout_frac_{ss}"])
             > float(base["gated"][f"e01_timeout_frac_{ss}"])
         ]
         add(
             "1c",
             method,
-            "max (run,SS) e05 timeout frac; SS where pooled > gated",
+            f"max (run,SS) {tag} timeout frac; SS where pooled > gated",
             f"{cell_max!r}; {','.join(above_gated) or 'none'}",
             f"> {TIMEOUT_E05_CELL_MAX} or pooled > gated",
             cell_max > TIMEOUT_E05_CELL_MAX or bool(above_gated),
         )
-        rate = float(pooled["e05_tunnel_rate_all"])
-        depth = float(pooled["e05_depth_max_mm_all"])
+        rate = float(pooled[f"{tag}_tunnel_rate_all"])
+        depth = float(pooled[f"{tag}_depth_max_mm_all"])
         add(
             "2a",
             method,
-            "pooled e05 tunnel rate; max depth mm",
+            f"pooled {tag} tunnel rate; max depth mm",
             f"{rate!r}; {depth!r}",
             f"> {cut_rate!r} (lowvz_cut id) or > {cut_all['max_mm']!r} mm",
             rate > cut_rate or depth > LOWVZ_CUT_MAX_DEPTH_M * 1000.0,
@@ -2077,11 +2504,11 @@ def _verdicts(
             "> 0",
             dep > 0 if n_t else False,
         )
-        dis_max = max(float(pooled[f"e05_disagree_rate_{ss}"]) for ss in SEA_STATES)
+        dis_max = max(float(pooled[f"{tag}_disagree_rate_{ss}"]) for ss in SEA_STATES)
         add(
             "3",
             method,
-            "max SS pooled e05 disagreement rate",
+            f"max SS pooled {tag} disagreement rate",
             dis_max,
             f">= {DISAGREE_MAX}",
             dis_max >= DISAGREE_MAX,
@@ -2136,29 +2563,43 @@ def _verdicts(
     return out
 
 
-#: Per-run metrics the seed-outlier rule (check 8) is applied to.
-SEED_METRICS: tuple[str, ...] = (
-    "train_timeout_frac_final10",
-    "train_timeout_frac_max_bin",
-    "train_tunnel_rate_final10",
-    *(f"e05_timeout_frac_{ss}" for ss in SEA_STATES),
-    *(f"e05_tunnel_rate_{ss}" for ss in SEA_STATES),
-    *(f"e05_depth_max_mm_{ss}" for ss in SEA_STATES),
-    *(f"e05_disagree_rate_{ss}" for ss in SEA_STATES),
-    "s_sat_cap_pre",
-    "s_post_idle_frac",
-    "s_post_sp_z_median",
-    "s_passive_frac",
-    *(f"e05_deck_vz_td_mean_{ss}" for ss in SEA_STATES),
-)
+def seed_metrics(tag: str) -> tuple[str, ...]:
+    """Per-run metrics the seed-outlier rule (check 8) is applied to.
+
+    Args:
+        tag: The learned flight's column prefix (``e05``, ``e06``).
+
+    Returns:
+        The pre-stated metric list, the flight's columns under ``tag``.
+    """
+    return (
+        "train_timeout_frac_final10",
+        "train_timeout_frac_max_bin",
+        "train_tunnel_rate_final10",
+        *(f"{tag}_timeout_frac_{ss}" for ss in SEA_STATES),
+        *(f"{tag}_tunnel_rate_{ss}" for ss in SEA_STATES),
+        *(f"{tag}_depth_max_mm_{ss}" for ss in SEA_STATES),
+        *(f"{tag}_disagree_rate_{ss}" for ss in SEA_STATES),
+        "s_sat_cap_pre",
+        "s_post_idle_frac",
+        "s_post_sp_z_median",
+        "s_passive_frac",
+        *(f"{tag}_deck_vz_td_mean_{ss}" for ss in SEA_STATES),
+    )
 
 
-def _outliers(per_run: Mapping[str, Sequence[Mapping[str, Any]]]) -> list[dict[str, Any]]:
-    """Apply :func:`singled_out` to every :data:`SEED_METRICS` column, per method."""
+#: Phase 5's seed-outlier metrics.
+SEED_METRICS: tuple[str, ...] = seed_metrics("e05")
+
+
+def _outliers(
+    per_run: Mapping[str, Sequence[Mapping[str, Any]]], tag: str = "e05"
+) -> list[dict[str, Any]]:
+    """Apply :func:`singled_out` to every :func:`seed_metrics` column, per method."""
     out: list[dict[str, Any]] = []
     for method, rows in per_run.items():
         runs = [r for r in rows if r["run_seed"] != "pooled"]
-        for metric in SEED_METRICS:
+        for metric in seed_metrics(tag):
             values = {int(r["run_seed"]): float(r[metric]) for r in runs}
             seed = singled_out(values)
             out.append(
@@ -2182,17 +2623,55 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         The namespace.
     """
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
-    parser.add_argument("--out-dir", type=Path, default=REPO_ROOT / "results" / "audit")
+    parser.add_argument(
+        "--phase",
+        type=int,
+        choices=(5, 6),
+        default=5,
+        help="5: ppo/sac against results/e05; 6: the four Phase 6 methods against results/e06",
+    )
+    parser.add_argument(
+        "--out-dir",
+        type=Path,
+        default=None,
+        help="default results/audit (phase 5) or results/audit/e06 (phase 6)",
+    )
     parser.add_argument(
         "--scratch-dir", type=Path, required=True, help="substep logs (not results/)"
     )
     parser.add_argument("--workers", type=int, default=24)
     parser.add_argument("--chunk", type=int, default=10)
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.out_dir is None:
+        args.out_dir = REPO_ROOT / "results" / "audit" / ("e06" if args.phase == 6 else "")
+    return args
+
+
+def check_out_dir(out_dir: Path, spec: AuditSpec, repo: Path = REPO_ROOT) -> None:
+    """Refuse an output directory that would overwrite the other phase's committed audit.
+
+    Phase 6 never writes into ``results/audit`` itself (Phase 5's files), and Phase 5 never
+    into ``results/audit/e06``.
+
+    Args:
+        out_dir: The requested output directory.
+        spec: The audit.
+        repo: Repository root.
+
+    Raises:
+        ValueError: On a directory owned by the other phase.
+    """
+    out = out_dir.resolve()
+    p5 = (repo / "results" / "audit").resolve()
+    p6 = (p5 / "e06").resolve()
+    if spec.phase6 and out == p5:
+        raise ValueError("the Phase 6 audit must not write into results/audit (Phase 5's)")
+    if not spec.phase6 and out.is_relative_to(p6):
+        raise ValueError("the Phase 5 audit must not write into results/audit/e06")
 
 
 def main(listed_rows: Sequence[ListedEpisode], argv: Sequence[str] | None = None) -> int:
-    """Run the audit and write ``results/audit``'s CSVs.
+    """Run the audit and write its CSVs (``results/audit`` or ``results/audit/e06``).
 
     Args:
         listed_rows: The ``id`` list's rows, read and manifest-checked by the caller.
@@ -2202,10 +2681,12 @@ def main(listed_rows: Sequence[ListedEpisode], argv: Sequence[str] | None = None
         0.
     """
     args = parse_args(argv)
+    spec = PHASE6 if args.phase == 6 else PHASE5
+    check_out_dir(args.out_dir, spec)
     for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS"):
         os.environ.setdefault(var, "1")
     written = run_audit(
-        REPO_ROOT, args.out_dir, args.scratch_dir, args.workers, listed_rows, args.chunk
+        REPO_ROOT, args.out_dir, args.scratch_dir, args.workers, listed_rows, args.chunk, spec
     )
     import hashlib
 

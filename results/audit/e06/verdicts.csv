@@ -1,0 +1,83 @@
+check,method,statistic,value,threshold,verdict
+1a,residual_ppo,"max over runs, final-10% training timeout frac",0.0,>= 0.05,clean
+1b,residual_ppo,"max over runs and bins, training timeout frac",0.0,>= 0.5,clean
+1c,residual_ppo,"max (run,SS) e06 timeout frac; SS where pooled > gated",0.0; none,> 0.05 or pooled > gated,clean
+2a,residual_ppo,pooled e06 tunnel rate; max depth mm,0.00175; 6.1691071093708505,> 0.0075 (lowvz_cut id) or > 7.0304511072935645 mm,clean
+2b,residual_ppo,tunnelled episodes by timing reading (impact; post_contact_idle; other),0; 1; 6 of 7,a reading covering >= 50 % is named the mechanism; else the mix is reported,finding
+2c,residual_ppo,tunnelled episodes possibly outcome-dependent,3/7,> 0,finding
+3,residual_ppo,max SS pooled e06 disagreement rate,0.0,>= 0.01,clean
+4,residual_ppo,"flagged (SS, variable) contrasts",none,Bonferroni CI excludes 0 and |learned Q5-Q1| >= 0.10,clean
+5,residual_ppo,pooled pre-contact norm-cap fraction (sample S),0.0,> 0.1,clean
+6,residual_ppo,post-contact idle frac; median post-contact setpoint z,0.055374961590089436; -0.23894718289375305,>= 0.5 or <= -1.0,clean
+7,residual_ppo,pooled passive touchdown fraction (sample S),0.012,> 0.25,clean
+8,residual_ppo,runs singled out (seed: metric),0:s_post_idle_frac;3:s_passive_frac;1:e06_deck_vz_td_mean_SS5,most extreme of five and outside the others' range by more than that range,finding
+1a,ppo_forecast,"max over runs, final-10% training timeout frac",0.0,>= 0.05,clean
+1b,ppo_forecast,"max over runs and bins, training timeout frac",0.09085475194261805,>= 0.5,clean
+1c,ppo_forecast,"max (run,SS) e06 timeout frac; SS where pooled > gated",0.0; none,> 0.05 or pooled > gated,clean
+2a,ppo_forecast,pooled e06 tunnel rate; max depth mm,0.0025; 6.212768222277102,> 0.0075 (lowvz_cut id) or > 7.0304511072935645 mm,clean
+2b,ppo_forecast,tunnelled episodes by timing reading (impact; post_contact_idle; other),0; 7; 3 of 10,a reading covering >= 50 % is named the mechanism; else the mix is reported,finding
+2c,ppo_forecast,tunnelled episodes possibly outcome-dependent,1/10,> 0,finding
+3,ppo_forecast,max SS pooled e06 disagreement rate,0.0,>= 0.01,clean
+4,ppo_forecast,"flagged (SS, variable) contrasts",none,Bonferroni CI excludes 0 and |learned Q5-Q1| >= 0.10,clean
+5,ppo_forecast,pooled pre-contact norm-cap fraction (sample S),0.03100942825015137,> 0.1,clean
+6,ppo_forecast,post-contact idle frac; median post-contact setpoint z,0.47067183462532297; -0.33193783834576607,>= 0.5 or <= -1.0,clean
+7,ppo_forecast,pooled passive touchdown fraction (sample S),0.04,> 0.25,clean
+8,ppo_forecast,runs singled out (seed: metric),2:train_timeout_frac_max_bin;2:e06_depth_max_mm_SS3;2:e06_deck_vz_td_mean_SS4,most extreme of five and outside the others' range by more than that range,finding
+1a,residual_ppo_forecast,"max over runs, final-10% training timeout frac",0.0,>= 0.05,clean
+1b,residual_ppo_forecast,"max over runs and bins, training timeout frac",0.0,>= 0.5,clean
+1c,residual_ppo_forecast,"max (run,SS) e06 timeout frac; SS where pooled > gated",0.0; none,> 0.05 or pooled > gated,clean
+2a,residual_ppo_forecast,pooled e06 tunnel rate; max depth mm,0.00075; 5.652250924185599,> 0.0075 (lowvz_cut id) or > 7.0304511072935645 mm,clean
+2b,residual_ppo_forecast,tunnelled episodes by timing reading (impact; post_contact_idle; other),0; 2; 1 of 3,a reading covering >= 50 % is named the mechanism; else the mix is reported,finding
+2c,residual_ppo_forecast,tunnelled episodes possibly outcome-dependent,0/3,> 0,clean
+3,residual_ppo_forecast,max SS pooled e06 disagreement rate,0.0,>= 0.01,clean
+4,residual_ppo_forecast,"flagged (SS, variable) contrasts",none,Bonferroni CI excludes 0 and |learned Q5-Q1| >= 0.10,clean
+5,residual_ppo_forecast,pooled pre-contact norm-cap fraction (sample S),0.0,> 0.1,clean
+6,residual_ppo_forecast,post-contact idle frac; median post-contact setpoint z,0.0553869989025886; -0.23975727707147598,>= 0.5 or <= -1.0,clean
+7,residual_ppo_forecast,pooled passive touchdown fraction (sample S),0.006,> 0.25,clean
+8,residual_ppo_forecast,runs singled out (seed: metric),4:train_tunnel_rate_final10;4:e06_tunnel_rate_SS5;4:e06_tunnel_rate_SS6;4:e06_depth_max_mm_SS5;4:e06_depth_max_mm_SS6;4:s_post_idle_frac;3:e06_deck_vz_td_mean_SS3,most extreme of five and outside the others' range by more than that range,finding
+1a,ppo_sinusoid,"max over runs, final-10% training timeout frac",0.0,>= 0.05,clean
+1b,ppo_sinusoid,"max over runs and bins, training timeout frac",0.0589553283853802,>= 0.5,clean
+1c,ppo_sinusoid,"max (run,SS) e06 timeout frac; SS where pooled > gated",0.0; none,> 0.05 or pooled > gated,clean
+2a,ppo_sinusoid,pooled e06 tunnel rate; max depth mm,0.00275; 7.124504977056321,> 0.0075 (lowvz_cut id) or > 7.0304511072935645 mm,finding
+2b,ppo_sinusoid,tunnelled episodes by timing reading (impact; post_contact_idle; other),0; 8; 3 of 11,a reading covering >= 50 % is named the mechanism; else the mix is reported,finding
+2c,ppo_sinusoid,tunnelled episodes possibly outcome-dependent,3/11,> 0,finding
+3,ppo_sinusoid,max SS pooled e06 disagreement rate,0.0,>= 0.01,clean
+4,ppo_sinusoid,"flagged (SS, variable) contrasts",none,Bonferroni CI excludes 0 and |learned Q5-Q1| >= 0.10,clean
+5,ppo_sinusoid,pooled pre-contact norm-cap fraction (sample S),0.006861888111888112,> 0.1,clean
+6,ppo_sinusoid,post-contact idle frac; median post-contact setpoint z,0.5485330231355823; -0.36821767687797546,>= 0.5 or <= -1.0,finding
+7,ppo_sinusoid,pooled passive touchdown fraction (sample S),0.03,> 0.25,clean
+8,ppo_sinusoid,runs singled out (seed: metric),4:train_timeout_frac_max_bin;4:train_tunnel_rate_final10;2:e06_tunnel_rate_SS6;0:e06_depth_max_mm_SS4;2:e06_depth_max_mm_SS6;3:s_sat_cap_pre;4:e06_deck_vz_td_mean_SS4,most extreme of five and outside the others' range by more than that range,finding
+1b-fine,residual_ppo,"max over runs and 1 % bins, training timeout frac (seed, bin)","0.0 (seed 4, bin 0)",>= 0.5,clean
+1b-fine-late,residual_ppo,"max over runs and 1 % bins 1-99, training timeout frac (seed, bin)","0.0 (seed 4, bin 1)",>= 0.5,clean
+1b-fine,ppo_forecast,"max over runs and 1 % bins, training timeout frac (seed, bin)","0.9007352941176471 (seed 4, bin 0)",>= 0.5,finding
+1b-fine-late,ppo_forecast,"max over runs and 1 % bins 1-99, training timeout frac (seed, bin)","0.7845117845117845 (seed 2, bin 2)",>= 0.5,finding
+1b-fine,residual_ppo_forecast,"max over runs and 1 % bins, training timeout frac (seed, bin)","0.0 (seed 4, bin 0)",>= 0.5,clean
+1b-fine-late,residual_ppo_forecast,"max over runs and 1 % bins 1-99, training timeout frac (seed, bin)","0.0 (seed 4, bin 1)",>= 0.5,clean
+1b-fine,ppo_sinusoid,"max over runs and 1 % bins, training timeout frac (seed, bin)","0.9080882352941176 (seed 0, bin 0)",>= 0.5,finding
+1b-fine-late,ppo_sinusoid,"max over runs and 1 % bins 1-99, training timeout frac (seed, bin)","0.43042071197411 (seed 4, bin 1)",>= 0.5,clean
+6-seed,residual_ppo seed 0,post-contact idle frac; median post-contact setpoint z (sample S),0.11500565336779196; -0.2884546369314194,>= 0.5 or <= -1.0,clean
+6-seed,residual_ppo seed 1,post-contact idle frac; median post-contact setpoint z (sample S),0.03621958121109225; -0.22434016317129135,>= 0.5 or <= -1.0,clean
+6-seed,residual_ppo seed 2,post-contact idle frac; median post-contact setpoint z (sample S),0.06418672501823487; -0.18953436613082886,>= 0.5 or <= -1.0,clean
+6-seed,residual_ppo seed 3,post-contact idle frac; median post-contact setpoint z (sample S),0.047880944678097705; -0.28827573359012604,>= 0.5 or <= -1.0,clean
+6-seed,residual_ppo seed 4,post-contact idle frac; median post-contact setpoint z (sample S),0.01357137087002181; -0.21462875604629517,>= 0.5 or <= -1.0,clean
+6-seed,residual_ppo_forecast seed 0,post-contact idle frac; median post-contact setpoint z (sample S),0.031643525992896354; -0.22745125740766525,>= 0.5 or <= -1.0,clean
+6-seed,residual_ppo_forecast seed 1,post-contact idle frac; median post-contact setpoint z (sample S),0.010315925209542231; -0.19463938102126122,>= 0.5 or <= -1.0,clean
+6-seed,residual_ppo_forecast seed 2,post-contact idle frac; median post-contact setpoint z (sample S),0.01869610766379241; -0.2699641138315201,>= 0.5 or <= -1.0,clean
+6-seed,residual_ppo_forecast seed 3,post-contact idle frac; median post-contact setpoint z (sample S),0.00646151360956304; -0.1956823468208313,>= 0.5 or <= -1.0,clean
+6-seed,residual_ppo_forecast seed 4,post-contact idle frac; median post-contact setpoint z (sample S),0.2100500888673453; -0.3135179579257965,>= 0.5 or <= -1.0,clean
+9,residual_ppo,pooled pre-contact |pi_z|>=0.99 frac; |alpha pi| p50/p99 m/s; composed clip / norm cap frac; departure p50 m/s (pre-contact),0.4645960680654221; 0.4068293554292152/0.5963076716666212; 0.0/0.0; 0.4068293682182869,authority-limited if |pi_z|>=0.99 on >= 0.5,not authority-limited
+9,residual_ppo_forecast,pooled pre-contact |pi_z|>=0.99 frac; |alpha pi| p50/p99 m/s; composed clip / norm cap frac; departure p50 m/s (pre-contact),0.45163206706491965; 0.36299726382386144/0.5752076405432879; 0.0/0.0; 0.36299726279054734,authority-limited if |pi_z|>=0.99 on >= 0.5,not authority-limited
+10a,ppo_forecast,pooled open-loop median |delta v_sp| m/s (mean; zeros),0.045485755818011606; 0.04545546619825408,>= 0.015 under either: depends,depends on the block
+10b,ppo_forecast,paired success diff (counterfactual - factual) [95 % CI] (mean; zeros),"-0.002 [-0.006000000000000001, 0.0]; 0.0 [0.0, 0.0]",CI excludes 0 under either: outcome depends,outcome dependence not shown
+10a,residual_ppo_forecast,pooled open-loop median |delta v_sp| m/s (mean; zeros),0.02686405136792166; 0.026854031047154184,>= 0.015 under either: depends,depends on the block
+10b,residual_ppo_forecast,paired success diff (counterfactual - factual) [95 % CI] (mean; zeros),"0.0 [0.0, 0.0]; 0.0 [0.0, 0.0]",CI excludes 0 under either: outcome depends,outcome dependence not shown
+11,residual_ppo,hard landings: n; speed-only / tilt-only / both; deck-alone-over / deck-dominated / drone-dominated,28; 0/28/0; 20/8/0,descriptive (pre-stated classes),descriptive
+11,ppo_forecast,hard landings: n; speed-only / tilt-only / both; deck-alone-over / deck-dominated / drone-dominated,18; 0/18/0; 14/4/0,descriptive (pre-stated classes),descriptive
+11,residual_ppo_forecast,hard landings: n; speed-only / tilt-only / both; deck-alone-over / deck-dominated / drone-dominated,30; 0/30/0; 23/7/0,descriptive (pre-stated classes),descriptive
+11,ppo_sinusoid,hard landings: n; speed-only / tilt-only / both; deck-alone-over / deck-dominated / drone-dominated,25; 0/25/0; 20/5/0,descriptive (pre-stated classes),descriptive
+11,ppo,hard landings: n; speed-only / tilt-only / both; deck-alone-over / deck-dominated / drone-dominated,15; 0/15/0; 13/2/0,descriptive (pre-stated classes),descriptive
+11,pid_feedforward,hard landings: n; speed-only / tilt-only / both; deck-alone-over / deck-dominated / drone-dominated,9; 0/9/0; 6/3/0,descriptive (pre-stated classes),descriptive
+12,residual_ppo,"tunnelled re-flown n; impact / post-contact idle / other; deepest mm (its mechanism, seed, SS/index, outcome)","7; 0/1/6; 6.1691071093708505 (other, seed 1, SS5/45, hard_landing)",limit 7.03 mm; committed max 6.1691071093708505,descriptive
+12,ppo_forecast,"tunnelled re-flown n; impact / post-contact idle / other; deepest mm (its mechanism, seed, SS/index, outcome)","10; 0/7/3; 6.212768222277102 (post_contact_idle, seed 1, SS6/58, hard_landing)",limit 7.03 mm; committed max 6.212768222277102,descriptive
+12,residual_ppo_forecast,"tunnelled re-flown n; impact / post-contact idle / other; deepest mm (its mechanism, seed, SS/index, outcome)","3; 0/2/1; 5.652250924185599 (post_contact_idle, seed 4, SS6/108, hard_landing)",limit 7.03 mm; committed max 5.652250924185599,descriptive
+12,ppo_sinusoid,"tunnelled re-flown n; impact / post-contact idle / other; deepest mm (its mechanism, seed, SS/index, outcome)","11; 0/8/3; 7.124504977056321 (post_contact_idle, seed 2, SS6/58, hard_landing)",limit 7.03 mm; committed max 7.124504977056321,descriptive

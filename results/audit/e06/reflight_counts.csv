@@ -1,0 +1,9 @@
+method,flights,reproduced,in_S,in_T,in_H,counterfactual_C
+pid_feedforward,109,109,100,0,9,0
+pid_feedforward_lowvz_cut,105,105,100,6,0,0
+ppo,15,15,0,0,15,0
+ppo_forecast,522,522,500,10,18,1000
+ppo_sinusoid,528,528,500,11,25,0
+residual_ppo,530,530,500,7,28,0
+residual_ppo_forecast,531,531,500,3,30,1000
+all,2340,2340,2200,37,125,2000
