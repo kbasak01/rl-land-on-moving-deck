@@ -3,3 +3,6 @@ artifacts/
 __pycache__/
 *.egg-info/
 runs/
+
+# Phase 7 episode-level CSVs are committed gzipped only (P7-D1a §12).
+results/e07/**/episodes.csv

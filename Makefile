@@ -143,9 +143,15 @@ mss-export:
 # Resumable: a condition already written is verified byte for byte, not re-flown. The CSVs do
 # not depend on WORKERS (worker count, wall time and checkpoint digests go to run_info.json).
 # Hours of compute: launch in the background with output to a log (no tee; see dmf-forecasters).
+# The MSS list check resets real environments on MSS motion, so it needs the gitignored
+# artifacts/mss/ (run `make mss-export` first); without them it is skipped with a message and
+# the MSS arm is reported "not flown" by eval_phase7.py. Episodes are gzipped per condition
+# afterwards (P7-D1a §12); a condition already written is verified, not re-flown.
 eval:
 	$(PY) scripts/make_episodes.py --check --workers $(WORKERS)
+	@if [ -d artifacts/mss/records ]; then $(PY) scripts/make_episodes.py --mss --check --workers $(WORKERS); else echo "eval: artifacts/mss/records absent -- MSS list check skipped (run make mss-export)"; fi
 	$(PY) scripts/eval_phase7.py --arm all --workers $(WORKERS)
+	$(PY) scripts/eval_phase7.py --arm all --compress
 # Phase 8 -- deploy-benchmarker: ONNX export, parity, latency -> results/latency*
 bench:           ; @echo "not implemented: phase 8"
 # Phase 7/9 -- eval-auditor: re-render results/results.md from the committed CSVs only
