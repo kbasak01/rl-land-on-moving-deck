@@ -177,7 +177,6 @@ def build_observation(
     time_fraction: float,
     last_action: FloatArray,
     in_contact: bool,
-    relative_block_override: FloatArray | None = None,
 ) -> FloatArray:
     """Assemble one observation vector.
 
@@ -192,14 +191,15 @@ def build_observation(
             through unrotated and the layout table calls it ``body`` because that is how
             gym-pybullet-drones' own observation labels it.
         drone_rotation: The drone's body-to-world rotation matrix, shape ``(3, 3)``.
-        deck: The analytic deck state at the same instant.
+        deck: The deck state every deck-derived entry (relative position and velocity,
+            deck normal, relative tilt, clearance) is computed from: the analytic deck at
+            the same instant, or, with the perception stand-in on, the perceived sample
+            from :meth:`rld.envs.noise.PerceptionNoise.perceive` (P7-D4). Metres and metres
+            per second model scale, world frame.
         geometry: The drone's collision cylinder, for the signed clearance.
         time_fraction: ``t_episode / episode_len``, dimensionless, clipped into ``[0, 1]``.
         last_action: The previous action, dimensionless, in ``[-1, 1]^3``.
         in_contact: Whether the drone is touching the deck this step.
-        relative_block_override: Optional ``(6,)`` replacement for the relative position
-            and relative velocity blocks **in the drone-yaw frame**, used to inject the
-            :mod:`rld.envs.noise` stand-in. ``None`` means use the clean values.
 
     Returns:
         A ``(n,)`` float32 vector matching :func:`observation_space`, clipped into its
@@ -216,8 +216,6 @@ def build_observation(
         drone_velocity_m_s, dtype=np.float64
     )
     relative_block = np.concatenate([rot_yaw @ rel_position_world, rot_yaw @ rel_velocity_world])
-    if relative_block_override is not None:
-        relative_block = np.asarray(relative_block_override, dtype=np.float64).reshape(6)
 
     blocks: list[FloatArray] = [
         np.asarray(drone_rpy_rad, dtype=np.float64).reshape(3),

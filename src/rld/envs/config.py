@@ -291,14 +291,18 @@ class ObservationConfig:
 
 @dataclass(frozen=True)
 class NoiseConfig:
-    """``configs/env/noise.yaml``: the perception stand-in, applied to the relative block.
+    """``configs/env/noise.yaml``: the perception stand-in, applied to the perceived deck.
+
+    Since P7-D4 the stand-in perceives the deck sample at the pad (``rld.envs.noise``), not
+    the relative block; the YAML's own comments predate that and are left as committed (its
+    SHA-256 is recorded in committed results' provenance).
 
     Attributes:
         enabled: Off by default; Phase 7 ablates it.
-        position_sigma_m: Gaussian standard deviation on relative position, metres model
-            scale, independent per axis.
-        velocity_sigma_m_s: Gaussian standard deviation on relative velocity, metres per
-            second model scale.
+        position_sigma_m: Gaussian standard deviation on the perceived pad position, metres
+            model scale, world frame, independent per axis.
+        velocity_sigma_m_s: Gaussian standard deviation on the perceived pad velocity,
+            metres per second model scale, world frame, independent per axis.
         latency_ms: Fixed transport delay, milliseconds model scale, quantised down to a
             whole number of control steps.
         hold_freq_hz: Sample-and-hold refresh rate, hertz model scale. Equal to the control

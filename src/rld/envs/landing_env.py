@@ -745,29 +745,27 @@ class DeckLandingAviary(BaseAviary):  # type: ignore[misc]
     def _computeObs(self) -> FloatArray:  # noqa: N802
         """Build the observation for the current state.
 
+        With the perception stand-in enabled (P7-D4), the deck the observation is built from
+        is the **perceived** sample (:meth:`rld.envs.noise.PerceptionNoise.perceive`: the
+        true sample of control step ``k - L``, held, with world-frame noise on pad position
+        and velocity), and every deck-derived entry -- relative position and velocity, deck
+        normal, relative tilt, clearance -- is computed from it and the drone's **current**
+        true state. With it disabled, the true deck sample is used and the stand-in is never
+        called. Reward, termination and touchdown read the true deck either way.
+
+        Called exactly once per control step (once by ``BaseAviary.reset``, once per
+        :meth:`step`), which is what advances the stand-in's delay line by one step.
+
         Returns:
             A ``(n,)`` float32 vector matching ``observation_space``.
         """
         deck = self._deck_sample()
+        if self._noise_cfg.enabled:
+            deck = self._noise.perceive(deck)
         position = np.asarray(self.pos[0], dtype=np.float64)
         velocity = np.asarray(self.vel[0], dtype=np.float64)
         rotation = self._drone_rotation(np.asarray(self.quat[0], dtype=np.float64))
         rpy = np.asarray(self.rpy[0], dtype=np.float64)
-        override: FloatArray | None = None
-        if self._noise_cfg.enabled:
-            yaw = float(rpy[2])
-            cos_yaw, sin_yaw = np.cos(yaw), np.sin(yaw)
-            rot_yaw = np.array(
-                [[cos_yaw, sin_yaw, 0.0], [-sin_yaw, cos_yaw, 0.0], [0.0, 0.0, 1.0]],
-                dtype=np.float64,
-            )
-            clean = np.concatenate(
-                [
-                    rot_yaw @ (np.asarray(deck.position_m, dtype=np.float64) - position),
-                    rot_yaw @ (np.asarray(deck.velocity_m_s, dtype=np.float64) - velocity),
-                ]
-            )
-            override = self._noise.apply(clean)
         return build_observation(
             cfg=self._obs_cfg,
             drone_position_m=position,
@@ -786,7 +784,6 @@ class DeckLandingAviary(BaseAviary):  # type: ignore[misc]
             ),
             last_action=self._last_action,
             in_contact=self._in_contact,
-            relative_block_override=override,
         )
 
     def _computeReward(self) -> float:  # noqa: N802
