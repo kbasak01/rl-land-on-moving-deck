@@ -4143,6 +4143,80 @@ No combined H1 or H3 verdict exists (P3-D4 #5, P7-D1a #2).
   `unseen_vessel` cells) are not audited;
 - simulation only, with λ = 1/25, a 3-DOF deck and dmf's roll/pitch–heave phase defect carried.
 
+### P7-D4 — DEVIATION: the perception stand-in perceives the deck, and the noise arm is re-flown (2026-10-02)
+
+*Status.*
+- This is a dated deviation from P7-D1 §4's scope sentence and from the Phase 2 stand-in
+  (`rld.envs.noise`, `DeckLandingAviary._computeObs`).
+- The user decided it (option (b)) on 2026-10-02, after the Phase 7 `results-skeptic` review.
+- It is committed **alone**, before the stand-in code changes and before any re-flight.
+- It changes no success criterion, no episode list, no hypothesis and no threshold. P3-D1's block
+  SHA-256 stays `21465588…`.
+- No hypothesis reads the noise arm, so no verdict in P7-D3 can move.
+
+**Why (review M1, M2).** The Phase 2 stand-in replaced only the six relative entries (relative
+position and relative velocity) with a delayed, held, noisy copy. Everything else was computed from
+the true deck at the current step: the drone's own velocity, the deck normal, the relative tilt and
+the pad-plane clearance.
+- *M1, mixed timestamps.* A controller that reconstructs deck velocity as own velocity + relative
+  velocity (`rld.control.obs_view`) therefore received v_pad(t−L) + v_drone(t) − v_drone(t−L).
+  That is positive feedback on the drone's own acceleration through `pid_feedforward`'s
+  feedforward, with k_ff = 1.08.
+  - The reviewer's scratch re-flight: with a consistently delayed deck velocity, 20 of 20
+    episodes that crash as flown succeed (`pid_feedforward`, 2 steps, `id` SS3 and SS5).
+  - So the 2-step-latency crash rates in the committed noise arm measure this inconsistency, not
+    perception latency.
+- *M2, ideal channels.* Under every noise condition, the clearance, the deck normal and the
+  relative tilt stayed true and undelayed.
+
+**The corrected stand-in (definition, fixed before any change):**
+1. **What is perceived** is the *deck*: the full analytic deck sample at the pad (pad position,
+   velocity, orientation and normal, as `PlatformSample`). The drone's own state is not perceived.
+2. **Delay and hold.** At control step k the perceived sample is the true deck sample of step
+   k − L.
+   - L is the configured latency, quantised **down** to whole control steps. This is unchanged:
+     33.4 / 66.7 ms → 1 / 2 steps (P7-D1 §4).
+   - Warm-up is unchanged: before L samples exist, the oldest available sample is used.
+   - The 30 Hz hold is unchanged (no hold).
+3. **Noise.** Zero-mean Gaussian noise, independent per world axis, is added to the perceived pad
+   position (σ_p) and pad velocity (σ_v = σ_p / 0.2 s). The sigmas and the stream are unchanged
+   (a spawned child of the episode seed). It is now drawn in the **world** frame, not the
+   drone-yaw frame. The distribution is the same, because the noise is isotropic in the horizontal
+   plane and identical in z, but the realised values differ from the committed arm. Orientation
+   and normal get no noise; P7-D1 never specified attitude noise.
+4. **Every deck-derived observation entry** is computed from the perceived sample and the drone's
+   **current** true state, through the unchanged `build_observation`:
+   - relative position;
+   - relative velocity;
+   - the deck normal in the yaw frame;
+   - the relative tilt;
+   - the pad-plane clearance.
+
+   The drone's own attitude, rates and velocity, time, last action and contact flag stay clean
+   and current. With this, own velocity + relative velocity = v_pad(t−L) + noise: a consistent,
+   stale deck estimate.
+5. **What does not change.**
+   - With noise disabled (training, and every non-noise arm), the observation path is untouched.
+   - At L = 0 and σ = 0 with noise enabled, the observation is bit-identical to the clean one.
+   - Termination, reward, touchdown detection and every evaluation metric still use the true state.
+
+**Re-flight.**
+- All 11 non-clean noise conditions are re-flown on the identical episodes: same lists, t0,
+  initial state and noise stream, by the same rule as P7-D1 §4. Every one of them changes: the
+  latency conditions through the delayed deck, and the σ-only conditions through the clearance,
+  which now carries position noise.
+- The committed arm, flown at `6b83e5c` and recorded in P7-D2, is **not deleted**. It moves
+  unchanged to `results/e07/noise_superseded_p7d1/` and is labelled superseded wherever it is
+  shown. Its SHA-256s stay in P7-D2.
+- The new arm writes `results/e07/noise/`, and the scored hypotheses do not change.
+
+**Also folded in from the same review, as text corrections with no re-flight:**
+- M3: the `below_deck` bail-out is a fixed model-scale constant and pre-empts completed dwells.
+- M4: per-cell tunnelled-success counts.
+- MINOR m1–m8.
+
+These are recorded in P7-D5 after they are made.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|
