@@ -3728,6 +3728,64 @@ items (c) of the plan, with no change:
 - P6-D5's tunnelling bound;
 - tilt-only hard landings.
 
+### P7-D1a — Scoring details fixed before any Phase 7 number is read (2026-10-02)
+
+*Status.* The Phase 7 flights (matrix, cg, sinusoid, λ, noise) started at **08:32:37 EDT** from
+`6b83e5c`, in the background. This entry is committed while they run, **before any Phase 7
+output has been read**. Nothing is read from `results/e07/` until the flights have finished,
+and nothing from the run log beyond its arm start/done lines. Only the scoring code reads
+`results/e07/`. The `eval-auditor` raised the open points at the code hand-back; the user
+decided items 1–2 and 12, and the rest are readings of P3-D1. **No threshold or prediction
+changes.** P3-D1's block SHA-256 stays `21465588…`.
+
+1. **H2 and H4 verdict mapping (user, 2026-10-02).** This follows H1b's pattern, with the
+   pre-registered 10-point magnitude.
+   - **Supported:** the point estimate is ≥ 10 points **and** the 95 % CI's lower bound is > 0.
+   - **Inconclusive:** the CI's lower bound is > 0, but the point estimate is < 10 points.
+   - **Not supported:** every other case.
+2. **H3 has no combined verdict (user, 2026-10-02).** This is the P3-D4 #5 precedent for H1.
+   - Each part gets its own verdict: `ppo_forecast` vs `ppo` at `id` SS5 and at `id` SS6, and the
+     `unseen_vessel` half-rule at each.
+   - The `residual_ppo_forecast` vs `residual_ppo` secondary is scored the same way.
+   - No conjunction row is written.
+3. **Erratum to P7-D1 §2: IQM vs mean.**
+   - P7-D1 §2 said a learned method's cell success is the IQM over seeds for every contrast. That
+     over-reached. P3-D1 §4 fixes the H1–H4 method contrasts as a **paired bootstrap on per-episode
+     differences**, a mean over the resampled seeds × episodes.
+   - Only H2 names IQM explicitly ("IQM success").
+   - So H1a's non-inferiority, H1b and H4 use the §4 mean-based paired bootstrap, and H2 uses IQM.
+   - The IQM-based value of H1a, H1b and H4 is printed beside each as "post hoc, not scored".
+   - Where P3-D1 and P7-D1 disagree, P3-D1 wins.
+4. **H2 pairing inside a cell.** `ppo` and `residual_ppo` flew the identical list in each cell, so
+   inside a cell they share the resampled episode indices. Between the two cells (`id` SS5 and
+   `unseen_seastate` SS6), episodes are resampled independently, as P3-D1 states.
+5. **H3's rule.** H3 uses H1a's point-estimate and CI rule on r: ≥ 10 % on the point estimate, and
+   the CI of r excludes 0. It has **no** non-inferiority term, because P3-D1 gives H3 none.
+6. **"The CI excludes 0".** For a predicted improvement this means the lower bound is > 0. A CI
+   wholly below 0 is "not supported".
+7. **D0.4's transfer trigger for H4 (P6-D6).** It counts as fired when `ppo_sinusoid`'s JONSWAP
+   `id` SS5 success is ≥ `ppo`'s. Both are already 200/200 in every seed, from e05 and e06.
+8. **P3-D4 #8 sensitivity.** Only `timeout` episodes are ranked as the worst closing speed (+∞). A
+   `crash` without contact stays excluded. This is a sensitivity analysis and is never scored.
+9. **p95 estimator.** NumPy `linear`, the estimator behind every committed p95 since Phase 3.
+10. **What λ rescales.** Every component that reads the project scale is rebuilt at the arm's λ:
+    - the deck source;
+    - the pad lever arm;
+    - the ship-motion feed;
+    - `gated` / `oracle_gated`'s quiescence thresholds, which are dmf's full-scale thresholds
+      Froude-converted (`limits_for(..., spec.scale)`).
+
+    PID gains are model-scale constants and do not change. Learned policies do not change. That is
+    the point of the arm.
+11. **Bootstrap seed.** Every contrast uses seed 20260926 (P3-D1 §4). Replicate draws are therefore
+    correlated across contrasts. This is stated, not corrected. No multiplicity correction is
+    applied (P3-D4 #9).
+12. **Storage (user, 2026-10-02).**
+    - Episode-level CSVs are committed **gzipped, one file per condition**, as
+      `results/e07/<arm>[/<condition>]/episodes.csv.gz`, about 100 MB in all.
+    - The summaries, contrasts and `results.md` are re-derivable from a clone.
+    - The SHA-256 of each uncompressed `episodes.csv` is recorded beside it.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|
