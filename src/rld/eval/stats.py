@@ -679,7 +679,8 @@ class DropContrast:
     """A success contrast between two cells, or the difference of two methods' contrasts.
 
     ``drop(m) = success(m, cell 1) - success(m, cell 2)``, success being the IQM over seeds of
-    each seed's success rate (P7-D1 §2). With one method the statistic is ``drop(a)``; with
+    each seed's success rate (P7-D1 §2), or with ``estimator == "mean"`` their plain mean
+    (P3-D1 §4, P7-D1a #3). With one method the statistic is ``drop(a)``; with
     two it is ``drop(a) - drop(b)``. Rates and differences are fractions in ``[-1, 1]``
     (multiply by 100 for points).
 
@@ -700,6 +701,7 @@ class DropContrast:
         n_episodes_2: Episodes in cell 2.
         n_seeds_a: Seeds of ``a``.
         n_seeds_b: Seeds of ``b`` (0 without ``b``).
+        estimator: ``"iqm"`` or ``"mean"`` over seeds; the ``success_*`` fields use it too.
     """
 
     statistic: float
@@ -718,11 +720,30 @@ class DropContrast:
     n_episodes_2: int
     n_seeds_a: int
     n_seeds_b: int
+    estimator: str = "iqm"
 
     @property
     def separates(self) -> bool:
         """Return whether the interval excludes 0."""
         return self.lo > 0.0 or self.hi < 0.0
+
+
+#: How :func:`drop_difference_bootstrap` aggregates a method's success in a cell over seeds.
+type SeedEstimator = Literal["iqm", "mean"]
+
+
+def _seed_aggregate(rates: FloatArray, estimator: str) -> FloatArray:
+    """Aggregate ``(batch, n_seeds)`` per-seed rates over seeds: rliable IQM or plain mean."""
+    if estimator == "iqm":
+        return _iqm_rows(rates)
+    return np.asarray(np.mean(rates, axis=1), dtype=np.float64)
+
+
+def _seed_point(success: FloatArray, estimator: str) -> float:
+    """Return a cell's success over seeds: IQM of per-seed rates, or their plain mean."""
+    if estimator == "iqm":
+        return _iqm_point(success)
+    return float(np.mean(np.asarray(success, dtype=np.float64).mean(axis=1)))
 
 
 def _method_cells(cell1: FloatArray, cell2: FloatArray, name: str) -> tuple[FloatArray, FloatArray]:
@@ -747,6 +768,7 @@ def drop_difference_bootstrap(
     reps: int = PAIRED_REPS,
     confidence: float = 0.95,
     seed: int = DEFAULT_BOOTSTRAP_SEED,
+    estimator: SeedEstimator = "iqm",
 ) -> DropContrast:
     """Return ``drop(a)`` or ``drop(a) - drop(b)`` with its bootstrap interval (P7-D1 §2).
 
@@ -761,9 +783,13 @@ def drop_difference_bootstrap(
       are the **same** listed episodes under two conditions, so one set of indices is shared
       by both cells and both methods.
 
-    Each method's success in a cell is the IQM over its resampled seeds of each seed's
-    success rate over the resampled episodes. Draw order per batch: seeds of ``a``, seeds of
-    ``b`` (if any), episodes of cell 1, episodes of cell 2 (independent mode only).
+    Each method's success in a cell is the IQM (``estimator="iqm"``, the default: H2 and the
+    descriptive arm contrasts) or the plain mean (``"mean"``) over its resampled seeds of each
+    seed's success rate over the resampled episodes. Every seed flew the same episodes, so the
+    mean is the mean over resampled seeds x episodes, and with ``"shared_episodes"`` the
+    statistic is then P3-D1 §4's paired bootstrap on per-episode differences (H4, P7-D1a #3).
+    Draw order per batch: seeds of ``a``, seeds of ``b`` (if any), episodes of cell 1,
+    episodes of cell 2 (independent mode only); it does not depend on ``estimator``.
 
     Args:
         a_cell1: ``(n_seeds_a, n_episodes_1)`` 0/1 success of ``a`` in cell 1.
@@ -774,17 +800,20 @@ def drop_difference_bootstrap(
         reps: Bootstrap replicates (P7-D1: 10 000).
         confidence: Two-sided coverage.
         seed: Resampling seed (P7-D1: 20260926).
+        estimator: ``"iqm"`` or ``"mean"`` over seeds.
 
     Returns:
         The :class:`DropContrast`.
 
     Raises:
-        ValueError: On malformed input, a mode that does not fit the shapes, or only one of
-            ``b``'s cells.
+        ValueError: On malformed input, a mode that does not fit the shapes, only one of
+            ``b``'s cells, or an unknown estimator.
     """
     _check_reps(reps, confidence)
     if mode not in ("independent_cells", "shared_episodes"):
         raise ValueError(f"unknown mode {mode!r}")
+    if estimator not in ("iqm", "mean"):
+        raise ValueError(f"unknown estimator {estimator!r}")
     a1, a2 = _method_cells(a_cell1, a_cell2, "a")
     if (b_cell1 is None) != (b_cell2 is None):
         raise ValueError("give both of b's cells or neither")
@@ -802,14 +831,17 @@ def drop_difference_bootstrap(
     n_a = a1.shape[0]
     n_b = b1.shape[0] if has_b else 0
 
-    s_a1, s_a2 = _iqm_point(a1), _iqm_point(a2)
+    s_a1, s_a2 = _seed_point(a1, estimator), _seed_point(a2, estimator)
     drop_a = s_a1 - s_a2
     nan = float("nan")
     s_b1, s_b2, drop_b = nan, nan, nan
     if has_b:
-        s_b1, s_b2 = _iqm_point(b1), _iqm_point(b2)
+        s_b1, s_b2 = _seed_point(b1, estimator), _seed_point(b2, estimator)
         drop_b = s_b1 - s_b2
     point = drop_a - drop_b if has_b else drop_a
+
+    def agg(rates: FloatArray) -> FloatArray:
+        return _seed_aggregate(rates, estimator)
 
     rng = np.random.default_rng(seed)
     values = np.empty(reps, dtype=np.float64)
@@ -819,13 +851,10 @@ def drop_difference_bootstrap(
         seeds_b = rng.integers(0, n_b, size=(size, n_b)) if has_b else None
         ep1 = rng.integers(0, n_e1, size=(size, n_e1))
         ep2 = rng.integers(0, n_e2, size=(size, n_e2)) if mode == "independent_cells" else ep1
-        rep = _iqm_rows(_resampled_rates(a1, seeds_a, ep1)) - _iqm_rows(
-            _resampled_rates(a2, seeds_a, ep2)
-        )
+        rep = agg(_resampled_rates(a1, seeds_a, ep1)) - agg(_resampled_rates(a2, seeds_a, ep2))
         if seeds_b is not None:
             rep = rep - (
-                _iqm_rows(_resampled_rates(b1, seeds_b, ep1))
-                - _iqm_rows(_resampled_rates(b2, seeds_b, ep2))
+                agg(_resampled_rates(b1, seeds_b, ep1)) - agg(_resampled_rates(b2, seeds_b, ep2))
             )
         values[start : start + size] = rep
     lo, hi, _ = _percentile_interval(values, confidence)
@@ -846,6 +875,7 @@ def drop_difference_bootstrap(
         n_episodes_2=n_e2,
         n_seeds_a=n_a,
         n_seeds_b=n_b,
+        estimator=estimator,
     )
 
 

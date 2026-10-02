@@ -49,10 +49,10 @@ from rld.eval.hypotheses import (
     NOT_APPLICABLE,
     NOT_SUPPORTED,
     SUPPORTED,
-    combine_h3,
     verdict_h1a,
     verdict_half_rule,
     verdict_magnitude,
+    verdict_p7d1a,
 )
 from rld.eval.runner import (
     EpisodeListMismatchError,
@@ -180,16 +180,38 @@ def test_h1a_truth_table(r: float, lo: float, hi: float, ni_lo: float, want: str
         (0.05, 0.001, 0.09, 0.05, SUPPORTED),
         (0.03, 0.005, 0.06, 0.05, INCONCLUSIVE),
         (0.06, -0.01, 0.10, 0.05, NOT_SUPPORTED),
-        (-0.02, -0.05, -0.01, 0.05, NOT_SUPPORTED),
-        (0.0, 0.0, 0.0, 0.10, NOT_SUPPORTED),  # H4 at its bound: all 200/200 everywhere
-        (-0.40, -0.60, -0.20, 0.10, NOT_SUPPORTED),  # H4: both legs lose; CI below 0
-        (0.12, 0.02, 0.20, 0.10, SUPPORTED),  # H2 / H3 thresholds
+        (0.06, 0.0, 0.10, 0.05, NOT_SUPPORTED),  # a bound at 0 does not exclude 0
+        (-0.02, -0.05, -0.01, 0.05, NOT_SUPPORTED),  # wholly below 0 (P7-D1a #6)
+        (-0.01, 0.002, 0.03, 0.05, NOT_SUPPORTED),  # H1b: "negative" is not supported
+        (0.12, 0.02, 0.20, 0.10, SUPPORTED),  # H3 threshold
+        (0.07, 0.01, 0.12, 0.10, INCONCLUSIVE),  # H3: 0 < r < 10 %, separates
+        (float("nan"), float("nan"), float("nan"), 0.10, NOT_SUPPORTED),
     ],
 )
 def test_magnitude_truth_table(
     point: float, lo: float, hi: float, threshold: float, want: str
 ) -> None:
+    """H1b (P3-D1 §8) and H1a / H3's r rule (P3-D4 #5, P7-D1a #5, #6)."""
     assert verdict_magnitude(point, lo, hi, threshold) == want
+
+
+@pytest.mark.parametrize(
+    ("point", "lo", "hi", "want"),
+    [
+        (0.12, 0.02, 0.20, SUPPORTED),  # >= 10 points and lower bound > 0
+        (0.10, 0.001, 0.19, SUPPORTED),  # both inclusive / strict as worded
+        (0.09, 0.01, 0.15, INCONCLUSIVE),  # lower bound > 0, point < 10 points
+        (0.0, 0.001, 0.02, INCONCLUSIVE),  # P7-D1a #1 as worded (verdict_magnitude: not)
+        (0.15, 0.0, 0.30, NOT_SUPPORTED),  # bound at 0
+        (0.15, -0.02, 0.30, NOT_SUPPORTED),  # CI includes 0
+        (0.0, 0.0, 0.0, NOT_SUPPORTED),  # H4 at its bound: all 200/200 everywhere
+        (-0.40, -0.60, -0.20, NOT_SUPPORTED),  # both legs lose; CI wholly below 0
+        (float("nan"), float("nan"), float("nan"), NOT_SUPPORTED),
+    ],
+)
+def test_h2_h4_truth_table(point: float, lo: float, hi: float, want: str) -> None:
+    """P7-D1a #1 (user, 2026-10-02): H2 and H4 at the pre-registered 10-point magnitude."""
+    assert verdict_p7d1a(point, lo, hi, 0.10) == want
 
 
 @pytest.mark.parametrize(
@@ -207,21 +229,14 @@ def test_half_rule_truth_table(r_id: float, r_uv: float, want: str) -> None:
     assert verdict_half_rule(r_id, r_uv) == want
 
 
-@pytest.mark.parametrize(
-    ("ids", "halves", "want"),
-    [
-        ((SUPPORTED, SUPPORTED), (HOLDS, HOLDS), SUPPORTED),
-        ((SUPPORTED, SUPPORTED), (HOLDS, FAILS), NOT_SUPPORTED),
-        ((SUPPORTED, NOT_SUPPORTED), (HOLDS, HOLDS), NOT_SUPPORTED),
-        ((SUPPORTED, INCONCLUSIVE), (HOLDS, HOLDS), INCONCLUSIVE),
-        ((INCONCLUSIVE, INCONCLUSIVE), (FAILS, FAILS), INCONCLUSIVE),
-        ((NOT_SUPPORTED, NOT_SUPPORTED), (NOT_APPLICABLE, NOT_APPLICABLE), NOT_SUPPORTED),
-    ],
-)
-def test_h3_combination_truth_table(
-    ids: tuple[str, str], halves: tuple[str, str], want: str
-) -> None:
-    assert combine_h3(ids, halves) == want
+def test_no_combined_h3_or_h1_verdict_exists() -> None:
+    """P3-D4 #5 and P7-D1a #2: every part is its own verdict; no conjunction is written."""
+    from rld.eval import hypotheses
+
+    assert not hasattr(hypotheses, "combine_h3")
+    assert not hasattr(hypotheses, "ROLE_COMBINED")
+    assert "combine_h3" not in hypotheses.__all__
+    assert hypotheses.ROLE_POSTHOC == "post hoc, not scored"
 
 
 # --------------------------------------------------------------------------- flights (slow)
@@ -426,3 +441,49 @@ def test_report_round_trip(scratch_e07: Path, tmp_path: Path) -> None:
         assert f"`{method}`" in text
     out.write_text(text + "edited by hand\n", encoding="utf-8")
     assert main([*argv, "--check"]) == 1
+
+
+@pytest.mark.slow
+@pytest.mark.pybullet
+def test_compress_keeps_every_check_byte_identical(scratch_e07: Path, tmp_path: Path) -> None:
+    """P7-D1a §12: gzip each written condition; --check, hypotheses and report unchanged."""
+    import shutil
+
+    from rld.eval import storage
+    from rld.eval.hypotheses import check_hypotheses, write_hypotheses
+    from rld.eval.phase7 import main
+    from rld.eval.report import render_results
+
+    root = tmp_path / "e07"
+    shutil.copytree(scratch_e07, root)
+    write_hypotheses(root, RESULTS, reps=200, allow_subset=True)
+    hyp_before = (root / "hypotheses.csv").read_bytes()
+    md_before = render_results(RESULTS, root)
+    plain = (root / "matrix" / "episodes.csv").read_bytes()
+    assert main(["--arm", "matrix", "--compress", "--out-root", str(root)]) == 0
+    csv_path = root / "matrix" / "episodes.csv"
+    assert not csv_path.exists() and storage.gz_path(csv_path).is_file()
+    assert storage.read_bytes(csv_path) == plain  # round trip byte-identical
+    info = json.loads((root / "matrix" / "run_info.json").read_text(encoding="utf-8"))
+    sha = info["files_sha256"]["episodes.csv"]
+    assert info["episodes_storage"]["sha256"] == sha
+    assert storage.sha256_path(csv_path).read_text(encoding="utf-8").split()[0] == sha
+    assert main(["--arm", "matrix", "--check", "--out-root", str(root)]) == 0
+    assert main(["--arm", "matrix", "--compress", "--out-root", str(root)]) == 0  # idempotent
+    # A condition that no longer re-derives byte-identically (a derived file edited by hand)
+    # is refused, and nothing is written for it.
+    agg = root / "sinusoid" / "aggregate.csv"
+    agg.write_text(agg.read_text(encoding="utf-8") + "edited by hand\n", encoding="utf-8")
+    sin_csv = root / "sinusoid" / "episodes.csv"
+    assert main(["--arm", "sinusoid", "--compress", "--out-root", str(root)]) == 1
+    assert sin_csv.is_file() and not storage.gz_path(sin_csv).exists()
+    assert not storage.sha256_path(sin_csv).exists()
+    assert check_hypotheses(root, RESULTS, reps=200, allow_subset=True)
+    assert (root / "hypotheses.csv").read_bytes() == hyp_before
+    assert render_results(RESULTS, root) == md_before
+    log = json.loads((root / "run_info.json").read_text(encoding="utf-8"))
+    assert "compress" in log["invocations"][-1]
+    # A tampered sidecar is caught by --check.
+    side = storage.sha256_path(root / "matrix" / "episodes.csv")
+    side.write_text("0" * 64 + "  episodes.csv\n", encoding="utf-8")
+    assert main(["--arm", "matrix", "--check", "--out-root", str(root)]) == 1

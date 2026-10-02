@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from rld.envs.touchdown import OUTCOMES
+from rld.eval import storage
 from rld.eval.episodes import REGIME_CELLS
 from rld.eval.metrics import CELL_METRIC_COLUMNS, CellMetrics, as_bool, as_float, cell_metrics
 from rld.eval.stats import wilson_interval
@@ -361,8 +362,12 @@ def write_rows(path: Path, rows: Sequence[Mapping[str, Any]], columns: Sequence[
 
 
 def read_rows(path: Path) -> list[dict[str, str]]:
-    """Read a CSV back as text records, in file order."""
-    with path.open(newline="", encoding="utf-8") as handle:
+    """Read a CSV back as text records, in file order.
+
+    ``path`` is the logical CSV: when ``<path>.gz`` exists it is read instead
+    (:func:`rld.eval.storage.resolve`, P7-D1a §12); otherwise ``path`` itself, as before.
+    """
+    with storage.open_text(path) as handle:
         return list(csv.DictReader(handle))
 
 

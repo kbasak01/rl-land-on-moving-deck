@@ -210,3 +210,50 @@ def test_paired_iqm_difference() -> None:
     assert res.lo > 0.0 and res.separates
     same = paired_iqm_difference(b, b.copy(), reps=500)
     assert (same.diff, same.lo, same.hi) == (0.0, 0.0, 0.0)
+
+
+def test_drop_mean_estimator_is_the_per_episode_paired_mean() -> None:
+    """P7-D1a #3: H4 uses P3-D1 §4's mean over resampled seeds x shared episodes."""
+    from rld.eval import stats
+
+    rates = [0.5, 0.9, 0.95, 1.0, 1.0]
+    a2 = _with_failures(5, 20, [list(range(round(20 * (1 - r)))) for r in rates])
+    res = drop_difference_bootstrap(
+        np.ones((5, 20)), a2, mode="shared_episodes", reps=100, estimator="mean"
+    )
+    assert res.estimator == "mean"
+    assert res.success_a2 == pytest.approx(float(np.mean(rates)), abs=1e-15)
+    # An independent reference: same draw order (seeds of a, seeds of b, shared episodes),
+    # statistic = mean over the resampled seeds x episodes of the per-episode differences.
+    rng0 = _rng(20)
+    a1, a2 = (rng0.random((5, 60)) < 0.9).astype(float), (rng0.random((5, 60)) < 0.8).astype(float)
+    b1, b2 = (rng0.random((5, 60)) < 0.95).astype(float), (rng0.random((5, 60)) < 0.9).astype(float)
+    reps, seed = 600, 7
+    got = drop_difference_bootstrap(
+        a1, a2, b1, b2, mode="shared_episodes", reps=reps, seed=seed, estimator="mean"
+    )
+    rng = np.random.default_rng(seed)
+    values = []
+    for start in range(0, reps, stats._PAIRED_BATCH):
+        size = min(stats._PAIRED_BATCH, reps - start)
+        sa = rng.integers(0, 5, size=(size, 5))
+        sb = rng.integers(0, 5, size=(size, 5))
+        ep = rng.integers(0, 60, size=(size, 60))
+        for k in range(size):
+            da = (a1 - a2)[sa[k]][:, ep[k]].mean()
+            db = (b1 - b2)[sb[k]][:, ep[k]].mean()
+            values.append(da - db)
+    lo, hi = np.percentile(values, [2.5, 97.5])
+    assert got.lo == pytest.approx(lo, abs=1e-12) and got.hi == pytest.approx(hi, abs=1e-12)
+    point = ((a1 - a2).mean()) - ((b1 - b2).mean())
+    assert got.statistic == pytest.approx(point, abs=1e-12)
+    # The IQM default is untouched by the new argument.
+    default = drop_difference_bootstrap(
+        a1, a2, b1, b2, mode="shared_episodes", reps=reps, seed=seed
+    )
+    explicit = drop_difference_bootstrap(
+        a1, a2, b1, b2, mode="shared_episodes", reps=reps, seed=seed, estimator="iqm"
+    )
+    assert default == explicit and default.estimator == "iqm"
+    with pytest.raises(ValueError, match="estimator"):
+        drop_difference_bootstrap(a1, a2, mode="shared_episodes", estimator="median")  # type: ignore[arg-type]

@@ -4,8 +4,9 @@ Called as :func:`rld.eval.report.render_results` (``scripts/report.py``). Reads 
 under ``results/e07/`` (each condition's ``summary.csv``, ``aggregate.csv``, ``seeds.csv``,
 ``baselines_summary.csv`` and ``carried_summary_*.csv``; ``contrasts.csv``;
 ``hypotheses.csv``; ``lambda/feasibility.csv``) plus, for the MSS comparison only, the matrix
-``episodes.csv`` and ``results/e01/episodes.csv``. Re-rendering the committed CSVs reproduces
-the committed file byte for byte (``scripts/report.py --check``).
+``episodes.csv`` (its committed ``episodes.csv.gz``, read transparently, P7-D1a §12) and
+``results/e01/episodes.csv``. Re-rendering the committed CSVs reproduces the committed file
+byte for byte (``scripts/report.py --check``).
 
 Reporting rules enforced here (P3-D1, ``landing-protocol`` skill, CLAUDE.md):
 
@@ -29,6 +30,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from rld.envs.touchdown import OUTCOMES
+from rld.eval import storage
 from rld.eval.arms import (
     ALWAYS_PRINTED,
     BASELINES,
@@ -525,9 +527,9 @@ def _uv_headings(e07: Path, results: Path) -> list[str]:
     sources.append(results / "e01_lowvz_cut" / "episodes.csv")
     counts: dict[str, list[int]] = {}
     for path in sources:
-        if not path.is_file():
+        if not storage.exists(path):
             continue
-        with path.open(newline="", encoding="utf-8") as handle:
+        with storage.open_text(path) as handle:  # episodes.csv.gz when present (P7-D1a §12)
             for r in csv.DictReader(handle):
                 if r["regime"] != "unseen_vessel" or r["ss"] != "SS5" or r["pad"] != "aft":
                     continue
@@ -561,14 +563,19 @@ def _threshold(rec: Mapping[str, str]) -> str:
 
 def _hypotheses_section(e07: Path) -> list[str]:
     path = e07 / "hypotheses.csv"
-    lines = ["## 7. Hypotheses (P3-D1 §8, P3-D4, P6-D6, P7-D1 §2)", ""]
+    lines = ["## 7. Hypotheses (P3-D1 §8, P3-D4, P6-D6, P7-D1 §2, P7-D1a)", ""]
     if not path.is_file():
         return [*lines, "*Not scored yet: no `results/e07/hypotheses.csv`.*", ""]
     lines += [
         "Every verdict is computed by `rld.eval.hypotheses` from the pre-registered rule "
         "named in its row. Rates and differences in points, r in %; 10 000 bootstrap "
-        "replicates, seed 20260926, percentile 95 % CI. No multiplicity correction "
-        "(P3-D4 #9). Rows not labelled `scored` are not scored.",
+        "replicates, seed 20260926 for every contrast (replicates correlated across "
+        "contrasts; P7-D1a #11), percentile 95 % CI. No multiplicity correction "
+        "(P3-D4 #9). H1a's non-inferiority, H1b and H4 use P3-D1 §4's paired bootstrap on "
+        "per-episode differences (a mean over resampled seeds × episodes); their IQM-over-seeds "
+        "values sit beside them as *post hoc, not scored*. H2 uses IQM success (P7-D1a #3). "
+        "Each part of H1 and of H3 has its own verdict; there is no combined H1 or H3 verdict "
+        "(P3-D4 #5, P7-D1a #2). Rows not labelled `scored` are not scored.",
         "",
     ]
     rows = []

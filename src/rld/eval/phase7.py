@@ -28,6 +28,18 @@ What one condition writes (``results/e07/<arm>[/<condition>]/``)
   carry checks, any reproduction check, the worker-count re-flight checks, and
   ``"complete": true`` written last.
 
+Committed storage (P7-D1a §12)
+------------------------------
+After the flights, ``--compress`` gzips each complete condition's ``episodes.csv`` into a
+deterministic ``episodes.csv.gz`` (:mod:`rld.eval.storage`: no file name, ``MTIME`` 0, fixed
+level), writes the uncompressed SHA-256 to ``episodes.csv.sha256`` and to ``run_info.json``
+(``episodes_storage``), checks it against ``files_sha256["episodes.csv"]``, re-verifies the
+condition from the ``.gz``, and only then deletes the uncompressed file (``--keep-csv`` keeps
+it). Every reader -- :func:`verify_condition`, the re-flight check, :mod:`rld.eval.hypotheses`
+and the report -- reads ``episodes.csv.gz`` when present and ``episodes.csv`` otherwise, and
+names the logical ``episodes.csv``, so nothing derived changes by a byte. ``--check`` also
+verifies a present ``.gz`` against its sidecar and ``run_info.json``.
+
 Resumable and verified
 ----------------------
 A condition whose ``run_info.json`` says ``complete`` is **verified, not re-flown**:
@@ -74,6 +86,7 @@ import numpy as np
 
 from rld.config import REPO_ROOT
 from rld.envs.noise import PerceptionNoise
+from rld.eval import storage
 from rld.eval.arms import (
     ARMS,
     BASELINES,
@@ -166,6 +179,9 @@ ARM_COLUMNS: tuple[str, ...] = (
 
 #: Provenance keys that vary between runs of identical results; they go to run_info.json.
 VOLATILE_KEYS: tuple[str, ...] = ("omp_num_threads", "cpu_count", "host", "timestamp_utc")
+
+#: A condition's per-episode file (logical name; committed as ``episodes.csv.gz``, P7-D1a §12).
+EPISODES_FILE: str = "episodes.csv"
 
 #: The written files of a condition, in write order (carried files are added per source).
 DERIVED_FILES: tuple[str, ...] = (
@@ -641,8 +657,13 @@ def fly_condition(
 
     out_dir.mkdir(parents=True, exist_ok=True)
     stale = out_dir / "run_info.json"
-    if stale.exists():
-        stale.unlink()
+    for old in (
+        stale,
+        storage.gz_path(out_dir / EPISODES_FILE),
+        storage.sha256_path(out_dir / EPISODES_FILE),
+    ):
+        if old.exists():  # a crashed condition is flown again from scratch
+            old.unlink()
     write_rows(out_dir / "episodes.csv", rows, EPISODE_COLUMNS)
     text_rows = read_rows(out_dir / "episodes.csv")
     run_cols = {
@@ -801,9 +822,14 @@ def verify_condition(
     cfgs = load_eval_configs()
     cfgs_arm = condition_configs(cond, cfgs)
     episodes, _ = condition_episodes(cond, per_cell)
-    rows = read_rows(out_dir / "episodes.csv")
-    header = (out_dir / "episodes.csv").read_text(encoding="utf-8").split("\n", 1)[0]
+    episodes_csv = out_dir / EPISODES_FILE
+    rows = read_rows(episodes_csv)  # episodes.csv.gz when compressed (P7-D1a §12)
+    with storage.open_text(episodes_csv) as handle:
+        header = handle.readline().rstrip("\n")
     result: dict[str, bool] = {"episodes.csv header": header == ",".join(EPISODE_COLUMNS)}
+    if storage.gz_path(episodes_csv).is_file():
+        recorded = info.get("files_sha256", {}).get(EPISODES_FILE) if info else None
+        result.update(storage.verify_compressed(episodes_csv, recorded))
     summary = read_rows(out_dir / "summary.csv")
     run_cols = _committed_run_cols(summary)
     provenance = _committed_provenance(out_dir / "summary.csv", [*RUN_COLUMNS, *RUN_POLICY_COLUMNS])
@@ -920,6 +946,92 @@ def refly_check(
     return check
 
 
+# --------------------------------------------------------------------------- storage (P7-D1a §12)
+
+
+def compress_condition(
+    cond: Condition,
+    *,
+    out_root: Path = E07_DIR,
+    results_dir: Path = RESULTS_DIR,
+    remove: bool = True,
+) -> dict[str, Any]:
+    """Gzip a complete condition's ``episodes.csv`` deterministically, verified both ways.
+
+    Order: the condition must be ``complete`` and re-derive byte-identically from its
+    uncompressed ``episodes.csv`` (:func:`verify_condition`); then
+    :func:`rld.eval.storage.compress_csv` writes ``episodes.csv.gz`` plus
+    ``episodes.csv.sha256`` and checks the round trip, and the source's SHA-256 must equal
+    ``run_info.json``'s ``files_sha256["episodes.csv"]``; then the condition is verified again,
+    now reading the ``.gz`` (and comparing it with the still-present source). Only then, with
+    ``remove``, is the uncompressed file deleted and ``run_info.json`` given an
+    ``episodes_storage`` entry. Nothing is deleted or recorded for a condition that fails a
+    step.
+
+    Args:
+        cond: The condition.
+        out_root: Output root.
+        results_dir: Where carried sources live.
+        remove: Delete the uncompressed ``episodes.csv`` after verification.
+
+    Returns:
+        ``{"condition", "status", ...}``: ``status`` is ``"compressed"``, ``"already
+        compressed"``, ``"not written"`` or ``"FAILED"``, with the storage facts and both
+        verification results.
+    """
+    out_dir = cond.out_dir(out_root)
+    info_path = out_dir / "run_info.json"
+    info = json.loads(info_path.read_text(encoding="utf-8")) if info_path.is_file() else {}
+    if not info.get("complete"):
+        return {"condition": cond.key, "status": "not written"}
+    episodes_csv = out_dir / EPISODES_FILE
+    recorded = info.get("files_sha256", {}).get(EPISODES_FILE)
+    before = verify_condition(cond, out_root=out_root, results_dir=results_dir)
+    if not all(before.values()):
+        bad = [k for k, ok in before.items() if not ok]
+        return {
+            "condition": cond.key,
+            "status": "FAILED",
+            "reason": f"not byte-identical before compression, nothing written: {bad}",
+            "verified_before": before,
+        }
+    facts = storage.compress_csv(episodes_csv, remove=False)
+    if facts["sha256"] != recorded:
+        return {
+            "condition": cond.key,
+            "status": "FAILED",
+            "reason": f"uncompressed SHA-256 {facts['sha256']} != run_info.json {recorded}",
+            **facts,
+        }
+    after = verify_condition(cond, out_root=out_root, results_dir=results_dir)  # reads the .gz
+    status = "already compressed" if facts["already_compressed"] else "compressed"
+    if not all(after.values()):
+        status = "FAILED"
+        facts["reason"] = (
+            f"not byte-identical from the .gz: {[k for k, ok in after.items() if not ok]}"
+        )
+    elif remove and episodes_csv.is_file():
+        episodes_csv.unlink()
+        facts["removed_source"] = True
+    entry = {
+        **facts,
+        "authority": "sha256 of the uncompressed episodes.csv (P7-D1a §12); gz bytes are "
+        "deterministic (no name, MTIME 0, OS 255, fixed level) for a given zlib",
+        "timestamp_utc": environment_provenance(REPO_ROOT)["timestamp_utc"],
+        "verified_before": all(before.values()),
+        "verified_after": all(after.values()),
+    }
+    if status != "FAILED" and not facts["already_compressed"]:
+        info["episodes_storage"] = entry
+        info_path.write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
+    print(
+        f"[{cond.key}] {status}: {facts['bytes']} -> {facts['gz_bytes']} bytes, "
+        f"sha256 {facts['sha256'][:12]}…",
+        flush=True,
+    )
+    return {"condition": cond.key, "status": status, **entry, "after": after}
+
+
 # --------------------------------------------------------------------------- lambda feasibility
 
 #: ``results/e07/lambda/feasibility.csv`` columns (the P1-D1 rule at each lambda).
@@ -1016,6 +1128,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--arm", choices=[*ARMS, "all", "hypotheses"], default="all")
     parser.add_argument("--check", action="store_true", help="verify written outputs; no flight")
+    parser.add_argument(
+        "--compress",
+        action="store_true",
+        help="gzip every complete condition's episodes.csv deterministically (P7-D1a §12), "
+        "verified before and after; no flight",
+    )
+    parser.add_argument(
+        "--keep-csv",
+        action="store_true",
+        help="with --compress: keep the uncompressed episodes.csv beside the .gz",
+    )
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
     parser.add_argument("--chunk", type=int, default=DEFAULT_CHUNK)
     parser.add_argument("--out-root", type=Path, default=E07_DIR)
@@ -1067,6 +1190,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         conds = [c for c in conds if c.key == args.condition]
         if not conds:
             raise SystemExit(f"no condition {args.condition!r} in arm {args.arm!r}")
+
+    if args.compress:
+        if args.check:
+            raise SystemExit("--compress and --check are separate steps")
+        started = environment_provenance(REPO_ROOT)["timestamp_utc"]
+        results = [
+            compress_condition(c, out_root=out_root, remove=not args.keep_csv) for c in conds
+        ]
+        for res in results:
+            if res["status"] in ("not written", "FAILED"):
+                print(f"[{res['condition']}] {res['status']} {res.get('reason', '')}".rstrip())
+        _invocation_log(
+            out_root,
+            {
+                "started_utc": started,
+                **git_state(REPO_ROOT),
+                "argv": list(sys.argv[1:] if argv is None else argv),
+                "compress": {
+                    r["condition"]: {k: v for k, v in r.items() if k not in ("condition", "after")}
+                    for r in results
+                },
+            },
+        )
+        return 1 if any(r["status"] == "FAILED" for r in results) else 0
 
     if args.check:
         status = 0

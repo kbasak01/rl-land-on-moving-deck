@@ -63,6 +63,28 @@ a **content** SHA-256 over :func:`canonical_csv` -- fixed column order, ``%.17g`
 hash depends on the pyarrow version; the content hash does not, and is the one to compare
 across machines.
 
+The MSS transfer lists (P7-D1 §6)
+---------------------------------
+A **separate** list directory, ``results/episodes_mss/``, with its own ``MANIFEST.csv``; the
+frozen ``results/episodes/`` and its manifest are never touched (:func:`generate_mss_lists`,
+``scripts/make_episodes.py --mss``). Two regimes, one cell each, N = 200:
+
+* ``mss_transfer``: ``ss = "SS5/mss:mss"``, motion kind ``mss`` -- MSS's spectrum and RAOs
+  (the primary arm);
+* ``mss_transfer_corpus``: ``ss = "SS5/mss:corpus"``, motion kind ``mss_corpus`` -- dmf's own
+  wave field through MSS's transfer function (the attribution control).
+
+The candidates are the arm config's 18 realizations per grid kind (headings {180, 135} deg x
+speeds {0, 6, 12} kn x seeds {0, 1, 2}, ``configs/deck/mss_s175_ss5.yaml``), sorted by
+``(heading_deg, speed_kn, seed)``, and they are dealt by the same ``balanced_round_robin`` rule
+with generator seed :data:`MSS_GENERATOR_SEED` (20261001): 200 = 11 x 18 + 2, so two
+realizations get 12 episodes and sixteen get 11. Each row carries
+``ss = rld.deck.mss.mss_ss_label(grid_kind)`` (so its key is :func:`rld.deck.mss.mss_key`,
+never a dmf corpus key), vessel ``s175`` (the lever arm), pad ``aft``, and
+``in_training_distribution = false`` (S175 is never trained on). ``t0`` and the initial state
+are read back from a real reset of the MSS source, exactly as for the frozen lists, and the
+runner's strict start check holds on them unchanged.
+
 Units: ``t0_model_s`` seconds **model** scale (one model second is five full-scale seconds at
 lambda = 1/25), ``init_*_m`` metres model scale in the world frame, ``heading_deg``
 degrees, ``speed_kn`` knots full scale.
@@ -85,9 +107,11 @@ from dmf.data.splits import REGIMES, realization_key
 
 from rld.config import REPO_ROOT
 from rld.deck.splits import build_all_splits, dev_pool, part_specs
+from rld.eval.arms import EPISODES_MSS_DIR, MSS_REGIME_MOTION
 from rld.eval.envs import (
     STATIC_LABEL,
     EvalConfigs,
+    MotionKind,
     load_eval_configs,
     make_env,
     motion_for,
@@ -101,10 +125,14 @@ __all__ = [
     "DEFAULT_WORKERS",
     "DRAW_RULE",
     "EPISODES_DIR",
+    "EPISODES_MSS_DIR",
     "EPISODES_PER_CELL",
     "LIST_COLUMNS",
     "MANIFEST_COLUMNS",
     "MANIFEST_NAME",
+    "MSS_GENERATOR_SEED",
+    "MSS_REGIME_GRID",
+    "MSS_VESSEL",
     "REGIME_CELLS",
     "EpisodeDraw",
     "ListedEpisode",
@@ -113,11 +141,17 @@ __all__ = [
     "cell_order",
     "content_sha256",
     "draw_cell",
+    "draw_mss_cell",
     "file_sha256",
     "generate_lists",
+    "generate_mss_lists",
     "label_entropy",
     "list_names",
     "manifest_row",
+    "motion_kind_for",
+    "mss_candidates",
+    "mss_list_names",
+    "mss_ss",
     "read_list",
     "read_manifest",
     "resolve_draws",
@@ -153,6 +187,15 @@ EPISODES_DIR: Path = REPO_ROOT / "results" / "episodes"
 
 #: The manifest's file name inside :data:`EPISODES_DIR`.
 MANIFEST_NAME: str = "MANIFEST.csv"
+
+#: The MSS transfer lists' generator seed (P7-D1 §6). Distinct from every other draw seed.
+MSS_GENERATOR_SEED: int = 20261001
+
+#: MSS list regime -> dmf.mss grid kind (P7-D1 §6), in manifest order.
+MSS_REGIME_GRID: dict[str, str] = {"mss_transfer": "mss", "mss_transfer_corpus": "corpus"}
+
+#: The vessel field of every MSS row: dmf's ``s175`` hull config sets the lever arm.
+MSS_VESSEL: str = "s175"
 
 #: Episodes per parallel reset task.
 DEFAULT_CHUNK: int = 25
@@ -449,6 +492,96 @@ def draw_cell(
     return draws
 
 
+def mss_list_names() -> tuple[str, ...]:
+    """Return the MSS list names (one parquet file each), in manifest order."""
+    return tuple(MSS_REGIME_GRID)
+
+
+def mss_ss(regime: str) -> str:
+    """Return an MSS list's ``ss`` label, e.g. ``"SS5/mss:mss"`` for ``mss_transfer``.
+
+    Raises:
+        ValueError: If ``regime`` is not an MSS list.
+    """
+    from rld.deck.mss import load_mss_config, mss_ss_label  # dmf.mss; MSS lists only
+
+    if regime not in MSS_REGIME_GRID:
+        raise ValueError(f"unknown MSS list {regime!r}, expected one of {mss_list_names()}")
+    return mss_ss_label(MSS_REGIME_GRID[regime], str(load_mss_config()["sea_state"]["name"]))
+
+
+def mss_candidates() -> list[tuple[float, float, int]]:
+    """Return the MSS arm's realizations per grid kind as ``(heading_deg, speed_kn, seed)``.
+
+    Returns:
+        The config's headings x speeds x seeds (``configs/deck/mss_s175_ss5.yaml``: 18),
+        sorted by ``(heading_deg, speed_kn, seed)``: the candidates' order before the cell's
+        shuffle. Headings degrees, speeds knots full scale.
+    """
+    from rld.deck.mss import load_mss_config  # dmf.mss; MSS lists only
+
+    cfg = load_mss_config()
+    return sorted(
+        (float(h), float(u), int(s))
+        for h in cfg["headings_deg"]
+        for u in cfg["speeds_kn"]
+        for s in cfg["seeds"]
+    )
+
+
+def draw_mss_cell(
+    regime: str,
+    generator_seed: int,
+    indices: Iterable[int],
+    pad: str = DEFAULT_PAD,
+) -> list[EpisodeDraw]:
+    """Draw some episodes of one MSS list by the same balanced round-robin rule.
+
+    Args:
+        regime: ``"mss_transfer"`` or ``"mss_transfer_corpus"``.
+        generator_seed: The draw seed (:data:`MSS_GENERATOR_SEED`).
+        indices: Which episode indices to draw; episode ``i`` flies candidate
+            ``cell_order(...)[i % 18]`` with an episode seed depending only on ``i`` and the
+            cell, exactly as :func:`draw_cell`.
+        pad: Pad name.
+
+    Returns:
+        The draws, in the order of ``indices``; ``in_training_distribution`` is false.
+    """
+    ss = mss_ss(regime)
+    candidates = mss_candidates()
+    order = cell_order(generator_seed, regime, ss, len(candidates))
+    draws: list[EpisodeDraw] = []
+    for index in indices:
+        rng = _episode_rng(generator_seed, regime, ss, index)
+        heading, speed, seed = candidates[order[int(index) % len(order)]]
+        draws.append(
+            EpisodeDraw(
+                regime=regime,
+                ss=ss,
+                index=int(index),
+                pad=pad,
+                vessel=MSS_VESSEL,
+                heading_deg=heading,
+                speed_kn=speed,
+                realization_seed=seed,
+                episode_seed=int(rng.integers(0, 2**31 - 1)),
+                in_training_distribution=False,
+            )
+        )
+    return draws
+
+
+def motion_kind_for(regime: str) -> MotionKind:
+    """Return the motion kind a listed regime is reset under: its MSS kind, else JONSWAP."""
+    kind = MSS_REGIME_MOTION.get(regime, "jonswap")
+    if kind == "mss":
+        return "mss"
+    if kind == "mss_corpus":
+        return "mss_corpus"
+    return "jonswap"
+
+
 def _resolve_chunk(task: tuple[Sequence[EpisodeDraw], EvalConfigs]) -> list[ListedEpisode]:
     """Reset a real environment once per draw and read back where the episode starts.
 
@@ -477,6 +610,7 @@ def _resolve_chunk(task: tuple[Sequence[EpisodeDraw], EvalConfigs]) -> list[List
             first.heading_deg,
             first.speed_kn,
             first.realization_seed,
+            kind=motion_kind_for(first.regime),
         ),
         first.vessel,
         first.pad,
@@ -486,7 +620,13 @@ def _resolve_chunk(task: tuple[Sequence[EpisodeDraw], EvalConfigs]) -> list[List
     try:
         for draw in draws:
             motion = motion_for(
-                cfgs, draw.vessel, draw.ss, draw.heading_deg, draw.speed_kn, draw.realization_seed
+                cfgs,
+                draw.vessel,
+                draw.ss,
+                draw.heading_deg,
+                draw.speed_kn,
+                draw.realization_seed,
+                kind=motion_kind_for(draw.regime),
             )
             env.set_motion(motion, draw.pad, pad_offset_for(cfgs, draw.vessel, draw.pad))
             _, info = env.reset(seed=draw.episode_seed)
@@ -603,6 +743,51 @@ def generate_lists(
             continue
         for ss in sea_states:
             draws += draw_cell(sim_cfg, regime, ss, generator_seed, range(n), pad)
+    rows = resolve_draws(draws, env_cfgs, workers=workers, chunk=chunk)
+    return {name: [row for row in rows if row.regime == name] for name in wanted}
+
+
+def generate_mss_lists(
+    generator_seed: int = MSS_GENERATOR_SEED,
+    n: int = EPISODES_PER_CELL,
+    *,
+    cfgs: EvalConfigs | None = None,
+    names: Sequence[str] | None = None,
+    pad: str = DEFAULT_PAD,
+    workers: int = DEFAULT_WORKERS,
+    chunk: int = DEFAULT_CHUNK,
+) -> dict[str, list[ListedEpisode]]:
+    """Draw and resolve the MSS transfer lists (P7-D1 §6; module docstring).
+
+    Args:
+        generator_seed: The draw seed (:data:`MSS_GENERATOR_SEED`).
+        n: Episodes per list; episode ``i`` does not depend on ``n``, so a smaller ``n``
+            reproduces a prefix.
+        cfgs: Environment configs; the committed ones when omitted. The MSS source reads
+            their ``scaling`` (lambda 1/25), ``pads`` and full-scale lookback.
+        names: Which MSS lists (default: :func:`mss_list_names`).
+        pad: Pad name carried by every row (``aft``).
+        workers: Reset processes; the result does not depend on it.
+        chunk: Draws per reset task.
+
+    Returns:
+        ``{list name: rows}`` in index order, ``t0`` and the initial state read back from a
+        real reset of each row's MSS source.
+
+    Raises:
+        ValueError: If ``n`` is not positive or a name is unknown.
+    """
+    if n < 1:
+        raise ValueError(f"n must be positive, got {n}")
+    wanted = mss_list_names() if names is None else tuple(names)
+    unknown = sorted(set(wanted) - set(mss_list_names()))
+    if unknown:
+        raise ValueError(f"unknown MSS lists {unknown}, expected a subset of {mss_list_names()}")
+    env_cfgs = cfgs if cfgs is not None else load_eval_configs()
+    draws: list[EpisodeDraw] = []
+    for regime in mss_list_names():
+        if regime in wanted:
+            draws += draw_mss_cell(regime, generator_seed, range(n), pad)
     rows = resolve_draws(draws, env_cfgs, workers=workers, chunk=chunk)
     return {name: [row for row in rows if row.regime == name] for name in wanted}
 
@@ -734,11 +919,13 @@ def write_lists(
         generator_seed: The draw seed, recorded in the manifest.
 
     Returns:
-        The manifest rows, in :func:`list_names` order.
+        The manifest rows, in :func:`list_names` order, then any other list (the MSS lists)
+        in the order given.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     manifest: list[ManifestRow] = []
     order = [name for name in list_names() if name in lists]
+    order += [name for name in lists if name not in order]
     for name in order:
         path = out_dir / f"{name}.parquet"
         pq.write_table(_to_table(lists[name]), path, compression="snappy")

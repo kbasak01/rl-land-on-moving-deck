@@ -23,6 +23,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from rld.eval import storage
 from rld.eval.report import SkipRecord, read_rows, summarise, summary_columns
 from rld.eval.runner import EPISODE_COLUMNS, episode_rows_csv
 
@@ -82,7 +83,7 @@ def compare_to_reference(
         "all_identical", "methods": {method: {"n_compared", "n_identical", "n_differ",
         "n_missing_in_reference", "n_reference_rows", "first_mismatch"}}}``.
     """
-    ref_text = reference_csv.read_text(encoding="utf-8")
+    ref_text = storage.read_text(reference_csv)  # its .csv.gz when present (P7-D1a §12)
     ref_header, ref_lines = _keyed_lines(ref_text)
     new_header, new_lines = _keyed_lines(episode_rows_csv(rows))
     ref_methods = {key[0] for key in ref_lines}
