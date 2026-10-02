@@ -58,6 +58,7 @@ __all__ = [
     "deterministic_provenance",
     "method_label",
     "read_rows",
+    "render_results",
     "render_success_vs_seastate",
     "secondary_seed_arm",
     "sha256_file",
@@ -262,7 +263,8 @@ def summarise(
         :data:`~rld.eval.metrics.CELL_METRIC_COLUMNS`, then :data:`CELL_STATUS_COLUMNS` and
         :data:`QUIET_COLUMNS`,
         then the per-method and provenance columns. Ordered by pad (:data:`PAD_ORDER`),
-        ``method_order``, run seed, then the committed cell order. Cells with neither a
+        ``method_order``, run seed, then the committed cell order (any cell outside it after,
+        in first-appearance order). Cells with neither a
         flown nor a skipped episode are absent -- and :func:`render_success_vs_seastate`
         prints them as missing rather than inventing a zero.
 
@@ -293,6 +295,12 @@ def summarise(
     keys = set(groups) | set(skips)
     pads = sorted({key[2] for key in keys}, key=_pad_rank)
     cells = _cell_order()
+    # A cell outside the frozen lists (the Phase 7 MSS transfer lists, P7-D1 §6) follows the
+    # committed cells in first-appearance order, so it is summarised, never dropped. Every
+    # pre-Phase 7 table has none, and its rows are unchanged.
+    extra = [(str(r["regime"]), str(r["ss"])) for r in episode_rows]
+    extra += [(skip.regime, skip.ss) for skip in skipped]
+    cells += [cell for cell in dict.fromkeys(extra) if cell not in cells]
     out: list[dict[str, Any]] = []
     for pad in pads:
         for method in method_order:
@@ -662,3 +670,24 @@ def summary_columns(extra: Iterable[str]) -> list[str]:
         *QUIET_COLUMNS,
         *extra,
     ]
+
+
+def render_results(results_dir: Path | None = None, e07_dir: Path | None = None) -> str:
+    """Render ``results/results.md`` from the committed Phase 7 CSVs (and nothing else).
+
+    The renderer lives in :mod:`rld.eval.results_md` (it reads the arm definitions of
+    :mod:`rld.eval.arms` and the caveat legend of :mod:`rld.eval.hypotheses`, which import
+    this module); it is imported here lazily, so this module stays import-light.
+
+    Args:
+        results_dir: ``results/`` (default: the repository's).
+        e07_dir: ``results/e07`` (default: ``<results_dir>/e07``).
+
+    Returns:
+        The markdown text; :func:`rld.eval.results_md.main` writes or checks it.
+    """
+    from rld.eval.arms import RESULTS_DIR
+    from rld.eval.results_md import render
+
+    results = RESULTS_DIR if results_dir is None else results_dir
+    return render(results, results / "e07" if e07_dir is None else e07_dir)

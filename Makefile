@@ -33,7 +33,7 @@ THROUGHPUT_CSV ?= results/env_throughput.csv
 THROUGHPUT_LANDING_CSV ?= results/env_throughput_landing.csv
 
 .PHONY: test lint format throughput throughput-landing env-sanity \
-        deck-stats baselines dmf-forecasters forecast-report train-bg sweep tune eval bench \
+        deck-stats baselines dmf-forecasters forecast-report mss-export train-bg sweep tune eval bench \
         report all
 
 # --- implemented ------------------------------------------------------------------
@@ -115,12 +115,42 @@ sweep: ; $(PY) scripts/sweep.py --config $(CFG) --seeds $(SEEDS) --max-workers $
 # Phase 5 -- rl-trainer: the pre-registered search CFG=configs/rl/tune_<method>.yaml on the
 # same scheduler; trials.csv + selection.json land in the search's results_dir when done.
 tune:  ; $(PY) scripts/tune.py --config $(CFG) --max-workers $(MAX_WORKERS)
-# Phase 7 -- eval-auditor: full evaluation matrix on the frozen episode lists -> results/
-eval:            ; @echo "not implemented: phase 7"
+# Phase 7 -- deck-bridge-engineer: the optional MSS transfer arm's deck side (P7-D1 section 6).
+#   1. Clone MSS (https://github.com/cybergalactic/MSS, a NETWORK FETCH, only if the clone
+#      is absent) into artifacts/mss/upstream/ (gitignored) and pin dmf's SHA. The rev-parse
+#      test fails the target if the checkout is anything else.
+#   2. dmf's own scripts/mss_export.py, run from this repo root against
+#      configs/deck/mss_s175_ss5.yaml (dmf's config with only vessel.mat_path changed):
+#      36 records (18 realizations x grid kinds mss/corpus, 10 Hz full scale, t = 120..719.9
+#      s) + manifest.csv -> artifacts/mss/records/; the spectrum-match summary (Gate-8-style
+#      predicate 1: mean Hs and Tz relative error within 5 %) -> results/mss/spectrum_match.csv.
+#   3. The Octave parity check via scripts/mss_octave_check.py, because dmf's own script and
+#      m-files resolve the clone inside third_party/. dmf's m-files are staged verbatim
+#      (SHA-checked) beside the clone in artifacts/mss/ -> results/mss/octave_parity.csv.
+#      Writes a "skipped" row and exits 0 without Octave; exits 1 if any row fails.
+# Nothing is read from or written into third_party/ except reading dmf's code and m-files.
+# The env evaluates the motion analytically (rld.deck.mss); the CSVs are test oracles only.
+MSS_SHA ?= 98970f71a21cfe81e7e29abdcc1bb6741789cddc
+mss-export:
+	@[ -d artifacts/mss/upstream/.git ] || git clone https://github.com/cybergalactic/MSS.git artifacts/mss/upstream
+	git -C artifacts/mss/upstream checkout --quiet $(MSS_SHA)
+	test "$$(git -C artifacts/mss/upstream rev-parse HEAD)" = "$(MSS_SHA)"
+	$(PY) $(DMF_ROOT)/scripts/mss_export.py --config configs/deck/mss_s175_ss5.yaml --out-dir artifacts/mss/records --results-dir results/mss
+	$(PY) scripts/mss_octave_check.py --config configs/deck/mss_s175_ss5.yaml --stage-dir artifacts/mss --out-dir results/mss
+# Phase 7 -- eval-auditor: the frozen lists are re-verified (make_episodes.py --check), then
+# every Phase 7 arm (P7-D1: matrix, cg, sinusoid, lambda, noise, the optional mss) is flown into
+# results/e07/<arm>[/<condition>]/ and H1a-H4 are scored into results/e07/{contrasts,hypotheses}.csv.
+# Resumable: a condition already written is verified byte for byte, not re-flown. The CSVs do
+# not depend on WORKERS (worker count, wall time and checkpoint digests go to run_info.json).
+# Hours of compute: launch in the background with output to a log (no tee; see dmf-forecasters).
+eval:
+	$(PY) scripts/make_episodes.py --check --workers $(WORKERS)
+	$(PY) scripts/eval_phase7.py --arm all --workers $(WORKERS)
 # Phase 8 -- deploy-benchmarker: ONNX export, parity, latency -> results/latency*
 bench:           ; @echo "not implemented: phase 8"
-# Phase 7/9 -- eval-auditor: re-render results/results.md from the committed CSVs
-report:          ; @echo "not implemented: phase 7"
+# Phase 7/9 -- eval-auditor: re-render results/results.md from the committed CSVs only
+# (`$(PY) scripts/report.py --check` re-renders and compares bytes, writing nothing).
+report:          ; $(PY) scripts/report.py
 
 # The whole project in the order the methodology requires. Stubs today; each phase
 # replaces its own line's target. Training (train-bg / sweep / tune) is deliberately not in
