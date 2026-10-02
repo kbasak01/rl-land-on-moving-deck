@@ -5155,6 +5155,240 @@
           "H5/ORT CPU vs GPU p50 latency": "pending \u2014 scored at Gate 8"
         }
       }
+    },
+    {
+      "started_utc": "2026-10-02T19:46:55+00:00",
+      "git_sha": "3a256208b5b10984a1ebcbc6f827c6e8f6132260",
+      "git_dirty": true,
+      "git_dirty_paths": [
+        "R  results/e07/noise/sigma0cm_lat1step/aggregate.csv -> results/e07/noise_superseded_p7d1/sigma0cm_lat1step/aggregate.csv",
+        "R  results/e07/noise/sigma0cm_lat1step/baselines_summary.csv -> results/e07/noise_superseded_p7d1/sigma0cm_lat1step/baselines_summary.csv",
+        "R  results/e07/noise/sigma0cm_lat1step/episodes.csv.gz -> results/e07/noise_superseded_p7d1/sigma0cm_lat1step/episodes.csv.gz",
+        "R  results/e07/noise/sigma0cm_lat1step/episodes.csv.sha256 -> results/e07/noise_superseded_p7d1/sigma0cm_lat1step/episodes.csv.sha256",
+        "R  results/e07/noise/sigma0cm_lat1step/run_info.json -> results/e07/noise_superseded_p7d1/sigma0cm_lat1step/run_info.json",
+        "R  results/e07/noise/sigma0cm_lat1step/seeds.csv -> results/e07/noise_superseded_p7d1/sigma0cm_lat1step/seeds.csv",
+        "R  results/e07/noise/sigma0cm_lat1step/summary.csv -> results/e07/noise_superseded_p7d1/sigma0cm_lat1step/summary.csv",
+        "R  results/e07/noise/sigma0cm_lat2step/aggregate.csv -> results/e07/noise_superseded_p7d1/sigma0cm_lat2step/aggregate.csv",
+        "R  results/e07/noise/sigma0cm_lat2step/baselines_summary.csv -> results/e07/noise_superseded_p7d1/sigma0cm_lat2step/baselines_summary.csv",
+        "R  results/e07/noise/sigma0cm_lat2step/episodes.csv.gz -> results/e07/noise_superseded_p7d1/sigma0cm_lat2step/episodes.csv.gz",
+        "R  results/e07/noise/sigma0cm_lat2step/episodes.csv.sha256 -> results/e07/noise_superseded_p7d1/sigma0cm_lat2step/episodes.csv.sha256",
+        "R  results/e07/noise/sigma0cm_lat2step/run_info.json -> results/e07/noise_superseded_p7d1/sigma0cm_lat2step/run_info.json",
+        "R  results/e07/noise/sigma0cm_lat2step/seeds.csv -> results/e07/noise_superseded_p7d1/sigma0cm_lat2step/seeds.csv",
+        "R  results/e07/noise/sigma0cm_lat2step/summary.csv -> results/e07/noise_superseded_p7d1/sigma0cm_lat2step/summary.csv",
+        "R  results/e07/noise/sigma1cm_lat0step/aggregate.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat0step/aggregate.csv",
+        "R  results/e07/noise/sigma1cm_lat0step/baselines_summary.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat0step/baselines_summary.csv",
+        "R  results/e07/noise/sigma1cm_lat0step/episodes.csv.gz -> results/e07/noise_superseded_p7d1/sigma1cm_lat0step/episodes.csv.gz",
+        "R  results/e07/noise/sigma1cm_lat0step/episodes.csv.sha256 -> results/e07/noise_superseded_p7d1/sigma1cm_lat0step/episodes.csv.sha256",
+        "R  results/e07/noise/sigma1cm_lat0step/run_info.json -> results/e07/noise_superseded_p7d1/sigma1cm_lat0step/run_info.json",
+        "R  results/e07/noise/sigma1cm_lat0step/seeds.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat0step/seeds.csv",
+        "R  results/e07/noise/sigma1cm_lat0step/summary.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat0step/summary.csv",
+        "R  results/e07/noise/sigma1cm_lat1step/aggregate.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat1step/aggregate.csv",
+        "R  results/e07/noise/sigma1cm_lat1step/baselines_summary.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat1step/baselines_summary.csv",
+        "R  results/e07/noise/sigma1cm_lat1step/episodes.csv.gz -> results/e07/noise_superseded_p7d1/sigma1cm_lat1step/episodes.csv.gz",
+        "R  results/e07/noise/sigma1cm_lat1step/episodes.csv.sha256 -> results/e07/noise_superseded_p7d1/sigma1cm_lat1step/episodes.csv.sha256",
+        "R  results/e07/noise/sigma1cm_lat1step/run_info.json -> results/e07/noise_superseded_p7d1/sigma1cm_lat1step/run_info.json",
+        "R  results/e07/noise/sigma1cm_lat1step/seeds.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat1step/seeds.csv",
+        "R  results/e07/noise/sigma1cm_lat1step/summary.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat1step/summary.csv",
+        "R  results/e07/noise/sigma1cm_lat2step/aggregate.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat2step/aggregate.csv",
+        "R  results/e07/noise/sigma1cm_lat2step/baselines_summary.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat2step/baselines_summary.csv",
+        "R  results/e07/noise/sigma1cm_lat2step/episodes.csv.gz -> results/e07/noise_superseded_p7d1/sigma1cm_lat2step/episodes.csv.gz",
+        "R  results/e07/noise/sigma1cm_lat2step/episodes.csv.sha256 -> results/e07/noise_superseded_p7d1/sigma1cm_lat2step/episodes.csv.sha256",
+        "R  results/e07/noise/sigma1cm_lat2step/run_info.json -> results/e07/noise_superseded_p7d1/sigma1cm_lat2step/run_info.json",
+        "R  results/e07/noise/sigma1cm_lat2step/seeds.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat2step/seeds.csv",
+        "R  results/e07/noise/sigma1cm_lat2step/summary.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat2step/summary.csv",
+        "R  results/e07/noise/sigma2cm_lat0step/aggregate.csv -> results/e07/noise_superseded_p7d1/sigma2cm_lat0step/aggregate.csv",
+        "R  results/e07/noise/sigma2cm_lat0step/baselines_summary.csv -> results/e07/noise_superseded_p7d1/sigma2cm_lat0step/baselines_summary.csv",
+        "R  results/e07/noise/sigma2cm_lat0step/episodes.csv.gz -> results/e07/noise_superseded_p7d1/sigma2cm_lat0step/episodes.csv.gz",
+        "R  results/e07/noise/sigma2cm_lat0step/episodes.csv.sha256 -> results/e07/noise_superseded_p7d1/sigma2cm_lat0step/episodes.csv.sha256",
+        "R  results/e07/noise/sigma2cm_lat0step/run_info.json -> results/e07/noise_superseded_p7d1/sigma2cm_lat0step/run_info.json",
+        "R  results/e07/noise/sigma2cm_lat0step/seeds.csv -> results/e07/noise_superseded_p7d1/sigma2cm_lat0step/seeds.csv",
+        "R  results/e07/noise/sigma2cm_lat0step/summary.csv -> results/e07/noise_superseded_p7d1/sigma2cm_lat0step/summary.csv",
+        "R  results/e07/noise/sigma2cm_lat1step/aggregate.csv -> results/e07/noise_superseded_p7d1/sigma2cm_lat1step/aggregate.csv",
+        "R  results/e07/noise/sigma2cm_lat1step/baselines_summary.csv -> results/e07/noise_superseded_p7d1/sigma2cm_lat1step/baselines_summary.csv",
+        "R  results/e07/noise/sigma2cm_lat1step/episodes.csv.gz -> results/e07/noise_superseded_p7d1/sigma2cm_lat1step/episodes.csv.gz",
+        "R  results/e07/noise/sigma2cm_lat1step/episodes.csv.sha256 -> results/e07/noise_superseded_p7d1/sigma2cm_lat1step/episodes.csv.sha256",
+        "R  results/e07/noise/sigma2cm_lat1step/run_info.json -> results/e07/noise_superseded_p7d1/sigma2cm_lat1step/run_info.json",
+        "R  results/e07/noise/sigma2cm_lat1step/seeds.csv -> results/e07/noise_superseded_p7d1/sigma2cm_lat1step/seeds.csv",
+        "R  results/e07/noise/sigma2cm_lat1step/summary.csv -> results/e07/noise_superseded_p7d1/sigma2cm_lat1step/summary.csv",
+        "R  results/e07/noise/sigma2cm_lat2step/aggregate.csv -> results/e07/noise_superseded_p7d1/sigma2cm_lat2step/aggregate.csv"
+      ],
+      "argv": [
+        "--arm",
+        "all",
+        "--add-tunnelled"
+      ],
+      "add_tunnelled": {
+        "matrix": {
+          "status": "written",
+          "sha256": "45c6c7894cf490e7ad63412fd08770e2794d173b68cf3d5c2a650f7c65175dd1",
+          "rows": 494
+        },
+        "cg": {
+          "status": "written",
+          "sha256": "dc9ae9921cc8a0b561e7a378b17e6a02832eae0393371ff095362a6aaccd12f9",
+          "rows": 468
+        },
+        "sinusoid": {
+          "status": "written",
+          "sha256": "8f981cdbca25d7d4c17c359cd58a2e3e0507356c2ed87715903750a7fc7a75ef",
+          "rows": 144
+        },
+        "lambda/lam15": {
+          "status": "written",
+          "sha256": "8852d2330372ada7333ea2edf27a2ca23009fed2a7fc1e02870a27bb87b25785",
+          "rows": 104
+        },
+        "lambda/lam40": {
+          "status": "written",
+          "sha256": "948cce933b1d0ae43e80b76554e184b07c8f91bc75ced73d65488501b19db619",
+          "rows": 104
+        },
+        "noise/sigma1cm_lat0step": {
+          "status": "not written"
+        },
+        "noise/sigma2cm_lat0step": {
+          "status": "not written"
+        },
+        "noise/sigma4cm_lat0step": {
+          "status": "not written"
+        },
+        "noise/sigma0cm_lat1step": {
+          "status": "not written"
+        },
+        "noise/sigma1cm_lat1step": {
+          "status": "not written"
+        },
+        "noise/sigma2cm_lat1step": {
+          "status": "not written"
+        },
+        "noise/sigma4cm_lat1step": {
+          "status": "not written"
+        },
+        "noise/sigma0cm_lat2step": {
+          "status": "not written"
+        },
+        "noise/sigma1cm_lat2step": {
+          "status": "not written"
+        },
+        "noise/sigma2cm_lat2step": {
+          "status": "not written"
+        },
+        "noise/sigma4cm_lat2step": {
+          "status": "not written"
+        },
+        "mss": {
+          "status": "written",
+          "sha256": "130522fbeac30925e22cdbb24f9235266ae9bf20935d7a7758f4a69687255505",
+          "rows": 144
+        }
+      }
+    },
+    {
+      "started_utc": "2026-10-02T19:56:24+00:00",
+      "git_sha": "3a256208b5b10984a1ebcbc6f827c6e8f6132260",
+      "git_dirty": true,
+      "git_dirty_paths": [
+        " M results/e07/contrasts.csv",
+        " M results/e07/hypotheses.csv",
+        "R  results/e07/noise/sigma0cm_lat1step/aggregate.csv -> results/e07/noise_superseded_p7d1/sigma0cm_lat1step/aggregate.csv",
+        "R  results/e07/noise/sigma0cm_lat1step/baselines_summary.csv -> results/e07/noise_superseded_p7d1/sigma0cm_lat1step/baselines_summary.csv",
+        "R  results/e07/noise/sigma0cm_lat1step/episodes.csv.gz -> results/e07/noise_superseded_p7d1/sigma0cm_lat1step/episodes.csv.gz",
+        "R  results/e07/noise/sigma0cm_lat1step/episodes.csv.sha256 -> results/e07/noise_superseded_p7d1/sigma0cm_lat1step/episodes.csv.sha256",
+        "R  results/e07/noise/sigma0cm_lat1step/run_info.json -> results/e07/noise_superseded_p7d1/sigma0cm_lat1step/run_info.json",
+        "R  results/e07/noise/sigma0cm_lat1step/seeds.csv -> results/e07/noise_superseded_p7d1/sigma0cm_lat1step/seeds.csv",
+        "R  results/e07/noise/sigma0cm_lat1step/summary.csv -> results/e07/noise_superseded_p7d1/sigma0cm_lat1step/summary.csv",
+        "R  results/e07/noise/sigma0cm_lat2step/aggregate.csv -> results/e07/noise_superseded_p7d1/sigma0cm_lat2step/aggregate.csv",
+        "R  results/e07/noise/sigma0cm_lat2step/baselines_summary.csv -> results/e07/noise_superseded_p7d1/sigma0cm_lat2step/baselines_summary.csv",
+        "R  results/e07/noise/sigma0cm_lat2step/episodes.csv.gz -> results/e07/noise_superseded_p7d1/sigma0cm_lat2step/episodes.csv.gz",
+        "R  results/e07/noise/sigma0cm_lat2step/episodes.csv.sha256 -> results/e07/noise_superseded_p7d1/sigma0cm_lat2step/episodes.csv.sha256",
+        "R  results/e07/noise/sigma0cm_lat2step/run_info.json -> results/e07/noise_superseded_p7d1/sigma0cm_lat2step/run_info.json",
+        "R  results/e07/noise/sigma0cm_lat2step/seeds.csv -> results/e07/noise_superseded_p7d1/sigma0cm_lat2step/seeds.csv",
+        "R  results/e07/noise/sigma0cm_lat2step/summary.csv -> results/e07/noise_superseded_p7d1/sigma0cm_lat2step/summary.csv",
+        "R  results/e07/noise/sigma1cm_lat0step/aggregate.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat0step/aggregate.csv",
+        "R  results/e07/noise/sigma1cm_lat0step/baselines_summary.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat0step/baselines_summary.csv",
+        "R  results/e07/noise/sigma1cm_lat0step/episodes.csv.gz -> results/e07/noise_superseded_p7d1/sigma1cm_lat0step/episodes.csv.gz",
+        "R  results/e07/noise/sigma1cm_lat0step/episodes.csv.sha256 -> results/e07/noise_superseded_p7d1/sigma1cm_lat0step/episodes.csv.sha256",
+        "R  results/e07/noise/sigma1cm_lat0step/run_info.json -> results/e07/noise_superseded_p7d1/sigma1cm_lat0step/run_info.json",
+        "R  results/e07/noise/sigma1cm_lat0step/seeds.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat0step/seeds.csv",
+        "R  results/e07/noise/sigma1cm_lat0step/summary.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat0step/summary.csv",
+        "R  results/e07/noise/sigma1cm_lat1step/aggregate.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat1step/aggregate.csv",
+        "R  results/e07/noise/sigma1cm_lat1step/baselines_summary.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat1step/baselines_summary.csv",
+        "R  results/e07/noise/sigma1cm_lat1step/episodes.csv.gz -> results/e07/noise_superseded_p7d1/sigma1cm_lat1step/episodes.csv.gz",
+        "R  results/e07/noise/sigma1cm_lat1step/episodes.csv.sha256 -> results/e07/noise_superseded_p7d1/sigma1cm_lat1step/episodes.csv.sha256",
+        "R  results/e07/noise/sigma1cm_lat1step/run_info.json -> results/e07/noise_superseded_p7d1/sigma1cm_lat1step/run_info.json",
+        "R  results/e07/noise/sigma1cm_lat1step/seeds.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat1step/seeds.csv",
+        "R  results/e07/noise/sigma1cm_lat1step/summary.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat1step/summary.csv",
+        "R  results/e07/noise/sigma1cm_lat2step/aggregate.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat2step/aggregate.csv",
+        "R  results/e07/noise/sigma1cm_lat2step/baselines_summary.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat2step/baselines_summary.csv",
+        "R  results/e07/noise/sigma1cm_lat2step/episodes.csv.gz -> results/e07/noise_superseded_p7d1/sigma1cm_lat2step/episodes.csv.gz",
+        "R  results/e07/noise/sigma1cm_lat2step/episodes.csv.sha256 -> results/e07/noise_superseded_p7d1/sigma1cm_lat2step/episodes.csv.sha256",
+        "R  results/e07/noise/sigma1cm_lat2step/run_info.json -> results/e07/noise_superseded_p7d1/sigma1cm_lat2step/run_info.json",
+        "R  results/e07/noise/sigma1cm_lat2step/seeds.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat2step/seeds.csv",
+        "R  results/e07/noise/sigma1cm_lat2step/summary.csv -> results/e07/noise_superseded_p7d1/sigma1cm_lat2step/summary.csv",
+        "R  results/e07/noise/sigma2cm_lat0step/aggregate.csv -> results/e07/noise_superseded_p7d1/sigma2cm_lat0step/aggregate.csv",
+        "R  results/e07/noise/sigma2cm_lat0step/baselines_summary.csv -> results/e07/noise_superseded_p7d1/sigma2cm_lat0step/baselines_summary.csv",
+        "R  results/e07/noise/sigma2cm_lat0step/episodes.csv.gz -> results/e07/noise_superseded_p7d1/sigma2cm_lat0step/episodes.csv.gz",
+        "R  results/e07/noise/sigma2cm_lat0step/episodes.csv.sha256 -> results/e07/noise_superseded_p7d1/sigma2cm_lat0step/episodes.csv.sha256",
+        "R  results/e07/noise/sigma2cm_lat0step/run_info.json -> results/e07/noise_superseded_p7d1/sigma2cm_lat0step/run_info.json",
+        "R  results/e07/noise/sigma2cm_lat0step/seeds.csv -> results/e07/noise_superseded_p7d1/sigma2cm_lat0step/seeds.csv",
+        "R  results/e07/noise/sigma2cm_lat0step/summary.csv -> results/e07/noise_superseded_p7d1/sigma2cm_lat0step/summary.csv",
+        "R  results/e07/noise/sigma2cm_lat1step/aggregate.csv -> results/e07/noise_superseded_p7d1/sigma2cm_lat1step/aggregate.csv",
+        "R  results/e07/noise/sigma2cm_lat1step/baselines_summary.csv -> results/e07/noise_superseded_p7d1/sigma2cm_lat1step/baselines_summary.csv",
+        "R  results/e07/noise/sigma2cm_lat1step/episodes.csv.gz -> results/e07/noise_superseded_p7d1/sigma2cm_lat1step/episodes.csv.gz",
+        "R  results/e07/noise/sigma2cm_lat1step/episodes.csv.sha256 -> results/e07/noise_superseded_p7d1/sigma2cm_lat1step/episodes.csv.sha256",
+        "R  results/e07/noise/sigma2cm_lat1step/run_info.json -> results/e07/noise_superseded_p7d1/sigma2cm_lat1step/run_info.json",
+        "R  results/e07/noise/sigma2cm_lat1step/seeds.csv -> results/e07/noise_superseded_p7d1/sigma2cm_lat1step/seeds.csv"
+      ],
+      "argv": [
+        "--arm",
+        "hypotheses"
+      ],
+      "workers": 24,
+      "chunk": 25,
+      "wall_s": 33.8,
+      "conditions": {},
+      "policy_check": [],
+      "checkpoint_digests_before": {},
+      "checkpoint_digests_after": {},
+      "checkpoints_unchanged": true,
+      "hypotheses": {
+        "files": {
+          "contrasts.csv": 333,
+          "hypotheses.csv": 17
+        },
+        "missing": [
+          "/home/kbasak/projects_02/rl-land-on-moving-deck/results/e07/noise/sigma1cm_lat0step/episodes.csv: absent",
+          "/home/kbasak/projects_02/rl-land-on-moving-deck/results/e07/noise/sigma2cm_lat0step/episodes.csv: absent",
+          "/home/kbasak/projects_02/rl-land-on-moving-deck/results/e07/noise/sigma4cm_lat0step/episodes.csv: absent",
+          "/home/kbasak/projects_02/rl-land-on-moving-deck/results/e07/noise/sigma0cm_lat1step/episodes.csv: absent",
+          "/home/kbasak/projects_02/rl-land-on-moving-deck/results/e07/noise/sigma1cm_lat1step/episodes.csv: absent",
+          "/home/kbasak/projects_02/rl-land-on-moving-deck/results/e07/noise/sigma2cm_lat1step/episodes.csv: absent",
+          "/home/kbasak/projects_02/rl-land-on-moving-deck/results/e07/noise/sigma4cm_lat1step/episodes.csv: absent",
+          "/home/kbasak/projects_02/rl-land-on-moving-deck/results/e07/noise/sigma0cm_lat2step/episodes.csv: absent",
+          "/home/kbasak/projects_02/rl-land-on-moving-deck/results/e07/noise/sigma1cm_lat2step/episodes.csv: absent",
+          "/home/kbasak/projects_02/rl-land-on-moving-deck/results/e07/noise/sigma2cm_lat2step/episodes.csv: absent",
+          "/home/kbasak/projects_02/rl-land-on-moving-deck/results/e07/noise/sigma4cm_lat2step/episodes.csv: absent"
+        ],
+        "verdicts": {
+          "H1a/relative p95 + non-inferiority": "not supported",
+          "H1a/non-inferiority, IQM over seeds": "not scored",
+          "H1a/relative p95 with timeouts ranked worst": "not scored",
+          "H1b/success difference": "supported",
+          "H1b/success difference, IQM over seeds": "not scored",
+          "H2/drop difference": "not supported",
+          "H3/primary: id SS5 relative p95": "not supported",
+          "H3/primary: id SS6 relative p95": "not supported",
+          "H3/primary: unseen_vessel SS5 half-rule": "not applicable \u2014 no id gain to shrink",
+          "H3/primary: unseen_vessel SS6 half-rule": "not applicable \u2014 no id gain to shrink",
+          "H3/secondary: id SS5 relative p95": "not supported",
+          "H3/secondary: id SS6 relative p95": "inconclusive",
+          "H3/secondary: unseen_vessel SS5 half-rule": "not applicable \u2014 no id gain to shrink",
+          "H3/secondary: unseen_vessel SS6 half-rule": "not scored (no supported id gain)",
+          "H4/drop difference": "not supported",
+          "H4/drop difference, IQM over seeds": "not scored",
+          "H5/ORT CPU vs GPU p50 latency": "pending \u2014 scored at Gate 8"
+        }
+      }
     }
   ]
 }

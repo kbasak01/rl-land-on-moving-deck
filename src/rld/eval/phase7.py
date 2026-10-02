@@ -23,6 +23,14 @@ What one condition writes (``results/e07/<arm>[/<condition>]/``)
 * ``carried_summary_<source>.csv`` -- baselines **carried line for line** from a committed
   run on the identical lists (:func:`rld.eval.learned.carry_baselines`: byte-identical lines,
   live provenance, identical listed episodes, summary re-derived from the source episodes).
+* ``tunnelled_success.csv`` -- per (method, seed, pad, regime, sea state): episodes,
+  successes, tunnelled episodes and **tunnelled successes** (success and penetration deeper
+  than ``tunnelling_penetration_m`` = 5 mm at any contact substep), for the flown rows and,
+  read from the carried source's ``episodes.csv``, for the carried baselines
+  (:func:`derive_tunnelled`; review M4). The summaries' ``tunnelling_n`` counts every
+  outcome; this file isolates the successes that may depend on tunnelling overlap. Written
+  for the conditions flown before it existed with ``--add-tunnelled`` (a new file; no
+  committed byte changes).
 * ``run_info.json`` -- the non-deterministic facts: git state, worker count, chunk, wall
   time, the run table with checkpoint digests before and after the flight, list hashes, the
   carry checks, any reproduction check, the worker-count re-flight checks, and
@@ -46,8 +54,37 @@ A condition whose ``run_info.json`` says ``complete`` is **verified, not re-flow
 :func:`verify_condition` re-derives every CSV above from ``episodes.csv`` (the run, controller
 and provenance columns are read from the committed files, the condition columns are recomputed
 from :mod:`rld.eval.arms`), re-carries the carried files into a scratch directory, and
-compares bytes. ``--check`` does exactly that for every requested condition and writes
-nothing. A directory without ``complete`` is a crashed flight and is flown again.
+compares bytes. A directory without ``complete`` is a crashed flight and is flown again.
+
+What is read-only, and what needs the checkpoints (review m8)
+-------------------------------------------------------------
+* ``--check`` writes nothing: every requested condition is verified as above, the superseded
+  noise record by hash (:mod:`rld.eval.superseded`), ``lambda/feasibility.csv`` is recomputed
+  into a temporary directory, and ``contrasts.csv`` / ``hypotheses.csv`` are recomputed and
+  compared. It needs **no** checkpoint: only the committed ``results/`` files, the configs and
+  dmf (for the lambda feasibility recomputation). A condition that is not written is reported
+  ``NOT WRITTEN`` and fails the check.
+* A flight invocation (no ``--check``) verifies every requested condition first, without
+  the checkpoints. **Only if a condition has to be flown** (or ``--refly`` is given) are the
+  gitignored ``artifacts/runs/<method>/<seed>/final/`` checkpoints inspected and hashed; if
+  they are absent it stops with the list of conditions it could not fly. When nothing is
+  flown it is read-only: the hypotheses files are compared, not rewritten (a difference fails
+  and names ``--arm hypotheses`` as the explicit rewrite), and nothing is appended to
+  ``results/e07/run_info.json``. That log gets an entry only for an invocation that wrote
+  something (a flight, the feasibility file, the hypotheses files, a compression or
+  ``--add-tunnelled``).
+* ``--arm hypotheses`` always rewrites ``contrasts.csv`` and ``hypotheses.csv`` (from episode
+  rows; no checkpoint).
+
+Superseded record (P7-D4)
+-------------------------
+``results/e07/noise_superseded_p7d1/`` holds the noise arm flown under the Phase 2 stand-in,
+moved unchanged. It is never flown, re-derived, compressed or written: ``--arm noise`` and
+``--arm all`` check its bytes against P7-D2's SHA-256s (:func:`rld.eval.superseded.
+verify_superseded_noise`) and the P7-D4 arm writes ``results/e07/noise/``. Before a noise
+condition is flown, :func:`_noise_preflight` refuses a tree without the P7-D4 stand-in
+(``PerceptionNoise.perceive``) and, into ``results/``, a tree with uncommitted changes under
+``src``, ``configs``, ``scripts``, ``Makefile`` or ``pyproject.toml``.
 
 Pre-flight and provenance
 -------------------------
@@ -128,6 +165,7 @@ from rld.eval.learned import (
     summarise_learned,
     verify_lists,
 )
+from rld.eval.metrics import as_bool
 from rld.eval.report import SkipRecord, read_rows, summarise, summary_columns, write_rows
 from rld.eval.reproduce import compare_to_reference, git_state
 from rld.eval.runner import (
@@ -141,16 +179,21 @@ from rld.eval.runner import (
     run_arms,
     split_runnable,
 )
+from rld.eval.superseded import SUPERSEDED_NOISE_DIR, SUPERSEDED_NOTE, verify_superseded_noise
 from rld.provenance import environment_provenance
 from rld.rl.motion import DECK_STATS_SEEDS
 
 __all__ = [
     "ARM_COLUMNS",
+    "TUNNELLED_COLUMNS",
+    "TUNNELLED_FILE",
     "ConditionUnavailableError",
+    "add_tunnelled",
     "arm_columns",
     "condition_configs",
     "condition_episodes",
     "derive_condition",
+    "derive_tunnelled",
     "fly_condition",
     "inspect_runs",
     "lambda_feasibility",
@@ -189,6 +232,25 @@ DERIVED_FILES: tuple[str, ...] = (
     "seeds.csv",
     "aggregate.csv",
     "baselines_summary.csv",
+)
+
+#: Per-cell tunnelled-success counts of a condition (review M4; :func:`derive_tunnelled`).
+TUNNELLED_FILE: str = "tunnelled_success.csv"
+
+#: Its columns: one row per (method, seed, pad, regime, sea state) and source.
+TUNNELLED_COLUMNS: tuple[str, ...] = (
+    "method",
+    "privileged",
+    "run_seed",
+    "pad",
+    "regime",
+    "ss",
+    "source",
+    "n_episodes",
+    "n_success",
+    "n_tunnelled",
+    "n_success_tunnelled",
+    "tunnelling_penetration_m",
 )
 
 
@@ -523,6 +585,86 @@ def derive_condition(
     return out
 
 
+def derive_tunnelled(
+    cond: Condition,
+    rows: Sequence[Mapping[str, Any]],
+    episodes: Sequence[ListedEpisode],
+    cfgs: EvalConfigs,
+    *,
+    results_dir: Path = RESULTS_DIR,
+    carried: bool = True,
+) -> str:
+    """Return ``tunnelled_success.csv``: per-cell tunnelled successes (review M4).
+
+    A *tunnelled success* is an episode whose outcome is ``success`` and whose ``tunnelled``
+    flag is set, i.e. its penetration exceeded ``tunnelling_penetration_m`` (5 mm, metres
+    model scale, ``configs/env/success.yaml``) at **any** contact substep (P5-D14). Such a
+    success may depend on tunnelling overlap (the P6-D5 bound counts them per method).
+
+    Rows: the condition's own episode rows grouped by (method, privileged, seed, pad, regime,
+    SS) in first-appearance order (``source`` = ``flown here``); then, when ``carried``, the
+    carried baselines' rows of the condition's cells from each carried source's
+    ``episodes.csv`` (the lines :func:`rld.eval.learned.carry_baselines` verifies are the
+    identical listed episodes), in carry order (``source`` = ``carried from results/<name>``).
+
+    Args:
+        cond: The condition.
+        rows: Its ``episodes.csv`` rows, as text.
+        episodes: Its listed episodes (the carried cells).
+        cfgs: The committed configs (the threshold column).
+        results_dir: Where the carried sources live.
+        carried: Include the carried baselines (``False`` for a scratch subset).
+
+    Returns:
+        The CSV text (:data:`TUNNELLED_COLUMNS`).
+    """
+    threshold = repr(float(cfgs.success.tunnelling_penetration_m))
+    groups: dict[tuple[str, ...], list[int]] = {}
+
+    def add(row: Mapping[str, Any], source: str) -> None:
+        key = (
+            str(row["method"]),
+            str(row["privileged"]),
+            str(row["run_seed"]),
+            str(row["pad"]),
+            str(row["regime"]),
+            str(row["ss"]),
+            source,
+        )
+        counts = groups.setdefault(key, [0, 0, 0, 0])
+        success = str(row["outcome"]) == "success"
+        tunnelled = as_bool(str(row["tunnelled"]))
+        counts[0] += 1
+        counts[1] += success
+        counts[2] += tunnelled
+        counts[3] += success and tunnelled
+
+    for row in rows:
+        add(row, "flown here")
+    if carried and cond.carry:
+        cells = {(e.regime, e.ss) for e in episodes}
+        for name, methods, pad in cond.carry:
+            for row in read_rows(results_dir / name / EPISODES_FILE):
+                if (
+                    row["method"] in methods
+                    and (row.get("pad") or "aft") == pad
+                    and (row["regime"], row["ss"]) in cells
+                ):
+                    add(row, f"carried from results/{name}")
+    records = [
+        {
+            **dict(zip(TUNNELLED_COLUMNS[:7], key, strict=True)),
+            "n_episodes": counts[0],
+            "n_success": counts[1],
+            "n_tunnelled": counts[2],
+            "n_success_tunnelled": counts[3],
+            "tunnelling_penetration_m": threshold,
+        }
+        for key, counts in groups.items()
+    ]
+    return _csv_text(records, list(TUNNELLED_COLUMNS))
+
+
 def _carry(
     cond: Condition,
     out_dir: Path,
@@ -672,6 +814,9 @@ def fly_condition(
     learned_skips = [s for s in skipped if s.method in LEARNED_METHODS]
     texts = derive_condition(
         cond, cfgs_arm, text_rows, run_cols, base_prov, provenance, learned_skips
+    )
+    texts[TUNNELLED_FILE] = derive_tunnelled(
+        cond, text_rows, episodes, cfgs, results_dir=results_dir, carried=carry_on
     )
     for name, text in texts.items():
         (out_dir / name).write_text(text, encoding="utf-8")
@@ -845,6 +990,9 @@ def verify_condition(
             for pad in cond.pads:
                 skipped += _feed_skips(episodes, stub, pad)[1]
     texts = derive_condition(cond, cfgs_arm, rows, run_cols, base_prov, provenance, skipped)
+    texts[TUNNELLED_FILE] = derive_tunnelled(
+        cond, rows, episodes, cfgs, results_dir=results_dir, carried=per_cell is None
+    )
     for name, text in texts.items():
         path = out_dir / name
         result[name] = path.is_file() and text == path.read_text(encoding="utf-8")
@@ -878,6 +1026,60 @@ def _stub(method: str, seed: int, cols: Mapping[str, str]) -> PolicySpec:
     """Return a non-flyable spec carrying a run's feed flag (for skip bookkeeping)."""
     feed = cols.get("run_needs_motion_feed") == "True"
     return PolicySpec(method, False, _no_build, seed, needs_motion_feed=feed)
+
+
+def add_tunnelled(
+    cond: Condition, *, out_root: Path = E07_DIR, results_dir: Path = RESULTS_DIR
+) -> dict[str, Any]:
+    """Write ``tunnelled_success.csv`` into a condition written before the file existed.
+
+    Nothing else of the condition is touched (``run_info.json`` included). The file is
+    written only if every other file of the condition verifies byte for byte; an existing
+    file is compared, never overwritten. Afterwards the whole condition is verified again.
+
+    Args:
+        cond: A written (complete) condition.
+        out_root: Output root.
+        results_dir: Where carried sources live.
+
+    Returns:
+        ``{"condition", "status", ...}``: ``status`` is ``"written"``, ``"present"``,
+        ``"not written"`` (the condition) or ``"FAILED"``.
+    """
+    out_dir = cond.out_dir(out_root)
+    info_path = out_dir / "run_info.json"
+    info = json.loads(info_path.read_text(encoding="utf-8")) if info_path.is_file() else {}
+    if not info.get("complete"):
+        return {"condition": cond.key, "status": "not written"}
+    path = out_dir / TUNNELLED_FILE
+    before = verify_condition(cond, out_root=out_root, results_dir=results_dir)
+    if path.is_file():
+        ok = all(before.values())
+        return {"condition": cond.key, "status": "present" if ok else "FAILED", "check": before}
+    others = {k: v for k, v in before.items() if k != TUNNELLED_FILE}
+    if not all(others.values()):
+        bad = [k for k, ok in others.items() if not ok]
+        return {"condition": cond.key, "status": "FAILED", "reason": f"not byte-identical: {bad}"}
+    per_cell = info.get("list", {}).get("per_cell")
+    episodes, _ = condition_episodes(cond, per_cell)
+    text = derive_tunnelled(
+        cond,
+        read_rows(out_dir / EPISODES_FILE),
+        episodes,
+        load_eval_configs(),
+        results_dir=results_dir,
+        carried=per_cell is None,
+    )
+    path.write_text(text, encoding="utf-8")
+    after = verify_condition(cond, out_root=out_root, results_dir=results_dir)
+    status = "written" if all(after.values()) else "FAILED"
+    print(f"[{cond.key}] {TUNNELLED_FILE}: {status}", flush=True)
+    return {
+        "condition": cond.key,
+        "status": status,
+        "sha256": _sha256(path),
+        "rows": text.count("\n") - 1,
+    }
 
 
 # --------------------------------------------------------------------------- re-fly
@@ -1003,7 +1205,11 @@ def compress_condition(
             "reason": f"uncompressed SHA-256 {facts['sha256']} != run_info.json {recorded}",
             **facts,
         }
-    after = verify_condition(cond, out_root=out_root, results_dir=results_dir)  # reads the .gz
+    after = (  # reads the .gz; an already compressed condition was just verified from it
+        before
+        if facts["already_compressed"]
+        else verify_condition(cond, out_root=out_root, results_dir=results_dir)
+    )
     status = "already compressed" if facts["already_compressed"] else "compressed"
     if not all(after.values()):
         status = "FAILED"
@@ -1127,7 +1333,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--arm", choices=[*ARMS, "all", "hypotheses"], default="all")
-    parser.add_argument("--check", action="store_true", help="verify written outputs; no flight")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="verify written outputs and the superseded record; write nothing; no checkpoint "
+        "needed",
+    )
     parser.add_argument(
         "--compress",
         action="store_true",
@@ -1138,6 +1349,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--keep-csv",
         action="store_true",
         help="with --compress: keep the uncompressed episodes.csv beside the .gz",
+    )
+    parser.add_argument(
+        "--add-tunnelled",
+        action="store_true",
+        help=f"write {TUNNELLED_FILE} into complete conditions that lack it (review M4); "
+        "nothing else is touched; no flight",
     )
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
     parser.add_argument("--chunk", type=int, default=DEFAULT_CHUNK)
@@ -1160,12 +1377,142 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def _invocation_log(out_root: Path, entry: Mapping[str, Any]) -> None:
-    """Append one invocation's facts to ``<out_root>/run_info.json``."""
+    """Append one writing invocation's facts to ``<out_root>/run_info.json``.
+
+    Called only by an invocation that wrote something; a verification is never logged
+    (review m8: a verify-only run must leave the committed tree untouched).
+    """
     path = out_root / "run_info.json"
     doc = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {"invocations": []}
     doc["invocations"].append(dict(entry))
     out_root.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+
+
+def _check_superseded(out_root: Path, committed: bool) -> int:
+    """Verify the superseded noise record read-only (P7-D4); return an exit status.
+
+    Absent under a scratch root it is skipped with the reason; absent under ``results/`` it
+    fails, because P7-D4 keeps it.
+    """
+    result = verify_superseded_noise(out_root)
+    top = result.get(SUPERSEDED_NOISE_DIR, {})
+    if not top.get("present"):
+        where = out_root / SUPERSEDED_NOISE_DIR
+        if not committed:
+            print(f"[{SUPERSEDED_NOISE_DIR}] skipped: not present under {where} (scratch root)")
+            return 0
+        print(f"[{SUPERSEDED_NOISE_DIR}] MISSING: P7-D4 keeps it at {where}", file=sys.stderr)
+        return 1
+    status = 0
+    for key, checks in result.items():
+        ok = all(checks.values())
+        bad = [k for k, v in checks.items() if not v]
+        print(f"[{key}] {'OK (superseded, P7-D2 hashes)' if ok else 'MISMATCH'} {bad or ''}")
+        status |= 0 if ok else 1
+    print(f"[{SUPERSEDED_NOISE_DIR}] {SUPERSEDED_NOTE}")
+    return status
+
+
+def _missing_runs(methods: Sequence[str], seeds: Sequence[int], runs_root: Path) -> list[str]:
+    """Return the run files a flight needs that are absent (``config.yaml``, ``final/``).
+
+    The files are those :func:`rld.eval.learned.inspect_run` reads and hashes:
+    ``<run>/config.yaml`` and ``<run>/final/{model.zip, checkpoint.json}``.
+    """
+    out = []
+    for m in methods:
+        for s in seeds:
+            run = run_dir(m, s, runs_root)
+            need = (
+                run / "config.yaml",
+                run / "final" / "model.zip",
+                run / "final" / "checkpoint.json",
+            )
+            out += [_rel(path) for path in need if not path.is_file()]
+    return out
+
+
+#: Paths whose uncommitted changes would make a P7-D4 noise flight unattributable.
+_CODE_PREFIXES: tuple[str, ...] = ("src", "configs", "scripts", "Makefile", "pyproject.toml")
+
+
+def _noise_preflight(to_fly: Sequence[Condition], committed: bool) -> None:
+    """Refuse to fly the noise arm under the superseded stand-in or from uncommitted code.
+
+    P7-D4: the re-flown arm must use the deck-perceiving stand-in
+    (:meth:`rld.envs.noise.PerceptionNoise.perceive`; the Phase 2 stand-in had only
+    ``apply`` on the six relative entries). Into ``results/`` it must also fly from a
+    committed code tree, so its ``run_info.json`` ``git_sha`` names the stand-in it flew.
+
+    Raises:
+        SystemExit: On either condition, before anything is flown.
+    """
+    if not any(c.arm == "noise" for c in to_fly):
+        return
+    if not callable(getattr(PerceptionNoise, "perceive", None)):
+        raise SystemExit(
+            "noise arm: rld.envs.noise.PerceptionNoise has no `perceive` (the P7-D4 "
+            "deck-perceiving stand-in); refusing to fly under the superseded stand-in"
+        )
+    if not committed:
+        return
+    import subprocess
+
+    status = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=normal", "--", *_CODE_PREFIXES],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if status.returncode != 0:
+        raise SystemExit(f"noise arm into results/: git status failed: {status.stderr.strip()}")
+    dirty = [line for line in status.stdout.splitlines() if line]
+    if dirty:
+        raise SystemExit(
+            f"noise arm into results/: uncommitted code changes {dirty[:5]}; commit the "
+            "P7-D4 stand-in first so run_info.json's git_sha names what was flown"
+        )
+
+
+def _check_main(args: argparse.Namespace, conds: Sequence[Condition], committed: bool) -> int:
+    """``--check``: verify everything requested; write nothing; no checkpoint needed."""
+    out_root: Path = args.out_root
+    status = 0
+    for cond in conds:
+        try:
+            result = verify_condition(cond, out_root=out_root)
+        except ConditionUnavailableError as exc:
+            print(f"[{cond.key}] not flown (optional): {exc}")
+            continue
+        ok = all(result.values())
+        if result == {"complete": False}:
+            if cond.optional:
+                print(f"[{cond.key}] not flown (optional)")
+                continue
+            print(
+                f"[{cond.key}] NOT WRITTEN: fly it with `scripts/eval_phase7.py --arm "
+                f"{cond.arm}` (needs the artifacts/runs checkpoints)"
+            )
+            status = 1
+            continue
+        print(f"[{cond.key}] {'OK' if ok else 'MISMATCH'} {json.dumps(result)}")
+        status |= 0 if ok else 1
+    if args.arm in ("all", "noise") and args.condition is None:
+        status |= _check_superseded(out_root, committed)
+    if any(c.arm == "lambda" for c in conds) and args.condition is None:
+        feas = out_root / "lambda" / FEASIBILITY_FILE
+        with tempfile.TemporaryDirectory() as tmp:
+            fresh = lambda_feasibility(Path(tmp), workers=args.workers)
+            same = feas.is_file() and fresh.read_bytes() == feas.read_bytes()
+        print(f"[lambda/feasibility] {'OK' if same else 'MISMATCH or missing'}")
+        status |= 0 if same else 1
+    if args.arm in ("all", "hypotheses") and args.condition is None:
+        from rld.eval.hypotheses import check_hypotheses
+
+        status |= 0 if check_hypotheses(out_root, allow_subset=not committed) else 1
+    return status
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1183,6 +1530,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     scratch = (args.per_cell, args.methods, args.seeds, args.baselines)
     if committed and any(v is not None for v in scratch):
         raise SystemExit("--per-cell / --methods / --seeds / --baselines are scratch-only")
+    if sum(map(bool, (args.check, args.compress, args.add_tunnelled))) > 1:
+        raise SystemExit("--check, --compress and --add-tunnelled are separate steps")
     for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS"):
         os.environ.setdefault(var, "1")
     conds = [] if args.arm == "hypotheses" else _conditions(args.arm, args.episodes_mss_dir)
@@ -1190,64 +1539,87 @@ def main(argv: Sequence[str] | None = None) -> int:
         conds = [c for c in conds if c.key == args.condition]
         if not conds:
             raise SystemExit(f"no condition {args.condition!r} in arm {args.arm!r}")
+    argv_list = list(sys.argv[1:] if argv is None else argv)
 
-    if args.compress:
-        if args.check:
-            raise SystemExit("--compress and --check are separate steps")
+    if args.check:
+        return _check_main(args, conds, committed)
+
+    if args.compress or args.add_tunnelled:
         started = environment_provenance(REPO_ROOT)["timestamp_utc"]
-        results = [
-            compress_condition(c, out_root=out_root, remove=not args.keep_csv) for c in conds
-        ]
+        if args.compress:
+            results = [
+                compress_condition(c, out_root=out_root, remove=not args.keep_csv) for c in conds
+            ]
+            written = [r for r in results if r["status"] == "compressed"]
+            log_key = "compress"
+        else:
+            results = [add_tunnelled(c, out_root=out_root) for c in conds]
+            written = [r for r in results if r["status"] == "written"]
+            log_key = "add_tunnelled"
         for res in results:
             if res["status"] in ("not written", "FAILED"):
                 print(f"[{res['condition']}] {res['status']} {res.get('reason', '')}".rstrip())
-        _invocation_log(
-            out_root,
-            {
-                "started_utc": started,
-                **git_state(REPO_ROOT),
-                "argv": list(sys.argv[1:] if argv is None else argv),
-                "compress": {
-                    r["condition"]: {k: v for k, v in r.items() if k not in ("condition", "after")}
-                    for r in results
+            elif res["status"] in ("already compressed", "present"):
+                print(f"[{res['condition']}] {res['status']}; nothing written")
+        if written:
+            _invocation_log(
+                out_root,
+                {
+                    "started_utc": started,
+                    **git_state(REPO_ROOT),
+                    "argv": argv_list,
+                    log_key: {
+                        r["condition"]: {
+                            k: v for k, v in r.items() if k not in ("condition", "after", "check")
+                        }
+                        for r in results
+                    },
                 },
-            },
-        )
+            )
         return 1 if any(r["status"] == "FAILED" for r in results) else 0
-
-    if args.check:
-        status = 0
-        for cond in conds:
-            try:
-                result = verify_condition(cond, out_root=out_root)
-            except ConditionUnavailableError as exc:
-                print(f"[{cond.key}] not flown (optional): {exc}")
-                continue
-            ok = all(result.values())
-            if not ok and cond.optional and result == {"complete": False}:
-                print(f"[{cond.key}] not flown (optional)")
-                continue
-            print(f"[{cond.key}] {'OK' if ok else 'MISMATCH'} {json.dumps(result)}")
-            status |= 0 if ok else 1
-        if any(c.arm == "lambda" for c in conds) and args.condition is None:
-            feas = out_root / "lambda" / FEASIBILITY_FILE
-            with tempfile.TemporaryDirectory() as tmp:
-                fresh = lambda_feasibility(Path(tmp), workers=args.workers)
-                same = feas.is_file() and fresh.read_bytes() == feas.read_bytes()
-            print(f"[lambda/feasibility] {'OK' if same else 'MISMATCH or missing'}")
-            status |= 0 if same else 1
-        if args.arm in ("all", "hypotheses") and args.condition is None:
-            from rld.eval.hypotheses import check_hypotheses
-
-            status |= 0 if check_hypotheses(out_root, allow_subset=not committed) else 1
-        return status
 
     started = environment_provenance(REPO_ROOT)["timestamp_utc"]
     t_start = time.perf_counter()
+    status = 0
+    done: dict[str, str] = {}
+    to_fly: list[Condition] = []
+    # 1. Verify what is written -- read-only, no checkpoint needed (review m8).
+    for cond in conds:
+        try:
+            result = verify_condition(cond, out_root=out_root)
+        except ConditionUnavailableError as exc:
+            done[cond.key] = f"not flown (optional): {exc}"
+            print(f"[{cond.key}] not flown (optional): {exc}")
+            continue
+        if result.get("complete", True) and all(result.values()):
+            done[cond.key] = "verified (already written; not re-flown)"
+            print(f"[{cond.key}] already written and byte-identical; not re-flown")
+        elif result != {"complete": False}:
+            print(f"[{cond.key}] written but NOT byte-identical: {result}", file=sys.stderr)
+            done[cond.key] = f"MISMATCH {result}"
+            status = 1
+        else:
+            to_fly.append(cond)
+    if args.arm in ("all", "noise") and args.condition is None:
+        status |= _check_superseded(out_root, committed)
+
+    # 2. Only a flight (or a re-flight) needs the gitignored checkpoints.
     cfgs = load_eval_configs()
     methods = list(args.methods or LEARNED_METHODS)
     seeds = list(args.seeds if args.seeds is not None else LEARNED_SEEDS)
-    needed = [m for m in methods if any(m in c.learned for c in conds)]
+    flying = [args.refly] if args.refly is not None else [c.key for c in to_fly]
+    targets = [c for c in conds if c.key in flying]
+    needed = [m for m in methods if any(m in c.learned for c in targets)]
+    if flying:
+        _noise_preflight(targets, committed)
+        absent = _missing_runs(needed, seeds, args.runs_root)
+        if absent:
+            raise SystemExit(
+                f"cannot fly {flying}: the gitignored checkpoint files {absent[:3]}"
+                f"{' …' if len(absent) > 3 else ''} ({len(absent)} absent) are needed to fly. "
+                "Everything already written was verified above without them; "
+                "`--check` verifies every written condition without them."
+            )
     runs, policy_facts = inspect_runs(needed, seeds, cfgs, args.runs_root) if needed else ([], [])
     if args.refly is not None:
         target = next((c for c in conds if c.key == args.refly), None)
@@ -1263,21 +1635,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             per_cell=args.refly_per_cell,
         )
         return 0 if check["byte_identical"] else 1
+
+    # 3. Fly what is missing.
     digests_before = _check_digests(runs, "at start")
-    status = 0
-    done: dict[str, str] = {}
-    for cond in conds:
+    wrote = False
+    for cond in to_fly:
         try:
-            result = verify_condition(cond, out_root=out_root)
-            if result.get("complete", True) and all(result.values()):
-                done[cond.key] = "verified (already written; not re-flown)"
-                print(f"[{cond.key}] already written and byte-identical; not re-flown")
-                continue
-            if result != {"complete": False}:
-                print(f"[{cond.key}] written but NOT byte-identical: {result}", file=sys.stderr)
-                done[cond.key] = f"MISMATCH {result}"
-                status = 1
-                continue
             info = fly_condition(
                 cond,
                 runs,
@@ -1298,6 +1661,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             done[cond.key] = f"not flown (optional): {exc}"
             print(f"[{cond.key}] not flown (optional): {exc}")
             continue
+        wrote = True
         ok = all(info["rederived_byte_identical"].values())
         ref_ok = all(
             v["all_identical"] for v in info["reference_checks"].values() if v.get("applicable")
@@ -1311,19 +1675,37 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             lambda_feasibility(feas.parent, workers=args.workers)
             done["lambda/feasibility"] = "written"
+            wrote = True
             print(f"[lambda] feasibility context -> {feas}")
     digests_after = _check_digests(runs, "at the end")
+
+    # 4. Score: rewrite after a flight or on request; otherwise compare, read-only.
     hyp: dict[str, Any] | None = None
     if args.arm in ("all", "hypotheses") and args.condition is None:
-        from rld.eval.hypotheses import write_hypotheses
+        from rld.eval.hypotheses import check_hypotheses, write_hypotheses
 
-        hyp = write_hypotheses(out_root, allow_subset=not committed)
+        present = all((out_root / n).is_file() for n in ("contrasts.csv", "hypotheses.csv"))
+        if args.arm == "hypotheses" or wrote or not present:
+            hyp = write_hypotheses(out_root, allow_subset=not committed)
+            wrote = True
+        elif check_hypotheses(out_root, allow_subset=not committed):
+            done["hypotheses"] = "verified (byte-identical; not rewritten)"
+        else:
+            print(
+                "contrasts.csv / hypotheses.csv differ from a recomputation and nothing was "
+                "flown; not rewritten. Rewrite explicitly with `--arm hypotheses`.",
+                file=sys.stderr,
+            )
+            status = 1
+    if not wrote:
+        print("nothing flown or written; results/e07/run_info.json not appended (read-only)")
+        return status
     _invocation_log(
         out_root,
         {
             "started_utc": started,
             **git_state(REPO_ROOT),
-            "argv": list(sys.argv[1:] if argv is None else argv),
+            "argv": argv_list,
             "workers": args.workers,
             "chunk": args.chunk,
             "wall_s": round(time.perf_counter() - t_start, 1),

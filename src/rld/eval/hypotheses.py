@@ -73,8 +73,13 @@ wholly below 0 is "not supported" (P7-D1a #6).
 * **H3** (P7-D1a #2, #5): r(``ppo_forecast`` vs ``ppo``) at ``id`` SS5 and at ``id`` SS6,
   each its own verdict by H1a's point-estimate / CI rule at 0.10, with **no**
   non-inferiority term; the ``unseen_vessel`` half-rule per SS, its own verdict, on point
-  estimates, "not applicable" when r(``id``) <= 0 (P7-D1 §2). No conjunction row. The same
-  parts for ``residual_ppo_forecast`` vs ``residual_ppo`` are the secondary.
+  estimates, "not applicable" when r(``id``) <= 0 (P7-D1 §2), and "not scored (no supported
+  id gain)" when r(``id``) > 0 but the ``id`` part is not "supported": there is no
+  supported help for the half-rule to shrink (review m6, wording only; P7-D4, for P7-D5).
+  Only behind a "supported" ``id`` part is the half-rule a verdict in P3-D1 §8's vocabulary:
+  met -> "supported", not met -> "not supported" (no committed cell reaches this branch).
+  No conjunction row. The same parts for ``residual_ppo_forecast`` vs ``residual_ppo`` are
+  the secondary.
 * **H5**: "pending — scored at Gate 8" (P7-D1 §7).
 
 Units: success rates and differences are fractions in [-1, 1]; closing speeds m/s model
@@ -129,9 +134,8 @@ __all__ = [
 SUPPORTED = "supported"
 NOT_SUPPORTED = "not supported"
 INCONCLUSIVE = "inconclusive"
-HOLDS = "holds"
-FAILS = "fails"
 NOT_APPLICABLE = "not applicable — no id gain to shrink"
+NO_SUPPORTED_ID_GAIN = "not scored (no supported id gain)"
 PENDING_H5 = "pending — scored at Gate 8"
 NOT_SCORED = "not scored"
 
@@ -339,20 +343,30 @@ def verdict_h1a(r: float, lo: float, hi: float, ni_lo: float) -> str:
     return verdict_magnitude(r, lo, hi, H1A_R_MIN)
 
 
-def verdict_half_rule(r_id: float, r_unseen: float) -> str:
+def verdict_half_rule(r_id: float, r_unseen: float, id_verdict: str) -> str:
     """Return H3's ``unseen_vessel`` part for one sea state (P7-D1 §2, point estimates).
 
+    H3 predicts that the forecast helps at ``id`` **and then** helps less on the unseen
+    vessel. The half-rule is therefore only a verdict behind a supported ``id`` gain. The
+    words are P3-D1 §8's (supported / not supported) plus the two "no gain" labels; the
+    earlier "holds" / "fails" were outside that vocabulary (review m6, relabelled 2026-10-02,
+    P7-D4; to be recorded in P7-D5). No number and no other verdict changed.
+
     Args:
-        r_id: r(``id``, SS).
-        r_unseen: r(``unseen_vessel``, SS).
+        r_id: r(``id``, SS), point estimate.
+        r_unseen: r(``unseen_vessel``, SS), point estimate.
+        id_verdict: The verdict of the same pair's ``id`` SS relative-p95 part.
 
     Returns:
-        ``"not applicable — no id gain to shrink"`` if ``r_id <= 0``; ``"holds"`` if
-        ``r_unseen <= 0.5 r_id``; ``"fails"`` otherwise.
+        ``"not applicable — no id gain to shrink"`` if ``r_id <= 0``; ``"not scored (no
+        supported id gain)"`` if ``r_id > 0`` but ``id_verdict`` is not ``"supported"``;
+        otherwise ``"supported"`` if ``r_unseen <= 0.5 r_id`` and ``"not supported"`` if not.
     """
     if not r_id > 0.0:
         return NOT_APPLICABLE
-    return HOLDS if r_unseen <= H3_HALF * r_id else FAILS
+    if id_verdict != SUPPORTED:
+        return NO_SUPPORTED_ID_GAIN
+    return SUPPORTED if r_unseen <= H3_HALF * r_id else NOT_SUPPORTED
 
 
 # --------------------------------------------------------------------------- episode data
@@ -1105,9 +1119,14 @@ def _h3_family(ctx: _Ctx, a_name: str, b_name: str, role: str, tag: str) -> None
                 ci_lo=r_uv.lo,
                 ci_hi=r_uv.hi,
                 separates=r_uv.separates,
-                verdict=verdict_half_rule(r_id.r, r_uv.r),
-                rule="judged on point estimates; not applicable if r(id) <= 0",
-                rule_source="P3-D1 §8 H3; P7-D1 §2; P7-D1a #2 (own verdict)",
+                verdict=verdict_half_rule(
+                    r_id.r, r_uv.r, verdict_magnitude(r_id.r, r_id.lo, r_id.hi, H3_R_MIN)
+                ),
+                rule="judged on point estimates; not applicable if r(id) <= 0; not scored if "
+                "the id part is not supported (no supported id gain to shrink); behind a "
+                "supported id part: supported if r(unseen_vessel) <= 0.5 r(id), else not "
+                "supported",
+                rule_source="P3-D1 §8 H3; P7-D1 §2; P7-D1a #2 (own verdict); P7-D4 (m6 wording)",
                 contrasts=f"{tag}.r.unseen_vessel.{ss};{tag}.r.id.{ss}",
                 caveats=caveats + ";regimes-overlap",
                 note=f"r(id {ss}) {r_id.r:+.4f} [{r_id.lo:+.4f}, {r_id.hi:+.4f}]; "

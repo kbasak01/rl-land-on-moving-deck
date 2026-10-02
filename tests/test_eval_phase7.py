@@ -43,9 +43,8 @@ from rld.eval.envs import (
 )
 from rld.eval.episodes import EPISODES_DIR, ListedEpisode, read_list
 from rld.eval.hypotheses import (
-    FAILS,
-    HOLDS,
     INCONCLUSIVE,
+    NO_SUPPORTED_ID_GAIN,
     NOT_APPLICABLE,
     NOT_SUPPORTED,
     SUPPORTED,
@@ -215,18 +214,38 @@ def test_h2_h4_truth_table(point: float, lo: float, hi: float, want: str) -> Non
 
 
 @pytest.mark.parametrize(
-    ("r_id", "r_uv", "want"),
+    ("r_id", "r_uv", "id_verdict", "want"),
     [
-        (0.20, 0.10, HOLDS),  # exactly half holds
-        (0.20, 0.05, HOLDS),
-        (0.20, -0.10, HOLDS),
-        (0.20, 0.11, FAILS),
-        (0.0, 0.0, NOT_APPLICABLE),
-        (-0.05, 0.10, NOT_APPLICABLE),
+        (0.20, 0.10, SUPPORTED, SUPPORTED),  # exactly half meets the rule
+        (0.20, 0.05, SUPPORTED, SUPPORTED),
+        (0.20, -0.10, SUPPORTED, SUPPORTED),
+        (0.20, 0.11, SUPPORTED, NOT_SUPPORTED),
+        # Review m6: a met rule behind an id gain that is not supported is not a verdict.
+        (0.0188, 0.0004, INCONCLUSIVE, NO_SUPPORTED_ID_GAIN),
+        (0.05, 0.20, NOT_SUPPORTED, NO_SUPPORTED_ID_GAIN),
+        (0.0, 0.0, NOT_SUPPORTED, NOT_APPLICABLE),
+        (-0.05, 0.10, NOT_SUPPORTED, NOT_APPLICABLE),
     ],
 )
-def test_half_rule_truth_table(r_id: float, r_uv: float, want: str) -> None:
-    assert verdict_half_rule(r_id, r_uv) == want
+def test_half_rule_truth_table(r_id: float, r_uv: float, id_verdict: str, want: str) -> None:
+    assert verdict_half_rule(r_id, r_uv, id_verdict) == want
+
+
+def test_verdict_words_are_p3_d1_vocabulary() -> None:
+    """Review m6: every verdict word is P3-D1 §8's, or an explicit not-scored / pending label."""
+    import csv
+
+    from rld.eval import hypotheses
+
+    allowed = {SUPPORTED, NOT_SUPPORTED, INCONCLUSIVE}
+    with (RESULTS / "e07" / "hypotheses.csv").open(newline="", encoding="utf-8") as handle:
+        verdicts = [row["verdict"] for row in csv.DictReader(handle)]
+    for verdict in verdicts:
+        assert verdict in allowed or verdict.startswith(
+            (hypotheses.NOT_SCORED, "not applicable", "pending")
+        ), verdict
+    assert verdicts.count(NO_SUPPORTED_ID_GAIN) == 1
+    assert not hasattr(hypotheses, "HOLDS") and not hasattr(hypotheses, "FAILS")
 
 
 def test_no_combined_h3_or_h1_verdict_exists() -> None:

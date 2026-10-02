@@ -2,11 +2,13 @@ r"""Render ``results/results.md`` from the committed Phase 7 CSVs, and nothing e
 
 Called as :func:`rld.eval.report.render_results` (``scripts/report.py``). Reads only CSV files
 under ``results/e07/`` (each condition's ``summary.csv``, ``aggregate.csv``, ``seeds.csv``,
-``baselines_summary.csv`` and ``carried_summary_*.csv``; ``contrasts.csv``;
-``hypotheses.csv``; ``lambda/feasibility.csv``) plus, for the MSS comparison only, the matrix
-``episodes.csv`` (its committed ``episodes.csv.gz``, read transparently, P7-D1a §12) and
-``results/e01/episodes.csv``. Re-rendering the committed CSVs reproduces the committed file
-byte for byte (``scripts/report.py --check``).
+``baselines_summary.csv``, ``carried_summary_*.csv`` and ``tunnelled_success.csv``;
+``contrasts.csv``; ``hypotheses.csv``; ``lambda/feasibility.csv``) plus, for the MSS
+comparison only, the matrix ``episodes.csv`` (its committed ``episodes.csv.gz``, read
+transparently, P7-D1a §12) and ``results/e01/episodes.csv``. The superseded noise record
+(``results/e07/noise_superseded_p7d1/``, P7-D4) is never read; it is named in one labelled
+note. Re-rendering the committed CSVs reproduces the committed file byte for byte
+(``scripts/report.py --check``).
 
 Reporting rules enforced here (P3-D1, ``landing-protocol`` skill, CLAUDE.md):
 
@@ -15,7 +17,9 @@ Reporting rules enforced here (P3-D1, ``landing-protocol`` skill, CLAUDE.md):
 * a learned method's success is the IQM over its 5 seeds with the stratified-bootstrap 95 %
   CI and the per-seed range; a baseline's is its rate with the Wilson 95 % CI and k/N; per-seed
   Wilson CIs are in the appendix;
-* every success table is followed by the six-class outcome breakdown for the same cells;
+* every success table is followed by the six-class outcome breakdown for the same cells,
+  with the cell's tunnelled successes (success and penetration > 5 mm at any contact
+  substep; review M4) beside it;
 * the always-printed baselines ``pid_track_descend``, ``pid_feedforward`` and ``oracle_gated``
   are in every method table; ``oracle_gated`` is labelled "commit-timing oracle
   (privileged)"; the phrase refused by P3-D4 never appears;
@@ -45,6 +49,8 @@ from rld.eval.episodes import REGIME_CELLS
 from rld.eval.hypotheses import CAVEATS
 from rld.eval.metrics import as_float
 from rld.eval.report import FORBIDDEN_RENDERED_PHRASES, method_label, read_rows, render_results
+from rld.eval.stats import wilson_interval
+from rld.eval.superseded import SUPERSEDED_NOISE_DIR
 
 __all__ = ["RESULTS_NAME", "main", "render"]
 
@@ -62,6 +68,18 @@ _LEARNED_NOTES: dict[str, str] = {
 }
 
 _ORACLE_SHORT = "commit-timing oracle (privileged)"
+
+#: Column of the outcome breakdowns: successes whose penetration exceeded 5 mm (review M4).
+_TUNNEL_HEADER = "success ∧ tunnelled (> 5 mm)"
+
+#: The tunnelled-success definition, printed once in the header.
+_TUNNEL_NOTE = (
+    "`success ∧ tunnelled (> 5 mm)` in every outcome breakdown counts the successes (pooled "
+    "over seeds) whose penetration exceeded `tunnelling_penetration_m` = 5 mm at any contact "
+    "substep (`tunnelled_success.csv` per condition; review M4). Such a success may, but "
+    "need not, depend on tunnelling overlap. P6-D5's bound (successes that may depend on "
+    "the overlap, under P5-D14's rule) is the narrower subset of these it audited in `id`."
+)
 
 
 def _label(method: str) -> str:
@@ -109,8 +127,19 @@ class CondData:
         self.spread: dict[tuple[str, str, str, str], dict[str, str]] = {}
         self.base: dict[tuple[str, str, str, str], dict[str, str]] = {}
         self.base_source: dict[tuple[str, str, str, str], str] = {}
+        self.tunnel: dict[tuple[str, str, str, str], tuple[int, int]] | None = None
         if not self.present:
             return
+        tunnel_path = directory / "tunnelled_success.csv"
+        if tunnel_path.is_file():
+            self.tunnel = {}
+            for rec in read_rows(tunnel_path):
+                key = (rec["method"], rec["pad"], rec["regime"], rec["ss"])
+                n_tun, n_succ = self.tunnel.get(key, (0, 0))
+                self.tunnel[key] = (
+                    n_tun + int(rec["n_success_tunnelled"]),
+                    n_succ + int(rec["n_success"]),
+                )
         for rec in read_rows(directory / "summary.csv"):
             key = (rec["method"], rec["pad"], rec["regime"], rec["ss"])
             self.learned.setdefault(key, []).append(rec)
@@ -166,6 +195,33 @@ class CondData:
             f"{_pct(_f(rec, 'success_wilson_hi'))}] {rec['n_success']}/{rec['n_episodes']}"
         )
 
+    def success_compact(self, method: str, pad: str, regime: str, ss: str) -> str:
+        """Return a short success cell: IQM [CI] and N (learned), or rate [Wilson] k/N."""
+        recs = self.records(method, pad, regime, ss)
+        if not recs:
+            return "missing"
+        if all(int(r["n_episodes"]) == 0 for r in recs):
+            return "not run"
+        if method in LEARNED_METHODS:
+            a = self.agg.get((method, pad, regime, ss, "success_rate", "iqm"))
+            if a is None:
+                return "missing"
+            n = sum(int(r["n_episodes"]) for r in recs)
+            return (
+                f"**{_pct(_f(a, 'point'))}** [{_pct(_f(a, 'ci_lo'))}, {_pct(_f(a, 'ci_hi'))}] N {n}"
+            )
+        rec = recs[0]
+        return (
+            f"{_pct(_f(rec, 'success_rate'))} [{_pct(_f(rec, 'success_wilson_lo'))}, "
+            f"{_pct(_f(rec, 'success_wilson_hi'))}] {rec['n_success']}/{rec['n_episodes']}"
+        )
+
+    def first_record(self) -> dict[str, str] | None:
+        """Return any learned summary record (its condition columns), or ``None``."""
+        for recs in self.learned.values():
+            return recs[0]
+        return None
+
     def success_value(self, method: str, pad: str, regime: str, ss: str) -> float:
         """Return the IQM (learned) or rate (baseline) of a flown cell; NaN otherwise."""
         recs = [r for r in self.records(method, pad, regime, ss) if int(r["n_episodes"]) > 0]
@@ -198,6 +254,13 @@ class CondData:
                 f"{_num(_f(a, 'point'), 3)} [{_num(_f(a, 'ci_lo'), 3)}, {_num(_f(a, 'ci_hi'), 3)}]"
             )
         return _num(_f(recs[0], "rel_vz_normal_p95_m_s"), 3)
+
+    def tunnelled_successes(self, method: str, pad: str, regime: str, ss: str) -> str:
+        """Return a cell's tunnelled successes pooled over seeds, ``k`` (``–`` if not derived)."""
+        if self.tunnel is None:
+            return "–"
+        got = self.tunnel.get((method, pad, regime, ss))
+        return "missing" if got is None else str(got[0])
 
     def skip_reasons(self) -> list[str]:
         """Return the distinct ``skip_reason`` texts of not-run cells."""
@@ -238,14 +301,22 @@ def _breakdown(
     for m in methods:
         for ss in sea_states:
             if not data.has(m, pad, regime, ss):
-                rows.append([_label(m), ss, "missing", *[""] * len(OUTCOMES)])
+                rows.append([_label(m), ss, "missing", *[""] * (len(OUTCOMES) + 1)])
                 continue
             n, counts = data.outcome_counts(m, pad, regime, ss)
             if n == 0:
-                rows.append([_label(m), ss, "not run", *[""] * len(OUTCOMES)])
+                rows.append([_label(m), ss, "not run", *[""] * (len(OUTCOMES) + 1)])
                 continue
-            rows.append([_label(m), ss, str(n), *(f"{c} ({_pct(c / n)})" for c in counts)])
-    return _table(["method", "SS", "N", *OUTCOMES], rows)
+            rows.append(
+                [
+                    _label(m),
+                    ss,
+                    str(n),
+                    *(f"{c} ({_pct(c / n)})" for c in counts),
+                    data.tunnelled_successes(m, pad, regime, ss),
+                ]
+            )
+    return _table(["method", "SS", "N", *OUTCOMES, _TUNNEL_HEADER], rows)
 
 
 def _regime_block(
@@ -386,23 +457,112 @@ def _noise_label(sigma_cm: int, steps: int) -> str:
     return f"σp {sigma_cm} cm / {steps} step ({round(1000 * steps / 30, 1)} ms)"
 
 
+#: What the P7-D4 stand-in perceives, delays and noises (review M2), printed in section 4.
+_NOISE_STANDIN: tuple[str, ...] = (
+    "**Stand-in definition (P7-D4, a dated deviation from P7-D1 §4 and the Phase 2 stand-in).** "
+    "What is perceived is the **deck**: the analytic deck sample at the pad. At control step k "
+    "the perceived sample is the true sample of step k − L, with L the configured latency "
+    "quantised down to whole control steps (warm-up: the oldest available sample; no hold, "
+    "30 Hz).",
+    "",
+    "- Pad **position and velocity**: delayed by L and **noisy** — zero-mean Gaussian, "
+    "independent per world axis, σp and σv = σp / 0.2 s (0 / 0.05 / 0.10 / 0.20 m/s model "
+    "scale), drawn from a spawned child of the episode seed.",
+    "- Pad **orientation and deck normal**: delayed by L, **no noise**.",
+    "- Every deck-derived observation entry — relative position, relative velocity, deck "
+    "normal, relative tilt and pad-plane clearance — is computed from the perceived deck and "
+    "the drone's **current, true** state.",
+    "- The drone's **own state** (attitude, rates, velocity), time, last action and contact "
+    "flag: **current and clean**. Own velocity + relative velocity is therefore a consistent, "
+    "stale deck velocity plus noise.",
+    "- The forecast methods' ship-motion feed stays ideal (P7-D1 §4). Termination, reward, "
+    "touchdown detection and every metric use the true state.",
+    "",
+)
+
+
+def _noise_latency_table(conds: Mapping[str, tuple[Condition, CondData]]) -> list[str]:
+    """Return the conditions with their effective latency in steps and ms (review M2)."""
+    rows = []
+    for cond, data in conds.values():
+        if cond.noise is None:
+            continue
+        rec = data.first_record()
+        if rec is not None:
+            steps = int(rec["noise_latency_steps"])
+            model_ms = _f(rec, "noise_latency_ms_effective")
+            lam_inv = _f(rec, "lam_inverse")
+            source = "flown (`summary.csv`)"
+        else:
+            steps = cond.noise.latency_steps
+            model_ms = 1000.0 * steps / 30.0
+            lam_inv = cond.lam_inverse
+            source = "not flown yet (P7-D1 §4 value)"
+        rows.append(
+            [
+                f"`{cond.key}`",
+                f"{100 * cond.noise.sigma_p_m:g}",
+                f"{cond.noise.sigma_v_m_s:g}",
+                f"{cond.noise.latency_ms:g}",
+                str(steps),
+                _num(model_ms, 1),
+                _num(model_ms * lam_inv**0.5, 1),
+                source,
+            ]
+        )
+    header = [
+        "condition",
+        "σp (cm)",
+        "σv (m/s)",
+        "latency configured (ms)",
+        "effective (control steps)",
+        "effective (ms, model)",
+        "effective (ms, full scale)",
+        "source",
+    ]
+    return _table(header, rows)
+
+
+def _superseded_note(e07: Path) -> list[str]:
+    """Return the one labelled note on the superseded noise record (P7-D4), if it is kept."""
+    if not (e07 / SUPERSEDED_NOISE_DIR).is_dir():
+        return []
+    return [
+        f"*Superseded (P7-D4):* `results/e07/{SUPERSEDED_NOISE_DIR}/` keeps, unchanged, the "
+        "noise arm flown at `6b83e5c` under the Phase 2 stand-in. That stand-in delayed and "
+        "noised only the six relative entries, so a 1–2 step latency mixed timestamps, and it "
+        "left the clearance, deck normal and relative tilt ideal. Its SHA-256s are in P7-D2 §5 "
+        "and `scripts/eval_phase7.py --check` verifies them. Its numbers are not reported here "
+        "and are not comparable with this section.",
+        "",
+    ]
+
+
 def _noise_section(e07: Path) -> list[str]:
     clean = CondData(e07 / "matrix")
     conds = {c.name: (c, CondData(c.out_dir(e07))) for c in conditions("noise")}
-    lines = ["## 4. Perception stand-in (P7-D1 §4), `id`, aft pad", ""]
+    lines = ["## 4. Perception stand-in (P7-D4 definition), `id`, aft pad", ""]
     flown = [d for _, d in conds.values() if d.present]
+    lines += list(_NOISE_STANDIN)
     lines += [
-        "σp on relative position, σv = σp / 0.2 s on relative velocity (0 / 0.05 / 0.10 / "
-        "0.20 m/s), latency 0 / 1 / 2 control steps (configured 0 / 33.4 / 66.7 ms; 1 step = "
-        "33.3 ms model = 167 ms full scale), no hold (30 Hz). Applied to the six relative-pad "
-        "entries only; the forecast methods' ship-motion feed stays ideal. The clean column is "
-        "the main matrix's rows. Cells: success (IQM or rate) with the clean − noisy paired "
-        "contrast in points [95 % CI] below it.",
-        f"Conditions written: {len(flown)} of {len(conds)}.",
+        "Grid (P7-D1 §4): σp 0 / 1 / 2 / 4 cm × latency 0 / 1 / 2 control steps. 1 control step "
+        "= 33.3 ms model = 166.7 ms full scale at lambda = 1/25. The configured 33.4 / 66.7 ms "
+        "quantise down to exactly 1 / 2 steps. The clean (0 cm, 0 step) column is the main "
+        "matrix's rows.",
         "",
     ]
+    lines += _noise_latency_table(conds)
+    lines += _superseded_note(e07)
+    lines += [f"Conditions written: {len(flown)} of {len(conds)}.", ""]
     if not flown:
-        return [*lines, "*Not flown yet.*", ""]
+        return [*lines, "*Not flown yet under the P7-D4 stand-in.*", ""]
+    lines += [
+        "Cells: success — learned: IQM over 5 seeds [stratified-bootstrap 95 % CI] and N; "
+        "baselines: rate [Wilson 95 % CI] k/N — then the clean − noisy paired contrast in "
+        "points [95 % CI]. Per-condition success tables, outcome breakdowns and tunnelled "
+        "successes: Appendix B.",
+        "",
+    ]
     con = _contrasts(e07)
     methods = _methods([clean, *flown], "aft")
     header = ["method", _noise_label(0, 0)] + [
@@ -413,9 +573,9 @@ def _noise_section(e07: Path) -> list[str]:
     for ss in _ss("id"):
         rows = []
         for m in methods:
-            row = [_label(m), _pct(clean.success_value(m, "aft", "id", ss))]
+            row = [_label(m), clean.success_compact(m, "aft", "id", ss)]
             for name, (_, data) in conds.items():
-                value = _pct(data.success_value(m, "aft", "id", ss)) if data.present else "–"
+                value = data.success_compact(m, "aft", "id", ss) if data.present else "–"
                 row.append(f"{value}<br>{_ci(con.get(f'noise/{name}.{m}.id.{ss}'))}")
             rows.append(row)
         lines += [f"### `id` {ss}: success % by condition (clean − noisy, points [95 % CI])", ""]
@@ -521,11 +681,21 @@ def _mss_section(e07: Path, results: Path) -> list[str]:
     return lines
 
 
+def _seed_order(seed: str) -> tuple[bool, int]:
+    """Sort key: numeric seeds first, the baselines' ``–`` last."""
+    return (seed == "–", int(seed) if seed != "–" else 0)
+
+
 def _uv_headings(e07: Path, results: Path) -> list[str]:
-    """Success of every method on unseen_vessel SS5 at 180 / 135 deg, pooled over seeds."""
+    """unseen_vessel SS5 at 180 / 135 deg: per-seed Wilson success and the outcome breakdown.
+
+    Read from the matrix ``episodes.csv`` (learned) and ``results/e01`` /
+    ``results/e01_lowvz_cut`` (baselines), aft pad. Descriptive only (P7-D1 §6).
+    """
     sources = [e07 / "matrix" / "episodes.csv", results / "e01" / "episodes.csv"]
     sources.append(results / "e01_lowvz_cut" / "episodes.csv")
-    counts: dict[str, list[int]] = {}
+    tunnel = CondData(e07 / "matrix").tunnel is not None
+    counts: dict[str, dict[str, list[int]]] = {}
     for path in sources:
         if not storage.exists(path):
             continue
@@ -540,16 +710,39 @@ def _uv_headings(e07: Path, results: Path) -> list[str]:
                     and r["method"] != "pid_feedforward_lowvz_cut"
                 ):
                     continue
-                c = counts.setdefault(r["method"], [0, 0])
-                c[0] += r["outcome"] == "success"
-                c[1] += 1
-    rows = [
-        [_label(m), f"{_pct(k / n)} ({k}/{n} seed-episodes)"]
-        for m in (*LEARNED_METHODS, *BASELINES)
-        if m in counts
-        for k, n in [counts[m]]
+                seed = r["run_seed"] if r["method"] in LEARNED_METHODS else "–"
+                c = counts.setdefault(r["method"], {}).setdefault(seed, [0] * (len(OUTCOMES) + 1))
+                c[OUTCOMES.index(r["outcome"])] += 1
+                c[-1] += r["outcome"] == "success" and r["tunnelled"] == "True"
+    methods = [m for m in (*LEARNED_METHODS, *BASELINES) if m in counts]
+    lines = [
+        "Per seed: success [Wilson 95 % CI] k/N (a baseline is one deterministic run, seed `–`). "
+        "Then the six-class breakdown pooled over seeds, with the tunnelled successes. These "
+        "are different realizations from the MSS lists; descriptive, nothing is scored.",
+        "",
     ]
-    return _table(["method", "success, pooled over seeds"], rows)
+    rows = []
+    for m in methods:
+        for seed in sorted(counts[m], key=_seed_order):
+            c = counts[m][seed]
+            n, k = sum(c[:-1]), c[OUTCOMES.index("success")]
+            lo, hi = wilson_interval(k, n)
+            rows.append([_label(m), seed, f"{_pct(k / n)} [{_pct(lo)}, {_pct(hi)}] {k}/{n}"])
+    lines += _table(["method", "seed", "success [Wilson 95 % CI] k/N"], rows)
+    rows = []
+    for m in methods:
+        pooled = [sum(c[i] for c in counts[m].values()) for i in range(len(OUTCOMES) + 1)]
+        n = sum(pooled[:-1])
+        rows.append(
+            [
+                _label(m),
+                str(n),
+                *(f"{c} ({_pct(c / n)})" for c in pooled[:-1]),
+                str(pooled[-1]) if tunnel else "–",
+            ]
+        )
+    lines += _table(["method", "N (seed-episodes)", *OUTCOMES, _TUNNEL_HEADER], rows)
+    return lines
 
 
 def _threshold(rec: Mapping[str, str]) -> str:
@@ -628,10 +821,29 @@ def _appendix_seeds(e07: Path) -> list[str]:
     data = CondData(e07 / "matrix")
     if not data.present:
         return []
-    lines = ["## Appendix A. Per-seed success with Wilson 95 % CI (main matrix, aft)", ""]
+    lines = [
+        "## Appendix A. Per-seed success with Wilson 95 % CI (main matrix, aft)",
+        "",
+        "Learned methods: one row per training seed. Baselines (carried from `results/e01` and "
+        "`results/e01_lowvz_cut`): one deterministic run, seed `–`.",
+        "",
+    ]
+    methods = _methods([data], "aft")
     for regime, sea_states in REGIME_CELLS:
         rows = []
-        for m in LEARNED_METHODS:
+        for m in methods:
+            if m not in LEARNED_METHODS:
+                row = [_label(m), "–"]
+                for ss in sea_states:
+                    recs = data.records(m, "aft", regime, ss)
+                    if not recs:
+                        row.append("missing")
+                    elif int(recs[0]["n_episodes"]) == 0:
+                        row.append("not run")
+                    else:
+                        row.append(_wilson(recs[0]))
+                rows.append(row)
+                continue
             seeds = sorted(
                 {r["run_seed"] for ss in sea_states for r in data.records(m, "aft", regime, ss)},
                 key=int,
@@ -656,16 +868,27 @@ def _appendix_seeds(e07: Path) -> list[str]:
 
 
 def _appendix_noise(e07: Path) -> list[str]:
-    lines = ["## Appendix B. Perception stand-in: outcome breakdown per condition", ""]
+    lines = [
+        "## Appendix B. Perception stand-in (P7-D4): success, p95, outcome breakdown and "
+        "tunnelled successes per condition",
+        "",
+    ]
+    clean = CondData(e07 / "matrix")
     any_flown = False
     for cond in conditions("noise"):
         data = CondData(cond.out_dir(e07))
         if not data.present or cond.noise is None:
             continue
         any_flown = True
-        label = _noise_label(round(cond.noise.sigma_p_m * 100), cond.noise.latency_steps)
-        lines += [f"### `{cond.key}`: {label}, σv {cond.noise.sigma_v_m_s} m/s", ""]
-        lines += _breakdown(data, _methods([data], "aft"), "aft", "id", _ss("id"))
+        rec = data.first_record()
+        steps = int(rec["noise_latency_steps"]) if rec else cond.noise.latency_steps
+        model_ms = _f(rec, "noise_latency_ms_effective") if rec else 1000.0 * steps / 30.0
+        title = (
+            f"`{cond.key}` (σp {100 * cond.noise.sigma_p_m:g} cm, σv "
+            f"{cond.noise.sigma_v_m_s:g} m/s, latency {steps} step = {_num(model_ms, 1)} ms "
+            f"model)"
+        )
+        lines += _regime_block(title, data, _methods([clean, data], "aft"), "aft", "id")
     return lines if any_flown else []
 
 
@@ -679,7 +902,10 @@ def _header() -> list[str]:
         "the drone at **lambda = 1/25** (1 s model = 5 s full scale), except where the lambda "
         "arm says otherwise. Surge, sway and yaw are absent.",
         "- State-based observations; the perception stand-in (noise, latency) is the only "
-        "sensor model and is off except in section 4. Not vision.",
+        "sensor model and is off except in section 4. Not vision. Section 4 uses the P7-D4 "
+        "stand-in: the deck is perceived (pad position and velocity delayed and noisy; "
+        "orientation and normal delayed, no noise); the drone's own state is current and "
+        "clean.",
         "- dmf's roll/pitch–heave phase defect (~90°) is carried, not fixed; the aft pad is "
         "sensitive to it, and the pad-at-CG arm (section 2) is its control.",
         "- Success = all four frozen criteria (`configs/env/success.yaml`). Success is never "
@@ -706,6 +932,7 @@ def _header() -> list[str]:
                 "regimes-overlap",
             )
         ),
+        f"- {_TUNNEL_NOTE}",
         "- Rendered from the CSVs under `results/e07/` by `rld.eval.report.render_results` "
         "(`scripts/report.py`); do not edit by hand. `scripts/report.py --check` re-renders "
         "and compares bytes.",

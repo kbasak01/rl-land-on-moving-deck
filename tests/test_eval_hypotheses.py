@@ -220,7 +220,11 @@ def test_verdicts_are_the_rule_functions_and_h3_has_no_combined_row(
         elif "half-rule" in h["part"]:
             uv_id, id_id = h["contrasts"].split(";")
             assert _f(con[uv_id], "point") == point
-            want = verdict_half_rule(_f(con[id_id], "point"), point)
+            r_id = con[id_id]
+            id_verdict = verdict_magnitude(
+                _f(r_id, "point"), _f(r_id, "ci_lo"), _f(r_id, "ci_hi"), 0.10
+            )
+            want = verdict_half_rule(_f(r_id, "point"), point, id_verdict)
         else:
             want = verdict_magnitude(point, lo, hi, 0.10)
         assert h["verdict"] == want, h
@@ -236,8 +240,7 @@ def test_verdicts_are_the_rule_functions_and_h3_has_no_combined_row(
         INCONCLUSIVE,
         NOT_SUPPORTED,
         NOT_SCORED,
-        "holds",
-        "fails",
+        "not scored (no supported id gain)",
         "not applicable — no id gain to shrink",
         "pending — scored at Gate 8",
     }
