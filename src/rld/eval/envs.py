@@ -26,7 +26,8 @@ that every existing call builds exactly what it built before:
 Per-arm configs
 ---------------
 :func:`with_noise` and :func:`with_lambda` return a copy of an :class:`EvalConfigs` with the
-perception stand-in switched on at a stated sigma / latency (P7-D1 §4), or with another
+perception stand-in switched on at a stated sigma / latency (P7-D1 §4 grid; P7-D4
+definition: the deck is perceived, delayed and noisy), or with another
 Froude scale (P7-D1 §3), by ``dataclasses.replace``; the committed YAML files are not touched.
 
 Units: lengths metres model scale, times seconds model scale, headings degrees, speeds knots
@@ -311,8 +312,11 @@ def with_noise(
 
     Args:
         cfgs: The committed configs.
-        position_sigma_m: Relative-position noise sigma, metres model scale.
-        velocity_sigma_m_s: Relative-velocity noise sigma, metres per second model scale.
+        position_sigma_m: Noise sigma on the perceived pad position, metres model scale,
+            zero-mean Gaussian per world axis (P7-D4: the stand-in perceives the deck; every
+            deck-derived observation entry is built from the perceived sample).
+        velocity_sigma_m_s: Noise sigma on the perceived pad velocity, metres per second
+            model scale (P7-D4).
         latency_ms: Transport delay, milliseconds model scale; the environment quantises it
             **down** to whole control steps (33.4 ms -> 1 step at 30 Hz, 33 ms -> 0).
         hold_freq_hz: Sample-and-hold rate, hertz model scale; ``None`` keeps the committed

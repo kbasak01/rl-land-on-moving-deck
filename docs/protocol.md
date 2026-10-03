@@ -3989,7 +3989,7 @@ written in `results/e07/hypotheses.csv` (`d5a82daa…`), and every contrast behi
 | H3 | secondary: `id` SS5 | `id` SS5 | r = 1 − p95(`residual_ppo_forecast`) / p95(`residual_ppo`) | **−0.8 %** [−2.4, +0.9]; 0.2781 vs 0.2758 m/s | r ≥ 10 % | **not supported** | CI includes 0 |
 | H3 | secondary: `id` SS6 | `id` SS6 | same | **+1.9 %** [+0.4, +3.8]; 0.2785 vs 0.2838 m/s | r ≥ 10 % | **inconclusive** | 0 < r < 10 %, lower bound > 0 |
 | H3 | secondary: `unseen_vessel` SS5 half-rule | `unseen_vessel` vs `id` SS5 | same | r(uv) −2.0 % [−3.6, −0.3]; r(id) −0.8 % | half-rule | **not applicable — no id gain to shrink** | P7-D1 §2: r(`id`) ≤ 0 |
-| H3 | secondary: `unseen_vessel` SS6 half-rule | `unseen_vessel` vs `id` SS6 | same | r(uv) +0.04 % [−1.9, +2.6] ≤ 0.5 × r(id) = 0.5 × 1.88 % = 0.94 % | half-rule | **holds** | P7-D1 §2, judged on point estimates |
+| H3 | secondary: `unseen_vessel` SS6 half-rule | `unseen_vessel` vs `id` SS6 | same | r(uv) +0.04 % [−1.9, +2.6] ≤ 0.5 × r(id) = 0.5 × 1.88 % = 0.94 % | half-rule | **holds** (relabelled "not scored (no supported id gain)" in P7-D5) | P7-D1 §2, judged on point estimates |
 | H4 | drop difference | `id` SS5 | drop_sin − drop_jon, mean paired success, one shared episode set | **+0.0** [+0.0, +0.0]; all four legs 1 000/1 000 | ≥ +10 points | **not supported** | P7-D1a #1: lower bound 0 is not > 0 |
 | H5 | ORT CPU vs GPU p50 latency | batch 1 | — | — | ≥ 2× | **pending — scored at Gate 8** | P7-D1 §7 |
 
@@ -4071,7 +4071,8 @@ No combined H1 or H3 verdict exists (P3-D4 #5, P7-D1a #2).
     tilt-only (P6-D5).
   - `residual_ppo`'s 35 per 1 000 are 24 `hard_landing` (tilt-only) and 11 `bounce`.
 - **Tunnelling bound** (P6-D5). Up to 3 `residual_ppo` SS6 successes per 1 000 may depend on
-  tunnelling overlap.
+  tunnelling overlap (corrected in P7-D5: the raw tunnelled-success count is 4; 3 is the audited
+  subset).
   - The e07 rows are byte-identical to the e06 rows the audit covered (16 000/16 000), so the bound
     applies unchanged.
   - `pid_feedforward` has 0 tunnelled episodes in `results/e01`.
@@ -4080,7 +4081,8 @@ No combined H1 or H3 verdict exists (P3-D4 #5, P7-D1a #2).
   - *The margin.* 6.0 − 5.0 = **1.0 point**. One `pid_feedforward` episode is 0.5 point (1/200).
     One `residual_ppo` seed-episode is 0.1 point (1/1 000).
   - **Tunnelling alone cannot.** Remove all 3 bounded successes: 962/1 000 − 181/200 = 96.2 − 90.5
-    = **+5.7**, still ≥ 5. Crossing would take 10 per 1 000, more than three times the bound.
+    = **+5.7**, still ≥ 5. Crossing would take 10 per 1 000, more than three times the bound
+    (corrected in P7-D5: removing all 4 raw tunnelled successes gives +5.6; crossing takes 11).
   - **The bounce-grace rule can.** A bounce has already passed the crash, off-pad and
     hard-landing tests, and only the 0.5 s dwell failed. A rule that kept contact through the gap
     would at most turn it into a success.
@@ -4092,7 +4094,7 @@ No combined H1 or H3 verdict exists (P3-D4 #5, P7-D1a #2).
     - All 22 converted gives 96.5 + 1.1 − (90.5 + 5.5) = **+1.6**.
     - Only `pid_feedforward`'s 11 converted gives **+0.5**.
   - **Combined.** With the 3 tunnelling-bounded successes removed (+5.7), k = 2 already crosses:
-    5.7 − 1.0 = 4.7.
+    5.7 − 1.0 = 4.7 (corrected in P7-D5: with all 4 removed, +5.6 and 4.6).
   - *Is such a change plausible?* For `lowvz` on the tune pool, P5-D1 found:
     - 80 % of bounces were rim rocking, with the CoM still closing;
     - a 0.1 s grace would have reclassified 51 of 58 gaps over 50 ms.
@@ -4125,7 +4127,8 @@ No combined H1 or H3 verdict exists (P3-D4 #5, P7-D1a #2).
   - all four half-rule parts were scored "not applicable" or rest on no supported gain.
 - **The secondary SS6 "inconclusive"** (+1.9 % [+0.4, +3.8]) is under a fifth of the predicted
   10 %.
-- **The secondary `unseen_vessel` SS6 "holds"** is the scoring code's word for a met half-rule.
+- **The secondary `unseen_vessel` SS6 "holds"** is the scoring code's word for a met half-rule
+  (relabelled "not scored (no supported id gain)" in P7-D5).
   - P7-D1 §2 fixes the rule but no verdict word for it, and this is outside the
     supported / not supported / inconclusive vocabulary of P3-D1 §8.
   - It shrinks a gain that is itself only "inconclusive", and r(uv SS6)'s own CI includes 0.
@@ -4216,6 +4219,261 @@ the pad-plane clearance.
 - MINOR m1–m8.
 
 These are recorded in P7-D5 after they are made.
+
+### P7-D5 — Review fold-in: the re-flown perception arm, superseding hashes, and text corrections (2026-10-02)
+
+*Status.*
+- This entry records what P7-D4 announced: the stand-in change, the re-flight, the review's
+  text corrections, and the hashes that now stand in place of P7-D2's for the files that changed.
+- It changes no success criterion, no episode list, no hypothesis, no threshold and **no
+  verdict**. P3-D1's block SHA-256 stays `21465588…`. MANIFEST `e6f30e55…` is untouched.
+- P7-D3's text is not edited in place. Its errata carry "(corrected in P7-D5)" or "(relabelled …
+  in P7-D5)" markers, and the corrections are recorded here (item 8).
+
+**1. What changed, by commit.** Times are EDT on 2026-10-02.
+
+| commit | time | what |
+|---|---|---|
+| `3a25620` | 15:38:32 | P7-D4, committed alone, before any code change or re-flight. |
+| `8ebfd94` | 16:45:18 | The P7-D4 stand-in (`sim-env-engineer`): `PerceptionNoise.perceive(PlatformSample)` in `src/rld/envs/noise.py`, `DeckLandingAviary._computeObs`, `observation.py`, `config.py`; `tests/test_noise.py` (19 tests). The same commit carries the move of `results/e07/noise/` to `results/e07/noise_superseded_p7d1/` (77 renames, bytes unchanged). `182cdea`'s message also names the move, but the renames are in `8ebfd94`. |
+| `182cdea` | 16:45:18 | Eval-side review fixes. These are `tunnelled_success.csv` per condition (M4) and the m6 relabel in `hypotheses.csv` (item 5). `make eval`'s verify-only path is read-only and needs no checkpoint. The baselines appear in every appendix table, and the `unseen_vessel` subset table has Wilson CIs and a breakdown. The noise flight gets a preflight guard, and `rld.eval.superseded` hash-checks the superseded arm. `contrasts.csv` temporarily lost its 528 noise rows (333 rows), and `results.md` was re-rendered. |
+| `91f3447` | 20:01:56 | The re-flown noise arm. `contrasts.csv` is back to 861 rows, `hypotheses.csv` is byte-unchanged from `182cdea`, and `results.md` has 2 772 lines. |
+| this entry's commit | — | This entry, the `docs/findings.md` Phase 7 rewrite of the affected passages, and docstring-only fixes of the stale P7-D1 §4 scope wording in `src/rld/eval/envs.py` (`with_noise`) and `src/rld/eval/arms.py` (`NoiseSetting`, `_SIGMAS`). No derived file changes with them. |
+
+**2. Re-flight provenance** (`artifacts/e07_noise_p7d4.log`, `artifacts/e07_noise_post.log`, each
+condition's `run_info.json`).
+- *What.* All 11 non-clean conditions, every method: 6 learned × 5 seeds and the 6 baselines. That
+  is 28 800 episodes per condition and 316 800 in all, at 24 workers, chunk 25, OMP/MKL = 1, on a
+  host with 36 logical CPUs. There were 0 skipped episodes.
+- *When.* From 16:45:42 (`sigma1cm_lat0step` start, 20:45:42 UTC) to 19:11:32 (last condition
+  written, 23:11:32 UTC). Condition walls were 688.4–792.2 s. The log ends `=== NOISE EXIT 0`.
+- *Code tree.* `git_sha` is `182cdea` in all 11 `run_info.json`.
+  - `git_dirty` is true, but the only dirty paths are the untracked `.claude/worktrees/` and the
+    output directory `results/e07/noise/`. The first condition recorded only the former.
+  - **Preflight guard** (`_noise_preflight`, `src/rld/eval/phase7.py`). It refuses to fly the noise
+    arm if `PerceptionNoise` has no `perceive`, i.e. under the superseded stand-in. When writing
+    into `results/`, it also refuses if `git status` shows any change under `src`, `configs`,
+    `scripts`, `Makefile` or `pyproject.toml`. The flight passed it, so the tree it flew is
+    `182cdea`'s.
+- *Identical episodes.* Every condition records MANIFEST `e6f30e55…` with "10/10 hashes OK". Under
+  the strict start check, each reset reproduced its listed t0 and initial state. Each condition
+  re-derived its `summary`, `seeds`, `aggregate`, `baselines_summary` and `tunnelled_success`
+  byte-identically from its rows (`rederived_byte_identical`).
+- *Checkpoints unchanged.* In all 11 conditions, `checkpoint_digests_before` equals
+  `checkpoint_digests_after` (30 runs), and the digests are the same across conditions.
+  - The `run_model_sha256`, `run_vecnormalize_sha256`, `run_checkpoint_json_sha256` and
+    `run_config_sha256` in every re-flown `summary.csv` equal the matrix's for all 30
+    (method, seed) pairs.
+  - P7-D2 §2 recorded that those equal the committed e05/e06 digests.
+- *After the flight* (`artifacts/e07_noise_post.log`, ended 19:28; every step exit 0):
+  - `--compress` (11 `.gz`);
+  - `--arm hypotheses`, which left `hypotheses.csv` byte-unchanged from `182cdea`
+    ("RC hyp-unchanged 0");
+  - `scripts/report.py` (2 772 lines), a second render, and `scripts/report.py --check`
+    (byte-identical);
+  - `eval_phase7.py --arm all --check`: all 17 conditions OK, the 11 superseded conditions OK
+    against P7-D2's hashes, and `lambda/feasibility`, `contrasts.csv` and `hypotheses.csv` OK;
+  - `eval_learned.py --check` for `results/e05` (4/4) and `results/e06` (6/6).
+
+**3. SHA-256s that supersede P7-D2 §5's.** For episode files the authority stays the SHA-256 of
+the **uncompressed** `episodes.csv` (P7-D1a #12). Every other P7-D2 §5 hash (matrix, cg,
+sinusoid, λ, MSS, feasibility) is unchanged.
+
+| file | P7-D2 §5 | now | changed at |
+|---|---|---|---|
+| `results/e07/hypotheses.csv` (17 rows) | `d5a82daa…` | `27b4f6cea22893ffda2b24b088bffd02a299e2bb747909d7de93272e515c7f7d` | `182cdea` (m6 relabel), unchanged by `91f3447` |
+| `results/e07/contrasts.csv` (861 rows) | `1d5f1ce0…` | `d373299e6bd4dab515cef058544700acffc66629eee20138caf7dbd06c74608c` | `91f3447` (the 528 noise rows re-derived from the new arm; 333 rows at `182cdea`) |
+| `results/results.md` (2 772 lines) | `7fffab4d…` (2 297 lines) | `7f737727f3f43813ab60cf8282c5d296bbb52a281f7a64b298a7b5436ff678e7` | `91f3447` (`11e32e5e…` at `182cdea`) |
+
+The re-flown noise arm (`results/e07/noise/`):
+
+| condition | `summary.csv` | `aggregate.csv` | `episodes.csv` (uncompressed) | `episodes.csv.gz` | `tunnelled_success.csv` |
+|---|---|---|---|---|---|
+| `noise/sigma1cm_lat0step` | `0080b3e740b6f0cbb5a1c78537b6a6190a786512348c1d844f2e037381814fc5` | `1cac238a3cb9ed6125c263a1c20923a588ef8d611858fd34c726ac5847c12e4f` | `e10f6acb5c4a00b1055004595f1e63910ae34eb8a80c42850e997cdad1b16eb9` | `89cfe34ca4cb76a21dd7e53acf6a09c0202e614bcf7e531730cda3315cee5aee` | `64e9a3fcead830d27926e6609cc45cb022c3016500de5f840e6731198723f0d5` |
+| `noise/sigma2cm_lat0step` | `719f4774902df7846c15311246da0a103873f8d92b5db17a6fd0a4e26c986767` | `e77a453bed522001d425e18ff6f505ff11b4ffc33872963ef22dfae3f47cdd6a` | `245d71fdf391c376ac4dbd0035c7add60ad4a6e9c91b52f7d0971707372aeabe` | `b7b7d994f3adc6d0e251d525b6bd2b455c27b4f0de03ab3738169bbf07df6296` | `5955b8bc175f00e47b120dd081d69ede5087741f02ea41727ac157adbe245448` |
+| `noise/sigma4cm_lat0step` | `60dd25ee3dae5ae81b23f99a54e9363fe2d03614cc70c1aec6ac1a66e01ba952` | `b3ecf2556d5f53b9cefeecd5da3cc90c3bf9c015960b2774844eee6dd7058527` | `2c5b192535625fb5b49d3e1c100235751e6f1cf68daafc323f8f4104cbba47b5` | `4bf5732fb1fcb70483ca1945f80f705b474ae6c26d68fa3e27457fb45c7339f8` | `f8fbc6cf2b2cacaf60805eb62a1c9ff9ce2b2f175f2ebd77ee3bc1f97594cb83` |
+| `noise/sigma0cm_lat1step` | `fd40e94179dd26f05c60deb182c1cedfd0067acd28c15f21f7b9bb0f656bf4ce` | `a1ce1f64c9a7e1188f696af69c221f24b8408e9d115a7e767a914efabbe1108c` | `4c7c33c6ddc230605802a0cb09960e2d258579285ead64b48177c38c96bc080b` | `bb832cfc79d6ffa3b3d0d9f24910821e8dc7c08c0362f845d2564361711e6117` | `4c961dc0092a87ef886ce93eea605bc33127f5870d2f47a05bdaaf30c0d37846` |
+| `noise/sigma1cm_lat1step` | `23d3edca88286538778f18b2fc7858d26e460f599919eea58706feeaa62fd80f` | `2f4e96ac89b63ed4375c9913434f13ed36ca07affae28c153cebb14c25c42e14` | `ebae27b1c9e9df63261aafb32a74512f8dac66b12854f39c83901cd5f44f8ba5` | `24a880f2bd923d907827bee6808c8a73bd929f2349afe46c148670e48b02e0e4` | `8647206d5dd5b999cefc40ff0dce81885eef5395d3609d677f7ee9885f25fa8d` |
+| `noise/sigma2cm_lat1step` | `bb8e03d4edf5eda7b5e8132a6a2a254a5da5c058f29f755c491d6a9b14ee4fe2` | `e69df22903835c8a9cb3309d7f64aff353c371a503001c746ac52ee929062c68` | `c6c27079192bf2f209c467dd7735cf2bb6800e2be0fca6644f9274124a70a29b` | `f8ed57fd08a1d9505b38f890b1d33c7630e1a07d11d5d4f7b5ba6cdc4ef1a3a5` | `c559ac3f7b5e768afcc84faff5a44e6f56c792a0954e6d412a8d4617143b9eec` |
+| `noise/sigma4cm_lat1step` | `3241752e6e71b76b130ea57b56694cbfb9fa7ff3809457a508a742e841dea5ae` | `75efb59617cf236ad2801b700f511206b84cc3da30a172a9222bfcde971fe5eb` | `b31b41c24d86bd377af99021f1683fd6f03b853cd0e148f5d8b1c5798c53d5c0` | `2396714251f5fc4a11f2f1899eaa21790cc19e61c6ca58accd04f30df95fc180` | `1843785de4445b13e25995ddc3c04a2278b4839123f640fc63f1654bee552efc` |
+| `noise/sigma0cm_lat2step` | `bd08e01a2be35f2336dcf03164631c86c78b1fce1a9a03854d8a329a5f72b23e` | `ab06f5fea7bb52c3dcef74d2efe802397bd91af7f67454f93955e6a8d1dedd6d` | `cc257b60c4e9aa9457c35e12f00be1d07dac603dd20dee0028e71915c3937162` | `bd3c7ce49ab7072666dc22eedcbf8d00af220def6b92f86760ea4d556b79c585` | `9e7d4a5d9b705c0580df90c93152354ab98e221622fbde2ab56e14255a3ba190` |
+| `noise/sigma1cm_lat2step` | `2a54fcb72d02412c4fb090d72ab5eb919172cf7a1453ddbf2e1309d076d68d59` | `deb6f21922d54f68566db7b1b66e674aad056c802deb58e0f1ec1b3090862c0f` | `ff1a94c71b67274e6dc3d0a538c40682b11f19a797e55343d2349bc056034d6b` | `11147963104bbc45fda68040294591e4da7161f2282430f87f172f5bafe7aca0` | `14c47964b7aada79f450710b259ca6dd1e88ad224c7a309931487c49e69afcd2` |
+| `noise/sigma2cm_lat2step` | `bc5f4066e19b996def0cfa82bcf46fbde0855aade76add56a2569eaf340e82bf` | `bd8d1f8abc22c493de8604eaf70f1f77bd2d6825829103c91d5a1fa45c301f21` | `4443b5e1c74c8b61a8634d2e1904290b8f6bb58f0b0adb1cc1049e4fc60de174` | `16eee42174e49411c920ecb5de88a5d59ebadb114d1eb9b00079ffbea6909ee3` | `c16c2cc055c2c61f30535b1a46575d365251a0690bd62208969007be3647f8b8` |
+| `noise/sigma4cm_lat2step` | `8b4b6a83cec3b12e3faabee0c03b684fdd6c00cec57d5dc375c7143705f9bcaa` | `503ce7700d2bf3d45e5ec2e43326e492b1c499713928b2acc0f55e16b3a9e27f` | `82c988295d92e997f542ca33d2bcbc9687c9212cb4e104e4fe0defebd80d6791` | `c3a45246e6b084fe47578aeeb2c90b497596f38452d5fbe11b20b74d9f7ca28c` | `e5ff12d04ef745748d273c10a57bd456171f4380bcd862b4969303042531eee5` |
+
+The per-condition `tunnelled_success.csv` of the other arms were new at `182cdea`, and their
+episode rows are unchanged:
+
+| file | SHA-256 |
+|---|---|
+| `results/e07/matrix/tunnelled_success.csv` | `45c6c7894cf490e7ad63412fd08770e2794d173b68cf3d5c2a650f7c65175dd1` |
+| `results/e07/cg/tunnelled_success.csv` | `dc9ae9921cc8a0b561e7a378b17e6a02832eae0393371ff095362a6aaccd12f9` |
+| `results/e07/sinusoid/tunnelled_success.csv` | `8f981cdbca25d7d4c17c359cd58a2e3e0507356c2ed87715903750a7fc7a75ef` |
+| `results/e07/lambda/lam15/tunnelled_success.csv` | `8852d2330372ada7333ea2edf27a2ca23009fed2a7fc1e02870a27bb87b25785` |
+| `results/e07/lambda/lam40/tunnelled_success.csv` | `948cce933b1d0ae43e80b76554e184b07c8f91bc75ced73d65488501b19db619` |
+| `results/e07/mss/tunnelled_success.csv` | `130522fbeac30925e22cdbb24f9235266ae9bf20935d7a7758f4a69687255505` |
+
+**4. The superseded arm.**
+- It is in `results/e07/noise_superseded_p7d1/`: the 11 conditions flown at `6b83e5c`, bytes
+  unchanged.
+- P7-D2 §5's `noise/*` rows stay the authority for it. `rld.eval.superseded` checks the bytes
+  against them on every `eval_phase7.py --check`, and they matched at 19:28 (item 2).
+- It is never re-flown and never re-scored. `results/results.md` §4 names it as superseded and
+  reports none of its numbers. `docs/findings.md` §4 cites three of its cells only as the
+  artifact P7-D4 corrected.
+
+**5. The m6 relabel** (`182cdea`, `rld.eval.hypotheses.verdict_half_rule`). H3's `unseen_vessel`
+half-rule word "holds" / "fails" was outside P3-D1 §8's vocabulary.
+- The rule text now written in `hypotheses.csv` for all four half-rule rows is: "judged on point
+  estimates; not applicable if r(id) <= 0; not scored if the id part is not supported (no
+  supported id gain to shrink); behind a supported id part: supported if r(unseen_vessel) <= 0.5
+  r(id), else not supported".
+- The only verdict word that changed: the secondary `unseen_vessel` SS6 row moved from "holds" to
+  **"not scored (no supported id gain)"**. Its `id` SS6 part is "inconclusive" (+1.9 %).
+- The other three half-rule rows stay "not applicable — no id gain to shrink". No number changed.
+
+**6. The `below_deck` bail-out (review M3): diagnosis.** The frozen criteria do not change. This
+is a documented scoring artifact.
+- *The rule.* `src/rld/envs/landing_env.py` l.731 declares `crash` / `below_deck` when the drone's
+  z < `deck_origin_z` − `bounds.below_deck_m`. That is 1.0 − 0.3 = 0.7 m
+  (`configs/env/landing.yaml` l.107–109).
+  - The 0.3 m is a fixed **model-scale** constant and is not λ-scaled. Deck excursions in model
+    metres scale with λ, so at 1/15 they are 25/15 = 1.67× those at 1/25.
+  - The check runs every physics substep. The outcome is classified at the end of the control
+    step, and `crash` outranks `success` (P3-D1).
+- *It fires on drones resting on, or tracking, a deck in a deep trough* (λ = 1/15, `unseen_vessel`
+  SS6, `results/e07/lambda/lam15/episodes.csv.gz`).
+  - #127 (`ppo` seeds 0, 1, 2, 4 and `pid_feedforward`): no contact. The S175 aft pad reaches
+    0.51 m below the mean deck, so the drone crosses 0.7 m while about 0.2 m above the pad.
+  - #114 and #133 (`pid_feedforward`): the drone rests on the pad as it sinks 0.31–0.32 m below
+    the mean deck.
+- *It can pre-empt a completed dwell in the same control step.*
+  - Example: λ = 1/15, `pid_feedforward`, `unseen_vessel` SS6 #133. Touchdown at 4.079 s,
+    closing speed 0.155 m/s, lateral offset 0.011 m, relative tilt 2.1°, and a recorded dwell of
+    0.521 s.
+  - The dwell reached 0.500 s at 4.579 s and the bound fired at 4.588 s, inside the control step
+    that ends at 4.600 s. The episode is scored `crash`. Every other success criterion was met.
+- *It also occurs at λ = 1/25, through deck roll rather than heave.*
+  - The episode is `unseen_heading` SS6 #177 (frigate, 90°, 0 kn, seed 5). Matrix `ppo` seed 1
+    crashes on it at the aft pad (`results/e07/matrix/episodes.csv.gz`, the C1 of that cell). At
+    the CG, 3 more crash on it: `ppo` 1, `ppo_forecast` 0 and `ppo_sinusoid` 4
+    (`results/e07/cg/episodes.csv.gz`). λ = 1/15 #20 (`ppo` seed 2) is the same case.
+  - The pad sinks no more than 0.18–0.26 m. Instead the deck rolls to 24–32°, the drone slides
+    across the plate and off its low edge, contact is lost, and the drone drops below 0.7 m.
+  - Dwells were 0.40–0.48 s. These are failed landings under any label; the bound sets the label
+    to `crash`.
+- *Verification.*
+  - The rows, reasons, contact counts and dwells are read from the committed episode files above.
+  - Deck depths and roll come from the analytic deck source of each listed realization
+    (`rld.eval.envs.motion_for`, with `with_lambda` at 1/15).
+  - The drone-vs-plate picture comes from a post-hoc scratch re-flight of #133, #127, #20
+    (λ = 1/15) and #177 (aft and CG, 1/25), traced per substep. Each re-flight reproduced its
+    committed outcome, termination reason, step count and dwell. Nothing from it is committed.
+- *Other `below_deck` rows* in the committed e07 files have no contact and were not traced. They
+  are mostly `sac`: 1 in the matrix, 9 at CG, 3 on sinusoids and 1–53 per noise condition. Each
+  4 cm noise condition also has 17–27 non-`sac` rows.
+- *Effect on reported numbers.* One success is lost, `pid_feedforward` λ = 1/15 `unseen_vessel`
+  SS6: 193/200 would be 194/200. No hypothesis reads the λ arm, and no λ contrast separates for
+  `ppo` or `pid_feedforward`.
+
+**7. Tunnelled successes (review M4).** Counted directly from `tunnelled_success.csv`
+(`n_success_tunnelled`, pooled over seeds): successes whose penetration exceeded 5 mm at any
+contact substep. The full per-cell tables are in `docs/findings.md` §2 (matrix) and §4 (noise
+arm). `results/results.md` prints them in every outcome breakdown.
+- *What each count measures.*
+  - The direct count is every such success. It may, but need not, depend on the overlap.
+  - P5-D14's and P6-D5's bounds are the subset of those successes that the audits judged possibly
+    overlap-dependent: an unloaded stretch after contact (`possibly_dependent` in
+    `results/audit/tunnelling_episodes.csv` and `results/audit/e06/tunnelling_episodes.csv`).
+  - The audits examined exactly the successes the direct count lists, so the bound is a subset of
+    it.
+- *Matrix, `id`, per 1 000 (SS3/SS4/SS5/SS6) against the bound:*
+  - `residual_ppo` 0/0/0/4 against 3 (SS6);
+  - `ppo_forecast` 0/0/0/4 against 1 (SS6);
+  - `ppo` 0/0/1/3 against 2 (SS6);
+  - `sac` 3/7/23/50 = 83 against 41 (1/3/13/24);
+  - `pid_feedforward_lowvz_cut` 0/0/1/2 per 200 against 1 (SS6);
+  - `ppo_sinusoid` 0/0/0/3 against 3;
+  - `residual_ppo_forecast` 0/0/1/0 against 0 at SS6.
+
+  The direct counts exceed P6-D5's "may depend" bound at `id` SS6 for `residual_ppo` (4 vs 3),
+  `ppo_forecast` (4 vs 1) and `ppo` (3 vs 2). Over `id` they exceed it for `sac` (83 vs 41) and
+  `lowvz_cut` (3 vs 1).
+- *Outside `id`* nothing is audited. The largest counts are at `unseen_heading` SS6 (`ppo` 25,
+  `ppo_forecast` 22, `ppo_sinusoid` 19 per 1 000; `sac` 44) and `unseen_seastate` SS6 (`sac` 49;
+  the pure PPO methods 7–8).
+- *Noise arm (re-flown), unaudited.* At σ_p = 4 cm:
+  - `ppo` 30–59 per 1 000 per cell, and `ppo_sinusoid` 18–57;
+  - `pid_feedforward_lowvz_cut` 14–35 per 200 (35 of its 90 successes at SS6, 4 cm, 2 steps);
+  - `sac` 3–122 per 1 000 per cell across all conditions.
+- *Against the verdicts* (post hoc, point estimates, nothing re-scored):
+  - H1b: removing all 4 gives +5.6 (item 8).
+  - H2's cells hold at most 8 per 1 000 (`ppo`, `unseen_seastate` SS6), i.e. under 1 point per
+    cell, against a 10-point prediction and a point estimate of −1.5.
+  - H1a and H3 are p95 closing-speed statistics; a tunnelled success does not move a touchdown's
+    closing speed.
+
+**8. Errata to P7-D3 §6 (review m7).** H1b's tunnelling arithmetic used the bound, 3, as if it were
+the raw count.
+- The raw tunnelled-success count of `residual_ppo` at `id` SS6 is **4**. Removing all 4 gives
+  961/1 000 − 181/200 = 96.1 − 90.5 = **+5.6**, still ≥ 5.
+- "Crossing would take 10" should read **11**: at 10 removed the difference is exactly 5.0, which
+  still meets "≥ 5". 11 is 3.7× the bound and 2.75× the raw count.
+- "Combined": with all 4 removed (+5.6), k = 2 converted `pid_feedforward` bounces still cross
+  (5.6 − 1.0 = 4.6), and k = 1 does not (5.1).
+- P7-D3's conclusion stands: tunnelling alone cannot move H1b across its line, and the
+  bounce-grace rule can.
+- Markers are appended in P7-D3's H1b caveat and in its two "holds" mentions.
+
+**9. Other text corrections in `docs/findings.md` (Phase 7).** No number in a committed CSV
+changed for any of these.
+- *M1.* Every latency sentence is rewritten from the re-flown arm.
+  - At `id` SS5, 2 steps, σ_p = 0: `pid_feedforward` 92.5 % (superseded 0.0), `residual_ppo` IQM
+    99.0 (superseded 0.2) and `ppo` IQM 100.0 (superseded 35.3). The seed means are 99.1 and 100.0
+    (superseded 0.2 and 38.3).
+  - The superseded arm appears only as the artifact P7-D4 corrected.
+- *M2.* The sentence "its ship-motion feed is the only undelayed, noise-free deck-state channel" is
+  replaced. Under P7-D4 every deck-derived observation entry is perceived. What stays ideal is the
+  forecast methods' ship-motion feed and `oracle_gated`'s privileged context.
+- *The new noise picture.* It is reported per sea state and per condition, beside the baselines,
+  and no mechanism is asserted. Velocity noise through the feedforward is named only as a
+  plausible, untested explanation.
+- *m1.* At `unseen_heading` SS6 the pure-PPO tunnelling rate is 5.6 / 6.8 / 6.9 % (`ppo` /
+  `ppo_forecast` / `ppo_sinusoid`). The earlier "1.4–2.0 %" pooled SS3–SS6.
+- *m2.* "The PID baselines land softer than every learned method in every regime" was false.
+  `pid_track_descend` lands harder than every PPO-family method in **12** of 14 cells; it is
+  softer only at `unseen_heading` SS3 and `static`. The other five baselines are softer in all 14.
+  (The review said 13 of 14; recomputing from `matrix/aggregate.csv` and
+  `matrix/carried_summary_e01.csv` gives 12.)
+- *m3.* The like-for-like clean tunnelling rate is 1.09 % (313 of the 28 800 clean `id` rows,
+  learned and baselines). The earlier 1.4 % was all matrix rows of every regime (1 393 / 98 800).
+- *m4.* The findings λ table now includes `pid_track_descend` and `oracle_gated`.
+- *Detector disagreement in the re-flown arm.* It is above 1 % only at σ_p = 4 cm (1.21 / 1.28 /
+  1.30 %). Of those disagreements, 8 / 8 / 4 per 28 800 are successes.
+- *`below_deck`.* The earlier "only at λ = 1/15" is corrected (item 6).
+
+**10. The stale `configs/env/noise.yaml` comment** is recorded here, not edited. Its SHA-256,
+`7beb41da…`, is recorded as `noise_yaml_sha256` in every committed e07 summary.
+- Its header says the stand-in is "Applied to the RELATIVE PAD POSE BLOCK ONLY (relative position
+  and relative velocity)". Under P7-D4 the perceived quantity is the deck sample at the pad, and
+  every deck-derived observation entry is built from it (P7-D4 items 1–4). The noise is drawn in
+  the world frame.
+- "At lambda = 1/25 a 33 ms model latency is 165 ms full scale" should read 33.3 ms → 166.7 ms.
+  A configured 33 ms quantises to 0 steps (P7-D1 §4).
+- "Sigma in {0, 1, 2, 4} cm and latency in {0, 33, 66} ms" is the plan's wording. The configured
+  latencies are 0 / 33.4 / 66.7 ms = 0 / 1 / 2 steps (P7-D1 §4).
+- "applied after the hold" and "The relative-pose block is refreshed at this rate" now apply to
+  the perceived deck sample.
+- Where the file and P7-D1 §4 / P7-D4 disagree, the protocol wins.
+
+**11. No verdict moved.** `hypotheses.csv` is byte-identical before and after the re-flight. Its
+only change since P7-D3 is the m6 word in item 5.
+- H1a not supported; H1b supported (+6.0 [+2.0, +10.2]); H2 not supported.
+- H3: primary not supported at `id` SS5 and SS6, half-rules not applicable; secondary not
+  supported at SS5, inconclusive at SS6, half-rules not applicable (SS5) and not scored (SS6).
+- H4 not supported, novelty claim withdrawn; H5 pending — scored at Gate 8.
+- No hypothesis reads the noise or λ arm. The M3 artifact and the M4 counts do not move any
+  scored statistic across a verdict boundary (items 6–8).
 
 ## Gates
 | gate | date | result | note |

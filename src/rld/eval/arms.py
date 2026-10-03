@@ -124,8 +124,9 @@ class NoiseSetting:
     """One perception stand-in condition (P7-D1 §4).
 
     Attributes:
-        sigma_p_m: Relative-position sigma, metres model scale.
-        sigma_v_m_s: Relative-velocity sigma, metres per second model scale (sigma_p / tau).
+        sigma_p_m: Noise sigma on the perceived pad position, metres model scale (P7-D4).
+        sigma_v_m_s: Noise sigma on the perceived pad velocity, metres per second model scale
+            (sigma_p / tau; P7-D4).
         latency_ms: Configured latency, milliseconds model scale. 33.4 and 66.7 quantise
             **down** to exactly 1 and 2 control steps at 30 Hz (a literal 33 ms would be 0).
         latency_steps: The control steps that latency is (asserted by a test).
@@ -147,7 +148,8 @@ class NoiseSetting:
         return self.sigma_p_m == 0.0 and self.latency_steps == 0
 
 
-#: Relative-position sigmas (m) and the matching velocity sigmas (m/s), sigma_v = sigma_p / 0.2 s.
+#: Pad-position sigmas (m) and the matching pad-velocity sigmas (m/s), sigma_v = sigma_p / 0.2 s
+#: (P7-D1 §4 grid; applied to the perceived deck sample, P7-D4).
 _SIGMAS: tuple[tuple[float, float], ...] = ((0.0, 0.0), (0.01, 0.05), (0.02, 0.10), (0.04, 0.20))
 
 #: Configured latencies (ms) and the control steps they quantise to.
