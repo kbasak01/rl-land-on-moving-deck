@@ -82,11 +82,17 @@ No multiplicity correction was applied (P3-D4 #9).
     a fifth of the predicted 10 %.
   - In success, the forecast methods are within 3 points of their non-forecast twins in every
     clean cell of the matrix. That is an unpaired reading of the tables below; it was not tested.
-- **Training on sinusoids cost nothing measurable (H4).**
+- **At the scored `id` SS5 cell, where every method is at the ceiling, training on sinusoids cost
+  nothing measurable (H4).**
   - `ppo_sinusoid`, trained only on matched sinusoids, scores 1 000/1 000 at `id` SS5 on both
     JONSWAP and sinusoid motion. So does `ppo`.
   - H4 cannot be supported, as P6-D6 foresaw, and the motion-realism novelty claim is withdrawn
-    (D0.4). The transfer is the finding.
+    (D0.4). The transfer at that cell is the finding.
+  - Outside the scored cell the picture is weaker for `ppo_sinusoid` (unpaired, untested). At `id`
+    SS6 its seed CI, 97.3 [96.7, 97.8], lies below `ppo`'s 98.2 [98.0, 98.5]
+    (`results/e07/matrix/aggregate.csv`). Under σ_p = 4 cm noise it is 6–11 points below `ppo` at
+    every sea state, e.g. 69.7 vs 79.8 at SS3 with 0 steps (`results/e07/noise/sigma4cm_lat*/aggregate.csv`).
+    *(Scope narrowed at the Gate 7 review.)*
 - **H5** waits for Phase 8.
 
 ### 2. Success under shift, per regime (main matrix, aft pad, JONSWAP, λ = 1/25)
@@ -196,9 +202,14 @@ is named.
   - `gated` scores 42.0 % and `oracle_gated` 46.5 %, mostly `timeout`.
   - `pid_feedforward_lowvz_cut` (83.0 %) is above `pid_feedforward` (77.0 %) here. That is also
     unpaired; their Wilson intervals overlap.
-- **Within the PPO family no method stands out.** At `unseen_heading` SS6, `ppo` at 90.7
-  [86.3, 93.3] is above `residual_ppo` at 85.7 [84.0, 89.0], but the seed CIs overlap. That is a
-  non-result.
+- **Within the PPO family, plain `ppo` sits at or above the others; nothing here is tested.**
+  - At `unseen_heading` SS6, `ppo` at 90.7 [86.3, 93.3] is above `residual_ppo` at 85.7
+    [84.0, 89.0], but the seed CIs overlap. That is a non-result.
+  - At `id` SS6, the H1b cell, `ppo` at 98.2 [98.0, 98.5] lies wholly above `residual_ppo` at 96.2
+    [95.7, 97.8] and `ppo_sinusoid` at 97.3 [96.7, 97.8] (`results/e07/matrix/aggregate.csv`). This
+    is an unpaired, untested reading. It bears on how H1b is read: residual RL beats its own PID base
+    at SS6, while plain PPO sits above the residual in the same cell. *(Added at the Gate 7
+    review.)*
 - **SAC (2 M env steps against 10 M for the PPO family) is the weakest learned method everywhere
   past SS4.**
   - It falls to 46.5 % at `unseen_heading` SS6, with C86 and O98 per 1 000.
@@ -318,15 +329,19 @@ outcome breakdowns included, are in `results/results.md` §2.
     although the CG deck moves less.
   - Its CG losses at `id` SS6 are C48 O102 H327 per 1 000, against C18 O39 H232 aft.
   - It is not explained.
-- **Surprise 2: at `id` SS6, every learned method lands harder at CG, and most classical controllers
-  land softer.** The exceptions are `pid_track_descend` (0.502 → 0.507 m/s) and `gated_forecast_tcn`
+- **Surprise 2: at `id` SS6, the learned methods' p95 closing speed is higher at CG (for three of
+  six it separates by seed CI), and most classical controllers land softer.** The exceptions are `pid_track_descend` (0.502 → 0.507 m/s) and `gated_forecast_tcn`
   (0.204 → 0.209), both slightly harder (`results/e02/summary.csv`). *(Corrected at the Phase 7
   re-review; the earlier wording said "every classical controller softer".)*
   - `ppo`'s p95 at `id` SS6 is 0.278 → 0.295 m/s, and `residual_ppo`'s 0.283 → 0.305.
   - `pid_feedforward`'s is 0.264 → 0.243.
-  - This is an unpaired reading: no paired aft − CG closing-speed contrast was computed. The
-    learned methods' seed CIs do not overlap between pads (`ppo` [0.274, 0.285] vs
-    [0.286, 0.304]).
+  - This is an unpaired reading: no paired aft − CG closing-speed contrast was computed. The seed
+    CIs of the p95 IQM separate between pads for `ppo` ([0.274, 0.285] vs [0.286, 0.304]),
+    `residual_ppo` ([0.281, 0.287] vs [0.298, 0.311]) and `ppo_sinusoid` ([0.282, 0.292] vs
+    [0.300, 0.311]) only. They overlap for `sac` ([0.590, 0.778] vs [0.710, 0.852]),
+    `ppo_forecast` ([0.272, 0.295] vs [0.280, 0.300]) and `residual_ppo_forecast` ([0.274, 0.280]
+    at both pads; points 0.278 vs 0.279) (`results/e07/{matrix,cg}/aggregate.csv`). *(Corrected at
+    the Gate 7 review: the earlier text said no learned method's CIs overlapped.)*
   - All learned methods were trained at the aft pad only.
   - One untested explanation is that they learned aft-specific structure of the deck motion,
     including the defect's coupling of deck tilt to pad heave. It is only that: an explanation
@@ -835,7 +850,8 @@ real ship**. MSS's spectrum match and Octave parity pass (P7-D2 §3). Sources:
    (P7-D3 §6).
 3. **The timeout-ranked sensitivity is vacuous.** No timeouts occur in any scored closing-speed
    cell.
-4. **Learned methods land harder at CG, and SAC fails more there**, although the CG deck is calmer
+4. **Learned methods' p95 is higher at CG (separating for `ppo`, `residual_ppo` and `ppo_sinusoid`
+   only), and SAC fails more there**, although the CG deck is calmer
    (§3). This is not explained.
 5. **The perception arm was re-flown (P7-D4).** The first arm's 2-step-latency collapse
    (`pid_feedforward`, `gated` and `oracle_gated` crashing in 200 of 200) was an artifact of the
@@ -857,9 +873,10 @@ real ship**. MSS's spectrum match and Octave parity pass (P7-D2 §3). Sources:
      tunnelled successes per 1 000 (`matrix/summary.csv` `tunnelling_n`;
      `matrix/tunnelled_success.csv`). At `unseen_seastate` SS6 it is 1.5–2.0 %. (The earlier
      "1.4–2.0 % of `unseen_heading`" pooled SS3–SS6; corrected at review m1.)
-   - The deepest penetration is 8.81 mm (`ppo_forecast`, `unseen_heading` SS6). That is above the
-     7.03 mm `lowvz_cut` reference P5-D14 used as a limit (`matrix/summary.csv`,
-     `max_penetration_m`).
+   - The deepest PPO-family penetration is 8.81 mm (`ppo_forecast`, `unseen_heading` SS6). That is
+     above the 7.03 mm `lowvz_cut` reference P5-D14 used as a limit (`matrix/summary.csv`,
+     `max_penetration_m`). The deepest of any method is `sac` at 17.6 mm (`unseen_heading` SS6,
+     seed 4), above P5-D14's 15.7 mm `id` maximum. *(Corrected at the Gate 7 review.)*
    - `sac` tunnels in 0.2 % (`static`) to 19.5 % (`unseen_seastate`) of episodes, by regime.
 8. **The noise arm degrades the touchdown detectors** past Gate 2's 1 % in the 3 σ_p = 4 cm
    conditions (1.21–1.30 %). Only 4–8 of each condition's 28 800 disagreeing episodes are
