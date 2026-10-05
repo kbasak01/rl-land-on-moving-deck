@@ -96,6 +96,7 @@ from rld.eval.metrics import CELL_METRIC_COLUMNS, as_bool, as_float
 from rld.eval.report import (
     CAVEATS,
     FORBIDDEN_RENDERED_PHRASES,
+    SkipRecord,
     deterministic_provenance,
     method_label,
     read_rows,
@@ -610,6 +611,7 @@ def summarise_learned(
     rows: Sequence[Mapping[str, Any]],
     run_columns: Mapping[tuple[str, int], Mapping[str, str]],
     provenance: Mapping[str, str],
+    skipped: Sequence[SkipRecord] = (),
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Reduce learned episode rows to per-(method, seed, cell) summary rows.
 
@@ -619,6 +621,9 @@ def summarise_learned(
             a summary written since e06, :data:`RUN_POLICY_COLUMNS`; every run must have the
             same keys, in the same order.
         provenance: Deterministic provenance columns.
+        skipped: Listed episodes a run was not flown on, with the reason (a forecast run on
+            the static-pad list, Phase 7); they become ``n_episodes = 0`` cells with a
+            ``skip_reason`` (:func:`rld.eval.report.summarise`), never a silent drop.
 
     Returns:
         ``(records, columns)``: :func:`rld.eval.report.summarise`'s records with the run's
@@ -632,8 +637,8 @@ def summarise_learned(
     if len(names) > 1:
         raise ValueError(f"runs disagree on their run columns: {sorted(names)}")
     run_names = list(next(iter(names))) if names else list(RUN_COLUMNS)
-    methods = list(dict.fromkeys(str(r["method"]) for r in rows))
-    records = summarise(rows, methods, None, None)
+    methods = list(dict.fromkeys([*(str(r["method"]) for r in rows), *(k.method for k in skipped)]))
+    records = summarise(rows, methods, None, None, skipped)
     out: list[dict[str, Any]] = []
     for rec in records:
         out.append({**rec, **run_columns[(str(rec["method"]), int(rec["run_seed"]))], **provenance})

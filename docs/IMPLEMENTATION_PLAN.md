@@ -602,6 +602,35 @@ number.** No pooling of success rate across sea states in any headline.
 
 ### Phase 8 — ONNX export and latency (0.5–1 day) · owner: `deploy-benchmarker`
 
+**Before you start (added after Gate 7, 2026-10-04).**
+
+(a) **H5 is the only open hypothesis.** It is scored here, at Gate 8, exactly as P3-D1 §8 writes it:
+batch-1 p50 on ORT CPU (1 thread) vs every parity-passing GPU provider, ≥ 2×, Project 4's harness,
+200 warmup + 2 000 timed, p99 reported (P7-D1 §7).
+
+(b) **Which network.** Fix the exported policy in `docs/protocol.md` **before timing anything**.
+H5 names "the exported policy MLP". The natural choice is `ppo`, the Phase 7 best learned method
+(P7-D1 §3). Its five seeds share one architecture, so latency is per architecture, and parity is per
+seed. State what is exported for the residual and forecast methods:
+- the residual's `pid_feedforward` base stays outside the graph (plan step 1);
+- the forecast methods also need the DLinear-OLS forecaster per step, which added about 1.2 ms per
+  env step in training (P6-D1). That belongs in the end-to-end budget (step 4), not in H5.
+
+(c) **Closed-loop parity.** Fly the 50 episodes from the frozen `id` list with noise off, the
+configuration every scored number used. The P7-D4 stand-in is irrelevant here.
+
+(d) **Carry these into the README (Phase 9), from Gate 7.** These are the `docs/findings.md` Phase 7
+readings that are easy to overstate:
+- H1b's 1.0-point margin and its out-of-distribution cell;
+- plain `ppo` lies above `residual_ppo` at the H1b cell (unpaired);
+- `pid_feedforward` unbeaten on the S175 hull and on MSS;
+- the white-noise perception arm, whose σ is larger than the deck motion at SS3–SS4;
+- unaudited tunnelled successes outside clean `id`.
+
+**First task:** export the `ppo` actor (seed 0) with the `VecNormalize` mean and variance folded into
+the graph, opset 18, dynamic batch, and pass the 1 000 × 5 parity on ORT CPU.
+
+
 1. Export the actor network with `VecNormalize` mean/var **folded into the graph** (and the
    residual's baseline stays outside — document the boundary). Opset 18, dynamic batch only.
 2. Parity on every benchmarked provider: 1 000 random observations × 5 draws, scale-relative
