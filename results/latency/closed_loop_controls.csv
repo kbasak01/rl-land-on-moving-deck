@@ -1,0 +1,13 @@
+method,seed,arm,post_hoc,n_episodes,n_outcome_identical_to_torch,flipped_episodes,max_abs_d_rel_vz_normal_m_s,max_abs_d_steps,n_steps_identical,n_rows_identical
+ppo,0,onnx,False,50,49,SS6/10:hard_landing->success,0.03682423021600309,15,43,0
+ppo,0,torch_folded,True,50,50,,0.034368054049539604,13,44,0
+ppo,0,torch_obs_plus_1ulp,True,50,49,SS6/10:hard_landing->success,0.0346454931271174,14,43,0
+ppo,4,onnx,False,50,49,SS6/9:success->hard_landing,0.055755056350296844,13,42,0
+ppo,4,torch_folded,True,50,50,,0.04178775741688179,1,40,0
+ppo,4,torch_obs_plus_1ulp,True,50,49,SS6/9:success->hard_landing,0.04181555395653688,14,44,0
+residual_ppo_forecast,0,onnx,False,50,50,,0.03763714084661096,1,37,0
+residual_ppo_forecast,0,torch_folded,True,50,50,,0.038491275693088994,2,39,0
+residual_ppo_forecast,0,torch_obs_plus_1ulp,True,50,50,,0.03374116834194407,5,38,0
+residual_ppo_forecast,4,onnx,False,50,49,SS6/10:success->hard_landing,0.035932605489103375,14,40,0
+residual_ppo_forecast,4,torch_folded,True,50,50,,0.04239758249066772,1,41,0
+residual_ppo_forecast,4,torch_obs_plus_1ulp,True,50,49,SS6/10:success->hard_landing,0.042801547548068364,14,37,0

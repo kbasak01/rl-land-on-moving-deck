@@ -1,0 +1,11 @@
+method,source,pad,regime,ss,rank_worst_to_best,seed,success_rate,rel_vz_normal_p95_m_s,selected
+ppo,results/e05/seeds.csv,aft,id,SS6,1,2,0.98,0.27781126576285736,False
+ppo,results/e05/seeds.csv,aft,id,SS6,2,1,0.98,0.2753703815925786,False
+ppo,results/e05/seeds.csv,aft,id,SS6,3,4,0.98,0.27375927518906745,True
+ppo,results/e05/seeds.csv,aft,id,SS6,4,3,0.985,0.287275717948229,False
+ppo,results/e05/seeds.csv,aft,id,SS6,5,0,0.985,0.2818113647317609,False
+residual_ppo_forecast,results/e06/seeds.csv,aft,id,SS6,1,1,0.965,0.2800620619462461,False
+residual_ppo_forecast,results/e06/seeds.csv,aft,id,SS6,2,3,0.965,0.2796568483512599,False
+residual_ppo_forecast,results/e06/seeds.csv,aft,id,SS6,3,4,0.97,0.27669688357368144,True
+residual_ppo_forecast,results/e06/seeds.csv,aft,id,SS6,4,2,0.97,0.2733937494654109,False
+residual_ppo_forecast,results/e06/seeds.csv,aft,id,SS6,5,0,0.985,0.2772075183238876,False

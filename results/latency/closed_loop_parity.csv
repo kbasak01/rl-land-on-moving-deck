@@ -1,0 +1,5 @@
+method,seed,n_episodes,n_outcome_identical,passed,max_abs_d_rel_vz_normal_m_s,max_abs_d_steps,n_rows_identical,n_torch_rows_match_committed,committed_source,outcomes_torch,outcomes_onnx
+ppo,0,50,49,False,0.03682423021600309,15,0,50,results/e05/episodes.csv,hard_landing:1|success:49,success:50
+ppo,4,50,49,False,0.055755056350296844,13,0,50,results/e05/episodes.csv,hard_landing:1|success:49,hard_landing:2|success:48
+residual_ppo_forecast,0,50,50,True,0.03763714084661096,1,0,50,results/e06/episodes.csv,success:50,success:50
+residual_ppo_forecast,4,50,49,False,0.035932605489103375,14,0,50,results/e06/episodes.csv,success:50,hard_landing:1|success:49

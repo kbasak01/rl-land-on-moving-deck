@@ -1,0 +1,90 @@
+{
+  "e2e_vs_closed_loop": {
+    "ppo_s4": {
+      "n_episodes": 50,
+      "n_outcome_and_steps_equal_closed_loop_onnx": 50
+    },
+    "residual_ppo_forecast_s4": {
+      "n_episodes": 50,
+      "n_outcome_and_steps_equal_closed_loop_onnx": 50
+    }
+  },
+  "environment": {
+    "cpu": "Intel(R) Core(TM) i9-10980XE CPU @ 3.00GHz",
+    "cpu_count": "36",
+    "cuda": "13.0",
+    "cudnn": "92000",
+    "git_commit": "96d5f5d-dirty",
+    "gpu": "NVIDIA RTX A4000",
+    "nvidia_driver": "596.71",
+    "onnx": "1.22.0",
+    "onnxruntime": "1.29.0",
+    "onnxruntime_package": "onnxruntime-gpu",
+    "platform": "Linux-6.6.114.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "tensorrt": "10.16.1.11",
+    "torch": "2.13.0+cu130",
+    "torch_default_threads": "1"
+  },
+  "graphs": [
+    {
+      "architecture": "mlp512x2-tanh-in25",
+      "file": "ppo_s0.onnx",
+      "method": "ppo",
+      "model_sha256": "1a012394335c44d1e08d20f2199debaf3809d7bef96e04749817ae35b584fd49",
+      "obs_dim": 25,
+      "onnx_sha256": "06230fd2de23468a169589ac41f1d19da7e8c60c7dc5ea68a1534f0b39281621",
+      "seed": 0,
+      "vecnormalize_sha256": "9ddb2a992d4263426bc28033f8cd9f7f54daf7011ca67eb81f3099ecf289db6f"
+    },
+    {
+      "architecture": "mlp512x2-tanh-in25",
+      "file": "ppo_s4.onnx",
+      "method": "ppo",
+      "model_sha256": "0f6fa22d0d78ca95d6921cbffd3a3f33256b0b062e60450732bc5ff3d852289b",
+      "obs_dim": 25,
+      "onnx_sha256": "fb5a8180c6acd31a7ecbbd5d0322f5c09b54ad4b15558946b6c8dab35d96e926",
+      "seed": 4,
+      "vecnormalize_sha256": "6e5d7599d8b22d2faeae0c29e77815969a718294a40510afc7a7f4c6eeba4d38"
+    },
+    {
+      "architecture": "mlp512x2-tanh-in31",
+      "file": "residual_ppo_forecast_s0.onnx",
+      "method": "residual_ppo_forecast",
+      "model_sha256": "8642848a224023a069190ceba3a47a93e9d3884843f2a5d4c6ffb4daaac81522",
+      "obs_dim": 31,
+      "onnx_sha256": "27d6c5cac04b38d27faa5d17be576a048203e245e7c794c0bb6cf3ace3bd225b",
+      "seed": 0,
+      "vecnormalize_sha256": "05c683af2cfb1933e7265d6b306fbb2773a0f00e94f8deda7a8a4d729c4af0b4"
+    },
+    {
+      "architecture": "mlp512x2-tanh-in31",
+      "file": "residual_ppo_forecast_s4.onnx",
+      "method": "residual_ppo_forecast",
+      "model_sha256": "5927218ad237d36e64672b9d38e25e3d328803f5c4646623c19072e43b5d2763",
+      "obs_dim": 31,
+      "onnx_sha256": "06d90d2d0f432a02c76a6b57cab64bebefb46350840dc57110f7d61b1aa34eb2",
+      "seed": 4,
+      "vecnormalize_sha256": "0b7be3d802f56c6df8190de63634a287ed4dbaa8016d4ff9bb18ca779bcb457b"
+    }
+  ],
+  "latency": {
+    "failed": {},
+    "h5_verdict": "supported",
+    "n_jobs": 44,
+    "n_timed": 44,
+    "refused": [],
+    "timed_iters": 2000,
+    "warmup_iters": 200
+  },
+  "threads_env": {
+    "MKL_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1"
+  },
+  "wall_s_closed-loop": 31.6,
+  "wall_s_e2e": 27.8,
+  "wall_s_export": 1.6,
+  "wall_s_latency": 200.7,
+  "wall_s_parity": 19.9,
+  "wall_s_selection": 0.0
+}
