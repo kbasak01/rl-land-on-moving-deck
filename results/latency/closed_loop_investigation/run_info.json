@@ -4,7 +4,7 @@
     "cpu_count": "36",
     "cuda": "13.0",
     "cudnn": "92000",
-    "git_commit": "74ff936-dirty",
+    "git_commit": "46f7e55-dirty",
     "gpu": "NVIDIA RTX A4000",
     "nvidia_driver": "596.71",
     "onnx": "1.22.0",
@@ -34,7 +34,7 @@
     "residual_ppo_forecast_s4": 238
   },
   "trace_outcome_mismatches_vs_runner": [],
-  "wall_s_flights": 569.2,
-  "wall_s_total": 604.6,
-  "wall_s_traces": 33.2
+  "wall_s_flights": 575.7,
+  "wall_s_total": 715.7,
+  "wall_s_traces": 31.6
 }

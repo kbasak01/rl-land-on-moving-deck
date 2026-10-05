@@ -1,4 +1,4 @@
 hypothesis,architecture,batch_size,cpu_label,cpu_p50_ms,cpu_p99_ms,other_label,other_provider,other_status,other_p50_ms,other_p99_ms,ratio_p50,ratio_p99,scored,threshold,meets_threshold,verdict
 H5,mlp512x2-tanh-in25,1,mlp512x2-tanh-in25-ort-cpu-b1-t1,0.0459855,0.0824042,mlp512x2-tanh-in25-ort-cuda-b1-t1,CUDAExecutionProvider,timed,0.21709,0.459139,4.72083,5.5718,True,2,True,supported
 H5,mlp512x2-tanh-in25,1,mlp512x2-tanh-in25-ort-cpu-b1-t1,0.0459855,0.0824042,mlp512x2-tanh-in25-ort-trt-b1-t1,TensorrtExecutionProvider,timed,0.181086,0.573972,3.93788,6.96533,True,2,True,supported
-H5,mlp512x2-tanh-in25,1,mlp512x2-tanh-in25-ort-cpu-b1-t1,0.0459855,0.0824042,mlp512x2-tanh-in25-torch-eager-cuda-b1-t1,torch:cuda,timed,0.404467,0.813723,8.79553,9.87478,False,2,True,supported
+H5,mlp512x2-tanh-in25,1,mlp512x2-tanh-in25-ort-cpu-b1-t1,0.0459855,0.0824042,mlp512x2-tanh-in25-torch-eager-cuda-b1-t1,torch:cuda,timed,0.404467,0.813723,8.79553,9.87478,False,2,True,context (not scored)

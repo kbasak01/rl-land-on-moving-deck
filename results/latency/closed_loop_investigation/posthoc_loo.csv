@@ -1,0 +1,6 @@
+method,seed,ulp_flips,ulp_flips_outside_S_minus_k,rate,onnx_cuda_flips,onnx_cuda_outside_S,p_at_least_observed_binomial
+ppo,0,40,2,0.05,3,0,1.0
+ppo,4,63,4,0.06349206349206349,4,1,0.11808957309841928
+residual_ppo_forecast,0,81,2,0.024691358024691357,5,2,0.008987252244615496
+residual_ppo_forecast,4,107,1,0.009345794392523364,6,0,1.0
+pooled,,291,9,0.030927835051546393,18,3,0.017045259566416227
