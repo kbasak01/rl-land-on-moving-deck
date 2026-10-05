@@ -3,6 +3,68 @@
 Phase-by-phase record of what was found, including every claim withdrawn and what replaced it.
 Written at each gate. Hypotheses are scored here exactly as pre-registered in P3-D1.
 
+## Phase 8 — ONNX export, parity and latency (2026-10-05)
+
+**Scope.** Simulation only. The latencies are measurements of this desktop: an RTX A4000 and an
+i9-10980XE under WSL2. The A4000 stands in for an embedded GPU; **nothing here measures an embedded
+target or implies real flight.** Only ratios of rows measured on this machine are quoted. Sources:
+`results/latency/`. Definitions are in P8-D1, and the full record is in P8-D2.
+
+**What was exported.** `ppo` (the best pure RL method) and `residual_ppo_forecast` (the best
+residual by the same rule; its CI overlaps `residual_ppo`'s, so this is a selection, not a result),
+seeds 0 and 4. Seed 4 is the median seed of each at `id` SS6. Each graph is the deterministic
+actor, a 512×2 tanh MLP, with the frozen `VecNormalize` folded in: the observation clip and the
+action clip are inside the graph. The residual's `pid_feedforward` base, the α = 0.3 composition and
+the DLinear-OLS forecaster stay outside it.
+
+### Verdict (P8-D2 §7; `results/latency/h5.csv`)
+
+| H | part | number | verdict |
+|---|---|---|---|
+| H5 | batch-1 p50, `ppo` graph: GPU provider / ORT CPU (1 thread) | ORT CUDA **4.72×** (0.217 vs 0.046 ms); ORT TensorRT **3.94×** (0.181 vs 0.046 ms); p99 5.57× and 6.97× | **supported** |
+
+### 1. Parity
+
+- **Numeric parity passes on every provider that was timed.** The check covered ORT CPU, CUDA and
+  TensorRT and the folded torch module on CPU and CUDA, all four graphs, 1 000 observations × 5
+  draws, with TF32 off. The worst max error is 9.5e-7 against a threshold of 1e-4
+  (`parity.csv`). The draws push about 12 % of normalised entries past the ±10 clip, and the
+  reference reaches the ±1 action clip, so both clips are exercised. **No configuration was
+  refused.**
+- **Closed-loop parity is not met as pre-registered.** 50 frozen `id` episodes, noise off, ORT CPU
+  against PyTorch (`closed_loop_parity.csv`).
+  - `residual_ppo_forecast` seed 0 has identical outcome classes in 50/50.
+  - `ppo` seeds 0 and 4 and `residual_ppo_forecast` seed 4 have 49/50 each. Each differs in one
+    SS6 episode, `success` ↔ `hard_landing`.
+  - On the PyTorch side those episodes land at 12–16° relative tilt against the 15° limit.
+- **Attribution (post hoc, P8-D2 §4).** The ONNX graph differs from PyTorch by ≤ 1e-6 per call. A
+  one-ulp nudge of the PyTorch policy's input, with no ONNX involved, flips exactly the same three
+  episodes in the same direction (`closed_loop_controls.csv`). Every arm's touchdown v_z drifts
+  0.03–0.06 m/s from PyTorch's.
+  - So at these SS6 episodes the closed loop is sensitive to float32 rounding, and the flips are
+    consistent with no export defect.
+  - The pre-registered criterion is still not met. The user decides how Gate 8 and the plan §7
+    check read it.
+
+### 2. Latency and the control budget
+
+- *Batch 1, one CPU thread* (`latency.csv`). ORT CPU runs the 25-input policy in 0.046 ms p50
+  (0.082 ms p99). With 2–8 threads it takes 0.018–0.021 ms.
+  - The GPU rows are slower: ORT CUDA 0.217 ms, ORT TensorRT 0.181 ms, torch-eager CUDA 0.404 ms.
+    They include host-device copies by design (Project 4's host-to-host method).
+  - At batch 32, ORT CPU at 1 thread is still the fastest ORT row: 0.156 against 0.243 (CUDA) and
+    0.196 ms (TensorRT).
+- *End-to-end per control step, in real episodes* (`e2e_budget.csv`), one thread, ONNX policy:
+  - `ppo`: observation build + policy = 0.19 ms p50 and 0.30 ms p99, i.e. 0.9 % of the 33.3 ms
+    period at p99.
+  - `residual_ppo_forecast`: observation build + DLinear-OLS forecaster + policy + base + compose
+    = 0.85 ms p50 and 1.13 ms p99, i.e. 3.4 %. The forecaster is the largest part (0.53 ms p50).
+  - Physics stepping (1.5 ms p50, 13 ms p99) is simulation and is reported apart. So is the
+    ship-motion feed (0.55 ms p50).
+- **What this does and does not say.** On this machine, a 512×2 MLP at batch 1 runs fastest on
+  one CPU thread, and the whole per-step software stack uses a few percent of the control period.
+  It says nothing about any embedded computer's CPU or GPU, which were not measured.
+
 ## Phase 7 — evaluation under shift and ablations (2026-10-02)
 
 **Scope.** Everything below is simulation:
@@ -42,7 +104,7 @@ review corrections below and the hashes that supersede P7-D2's are recorded in P
 | H3 secondary | `residual_ppo_forecast` vs `residual_ppo`, `id` SS5 / SS6 | −0.8 % [−2.4, +0.9] / +1.9 % [+0.4, +3.8] | **not supported** / **inconclusive** |
 | H3 secondary | `unseen_vessel` half-rule, SS5 / SS6 | r(uv) −2.0 % [−3.6, −0.3] / +0.04 % [−1.9, +2.6] | **not applicable** / **not scored (no supported id gain)** (relabelled from "holds" at `182cdea`, no number changed; P7-D5) |
 | H4 | drop_sin − drop_jon, `id` SS5 | +0.0 [+0.0, +0.0] (degenerate: every episode a success) | **not supported**; **novelty claim withdrawn** (D0.4 and P3-D1 §8 both fired) |
-| H5 | ORT CPU vs GPU latency | — | **pending — scored at Gate 8** |
+| H5 | ORT CPU vs GPU latency, batch-1 p50, `ppo` graph | ORT CUDA 4.72×, ORT TensorRT 3.94× (≥ 2× each) | **supported** — scored at Gate 8 (P8-D2 §7; Phase 8 above). It read "pending — scored at Gate 8" at Gate 7 |
 
 No multiplicity correction was applied (P3-D4 #9).
 
@@ -93,7 +155,7 @@ No multiplicity correction was applied (P3-D4 #9).
     (`results/e07/matrix/aggregate.csv`). Under σ_p = 4 cm noise it is 6–11 points below `ppo` at
     every sea state, e.g. 69.7 vs 79.8 at SS3 with 0 steps (`results/e07/noise/sigma4cm_lat*/aggregate.csv`).
     *(Scope narrowed at the Gate 7 review.)*
-- **H5** waits for Phase 8.
+- **H5** waited for Phase 8. *(Scored at Gate 8: **supported**, ORT CPU at 1 thread is 4.72× faster than ORT CUDA and 3.94× faster than ORT TensorRT at batch-1 p50; see Phase 8 above.)*
 
 ### 2. Success under shift, per regime (main matrix, aft pad, JONSWAP, λ = 1/25)
 

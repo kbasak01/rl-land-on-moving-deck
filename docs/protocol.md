@@ -3993,7 +3993,7 @@ written in `results/e07/hypotheses.csv` (`d5a82daa…`), and every contrast behi
 | H3 | secondary: `unseen_vessel` SS5 half-rule | `unseen_vessel` vs `id` SS5 | same | r(uv) −2.0 % [−3.6, −0.3]; r(id) −0.8 % | half-rule | **not applicable — no id gain to shrink** | P7-D1 §2: r(`id`) ≤ 0 |
 | H3 | secondary: `unseen_vessel` SS6 half-rule | `unseen_vessel` vs `id` SS6 | same | r(uv) +0.04 % [−1.9, +2.6] ≤ 0.5 × r(id) = 0.5 × 1.88 % = 0.94 % | half-rule | **holds** (relabelled "not scored (no supported id gain)" in P7-D5) | P7-D1 §2, judged on point estimates |
 | H4 | drop difference | `id` SS5 | drop_sin − drop_jon, mean paired success, one shared episode set | **+0.0** [+0.0, +0.0]; all four legs 1 000/1 000 | ≥ +10 points | **not supported** | P7-D1a #1: lower bound 0 is not > 0 |
-| H5 | ORT CPU vs GPU p50 latency | batch 1 | — | — | ≥ 2× | **pending — scored at Gate 8** | P7-D1 §7 |
+| H5 | ORT CPU vs GPU p50 latency | batch 1 | — | — | ≥ 2× | **pending — scored at Gate 8** (scored in P8-D2 §7: **supported**, CUDA 4.72×, TensorRT 3.94×) | P7-D1 §7 |
 
 No combined H1 or H3 verdict exists (P3-D4 #5, P7-D1a #2).
 
@@ -4026,7 +4026,7 @@ No combined H1 or H3 verdict exists (P3-D4 #5, P7-D1a #2).
   every seed. At SS6 the two read 97.3 % and 98.2 % (IQM). That SS6 comparison is unpaired between
   methods and not tested.
 
-**4. H5** is "pending — scored at Gate 8" (P7-D1 §7; the user's decision of 2026-10-01).
+**4. H5** is "pending — scored at Gate 8" (P7-D1 §7; the user's decision of 2026-10-01). *(Scored at Gate 8 in P8-D2 §7: supported.)*
 
 **5. No multiplicity correction** is applied across H1a, H1b, H2, H3 and H4 (P3-D4 #9).
 - All contrasts share bootstrap seed 20260926, so their replicate draws are correlated (P7-D1a #11).
@@ -4821,6 +4821,200 @@ success at `id` SS6, aft pad, JONSWAP, in the committed e05/e06 `aggregate.csv`.
     selection is not bit-reproducible between sessions (prototype above), so its last digits cannot
     be byte-checked.
   - Latency, e2e and `h5.csv` are measurements and are not byte-checked.
+
+### P8-D2 — Phase 8 results: parity, closed loop, latency, end-to-end budget and H5 (2026-10-05)
+
+*Status.* `make bench` ran once, from the code commit `96d5f5d`, in about 5 minutes; its outputs are
+committed at `400b706` under `results/latency/`. The environment stamp reads `96d5f5d-dirty`. The
+only dirty path is the untracked `.claude/worktrees/`, as in P7-D6 §9. Nothing else ran on the
+machine (load average 0.27 before the run, GPU idle). The user's shell sets `OMP_NUM_THREADS=1`,
+which every child inherited. ORT's thread pools and `torch.set_num_threads` are set explicitly per
+configuration and read back (`latency.json`, `intra_op_threads`), so the sweep is what it says.
+**This entry changes no threshold, list or criterion.** The P3-D1 block SHA-256 stays `21465588…`.
+Everything here is simulation and measurements of this desktop; nothing measures an embedded target.
+
+**1. Selection** (`selection.csv`). Recomputed by `rld.deploy.selection` from the committed
+`seeds.csv`; it reproduces P8-D1 §2: `ppo` worst → best 2, 1, 4, 3, 0 → **seed 4**;
+`residual_ppo_forecast` 1, 3, 4, 2, 0 → **seed 4**.
+
+**2. Graphs** (`run_info.json`, `artifacts/onnx/`, gitignored). Opset 18, input `[batch, D]`,
+output `[batch, 3]`, batch the only dynamic axis. The re-export in `--check` reproduces every SHA-256.
+
+| graph | D | SHA-256 |
+|---|---|---|
+| `ppo_s0.onnx` | 25 | `06230fd2de23468a169589ac41f1d19da7e8c60c7dc5ea68a1534f0b39281621` |
+| `ppo_s4.onnx` (timed; scores H5) | 25 | `fb5a8180c6acd31a7ecbbd5d0322f5c09b54ad4b15558946b6c8dab35d96e926` |
+| `residual_ppo_forecast_s0.onnx` | 31 | `27d6c5cac04b38d27faa5d17be576a048203e245e7c794c0bb6cf3ace3bd225b` |
+| `residual_ppo_forecast_s4.onnx` (timed) | 31 | `06d90d2d0f432a02c76a6b57cab64bebefb46350840dc57110f7d61b1aa34eb2` |
+
+**3. Numeric parity** (`parity.csv`, 220 rows). Max error is the worst over the 5 draws, and for the
+CPU rows also over threads 1, 2, 4 and 8. The reference reaches the ±1 output clip (|y|max = 1.0),
+so the threshold is 1e-4 · max(1, 1.0) = **1e-4** everywhere. 12.2 % (25-input) and 12.3 % (31-input)
+of normalised entries per draw lie beyond the ±10 input clip.
+
+| graph | ORT CPU | ORT CUDA | ORT TensorRT | torch CPU | torch CUDA |
+|---|---|---|---|---|---|
+| `ppo` s0 | 3.6e-7 | 4.8e-7 | 5.4e-7 | 3.1e-7 | 5.4e-7 |
+| `ppo` s4 | 3.6e-7 | 4.8e-7 | 8.3e-7 | 3.0e-7 | 5.4e-7 |
+| `residual_ppo_forecast` s0 | 8.3e-7 | 9.5e-7 | 8.9e-7 | 8.9e-7 | 8.9e-7 |
+| `residual_ppo_forecast` s4 | 7.2e-7 | 8.3e-7 | 7.9e-7 | 7.2e-7 | 8.3e-7 |
+
+- **Every row passes**, and every row also passes the unscaled `< 1e-4`.
+- **Refused configurations: none.** All 44 latency configurations were timed (`run_info.json`).
+- TensorRT's digits move between sessions: `ppo` s4 read 4.8e-7 in a scratch run and 8.3e-7 here.
+  This is why P8-D1 §11 checks GPU rows by verdict.
+
+**4. Closed-loop parity: NOT MET as P8-D1 §7 defines it** (`closed_loop_parity.csv`,
+`closed_loop_episodes.csv`).
+
+| policy | outcome classes identical | max \|Δ touchdown `rel_vz_normal`\| (m/s) | max \|Δ steps\| | P8-D1 §7 |
+|---|---|---|---|---|
+| `ppo` s0 | 49 / 50 | 0.037 | 15 | **fail** |
+| `ppo` s4 | 49 / 50 | 0.056 | 13 | **fail** |
+| `residual_ppo_forecast` s0 | 50 / 50 | 0.038 | 1 | pass |
+| `residual_ppo_forecast` s4 | 49 / 50 | 0.036 | 14 | **fail** |
+
+- *The three flips.* Each is one `id` SS6 episode, and each is `success` ↔ `hard_landing`:
+  - `ppo` s0, SS6 #10: hard_landing → success;
+  - `ppo` s4, SS6 #9: success → hard_landing;
+  - `residual_ppo_forecast` s4, SS6 #10: success → hard_landing.
+
+  On the PyTorch side these episodes touch down at 0.14, 0.24 and 0.27 m/s closing speed. Their
+  relative tilt is **16.3°, 14.0° and 12.0°** against the 15° hard-landing limit (committed e05/e06
+  rows). They are tilt classifications near the limit.
+- *The PyTorch path is the evaluated one.* Its 200 rows are byte-identical to the committed e05/e06
+  rows of the same episodes.
+- *The trajectories diverge everywhere.* 0 of 200 ONNX rows are byte-identical to their PyTorch
+  rows; step counts agree in 37–43 of 50.
+- **Post-hoc controls** (`closed_loop_controls.csv`). These were added *after* the result above was
+  read. They are descriptive and change no verdict. Two more arms fly the same 50 episodes per
+  policy:
+  - `torch_folded`: the graph's arithmetic run by PyTorch (no ONNX);
+  - `torch_obs_plus_1ulp`: the unchanged SB3 path with every raw input entry nudged up by one
+    float32 ulp before normalisation.
+
+| policy | ONNX flips | `torch_obs_plus_1ulp` flips | `torch_folded` flips | max \|Δv_z\| ONNX / ulp / folded (m/s) |
+|---|---|---|---|---|
+| `ppo` s0 | SS6 #10 | SS6 #10, same direction | none | 0.037 / 0.035 / 0.034 |
+| `ppo` s4 | SS6 #9 | SS6 #9, same direction | none | 0.056 / 0.042 / 0.042 |
+| `residual_ppo_forecast` s0 | none | none | none | 0.038 / 0.034 / 0.038 |
+| `residual_ppo_forecast` s4 | SS6 #10 | SS6 #10, same direction | none | 0.036 / 0.043 / 0.042 |
+
+- *Reading.* A one-ulp input perturbation of the PyTorch path reproduces all three ONNX flips:
+  the same episodes, the same direction, and no others. Every arm diverges from PyTorch by a similar
+  0.03–0.06 m/s. So the closed loop at these three SS6 episodes is sensitive to float32 rounding,
+  and the ONNX graph's per-call difference (≤ 1e-6, §3) lies at that floor.
+  - This is consistent with no export defect.
+  - It is an attribution, not a pass. P8-D1 §7 asks for identical classes, and three policies do
+    not have them.
+- **Open for the user, not decided here.** Gate 8's text names numeric parity, which passes.
+  Plan §7 also lists "closed-loop parity 50/50", which is not met. Two readings are possible:
+  - (a) record it as not met, with this attribution, and carry it into the README;
+  - (b) a dated deviation that defines closed-loop parity against the measured 1-ulp floor.
+
+  (b) would be post hoc. No criterion has been changed.
+
+**5. Latency** (`latency.csv`, `latency.json`). 200 warmup + 2 000 timed iterations, host to host,
+one child process per configuration, TF32 off on every row. Selected rows, milliseconds; the full
+44-row table is in `latency.csv`:
+
+| architecture | backend | batch | threads | p50 | p90 | p99 | mean | throughput (obs/s) |
+|---|---|---|---|---|---|---|---|---|
+| 25-input (`ppo` s4) | ORT CPU | 1 | 1 | **0.0460** | 0.0565 | **0.0824** | 0.0490 | 20 399 |
+| | ORT CUDA | 1 | 1 | **0.2171** | 0.2919 | **0.4591** | 0.2339 | 4 275 |
+| | ORT TensorRT | 1 | 1 | **0.1811** | 0.2132 | **0.5740** | 0.1964 | 5 092 |
+| | torch-eager CPU | 1 | 1 | 0.1325 | 0.1599 | 0.2134 | 0.1355 | 7 380 |
+| | torch-eager CUDA | 1 | 1 | 0.4045 | 0.4780 | 0.8137 | 0.4274 | 2 340 |
+| | ORT CPU | 32 | 1 | 0.1560 | 0.1817 | 0.2319 | 0.1581 | 202 457 |
+| | ORT CUDA | 32 | 1 | 0.2433 | 0.3228 | 0.6882 | 0.2673 | 119 697 |
+| | ORT TensorRT | 32 | 1 | 0.1959 | 0.2396 | 0.3884 | 0.2073 | 154 401 |
+| 31-input (`residual_ppo_forecast` s4) | ORT CPU | 1 | 1 | 0.0468 | 0.0592 | 0.0795 | 0.0495 | 20 186 |
+| | ORT CUDA | 1 | 1 | 0.2233 | 0.2885 | 0.5809 | 0.2426 | 4 122 |
+| | ORT TensorRT | 1 | 1 | 0.1647 | 0.2048 | 0.2829 | 0.1733 | 5 769 |
+
+- *Thread sweep, ORT CPU batch 1, 25-input.* p50 is 0.0460, 0.0210, 0.0184 and 0.0178 ms at 1, 2,
+  4 and 8 threads. H5 is defined at 1 thread; more threads only widen the CPU's margin on this
+  machine.
+- *Batch 32.* ORT CPU at 1 thread is still the fastest p50 of the ORT rows: CUDA/CPU 1.56×,
+  TensorRT/CPU 1.26×.
+- *Memory.* Peak host memory is about 1.06 GiB on every CPU row, and that is mostly the
+  interpreter and the torch import (dmf's caveat). The TensorRT rows reach 2.48 GiB host and
+  368 MiB device.
+
+**6. End-to-end control-step budget** (`e2e_budget.csv`). In real episodes: the 50 §7 episodes,
+ONNX policy, one process, one thread, one untimed warmup episode. Milliseconds per control step,
+against the 33.3 ms period:
+
+| method (seed 4) | component | p50 | p99 | p99 / 33.3 ms |
+|---|---|---|---|---|
+| `ppo` (3 107 steps) | observation build | 0.090 | 0.148 | |
+| | ONNX policy (ORT CPU, b1, t1) | 0.095 | 0.176 | |
+| | **deployment sum** | **0.186** | **0.300** | **0.9 %** |
+| `residual_ppo_forecast` (3 746 steps) | observation build | 0.092 | 0.145 | |
+| | forecaster (DLinear-OLS block) | 0.525 | 0.693 | |
+| | ONNX policy (ORT CPU, b1, t1) | 0.101 | 0.176 | |
+| | base `pid_feedforward` act | 0.098 | 0.154 | |
+| | compose | 0.020 | 0.045 | |
+| | **deployment sum** | **0.846** | **1.130** | **3.4 %** |
+| *simulation, reported apart* | physics step, `ppo` / residual | 1.47 / 1.49 | 13.4 / 12.7 | |
+| | ship-motion feed `advance_to` (residual) | 0.547 | 0.742 | |
+
+- The p50 and p99 of the sum are taken over per-step sums, not summed percentiles.
+- In the loop the policy call costs about twice its microbenchmark (0.095 against 0.046 ms p50).
+  The likely cause is cache state between physics steps; it was not isolated. The in-loop figure
+  is what the loop pays.
+- Feed plus forecaster is about 1.07 ms at p50. P6-D1 measured about 1.2 ms per env step in
+  training; that was a different measurement, but of the same order.
+- The e2e episodes reproduce the closed-loop ONNX rows' outcome and step count in 100 of 100 episodes
+  (`run_info.json`), so the timed loop flew the same actions.
+
+**7. H5: SUPPORTED** (`h5.csv`). P3-D1 §8, read as P8-D1 §10: batch 1, `ppo` graph, against ORT CPU
+at 1 thread (p50 0.0460 ms, p99 0.0824 ms):
+
+| GPU provider (parity passed) | p50 (ms) | ratio p50 | p99 (ms) | ratio p99 | ≥ 2× |
+|---|---|---|---|---|---|
+| ORT CUDA | 0.2171 | **4.72×** | 0.4591 | 5.57× | yes |
+| ORT TensorRT | 0.1811 | **3.94×** | 0.5740 | 6.97× | yes |
+| *torch-eager CUDA (context, not scored)* | 0.4045 | 8.80× | 0.8137 | 9.87× | — |
+
+- Every parity-passing GPU provider is at least 2× slower at p50, so **H5 is supported**. The
+  31-input graph, which does not score, reads 4.78× (CUDA) and 3.52× (TensorRT).
+- *Caveats.*
+  - These are ratios of rows measured on this machine only: an RTX A4000 and an i9-10980XE under
+    WSL2, with one measurement per configuration and no CI.
+  - The GPU rows include the host-device copies by design (host to host, P8-D1 §5). For a
+    0.5-MFLOP MLP those copies and the launches dominate.
+  - The A4000 stands in for an embedded GPU. **Nothing here measures an embedded target, and
+    nothing implies real flight.**
+
+**8. Additions to and readings of P8-D1, recorded.**
+1. The closed-loop controls in §4 and `closed_loop_controls.csv` are new and post hoc. `--check`
+   byte-checks them with the other closed-loop files.
+2. Parity covers ORT CPU and torch CPU at every swept thread count (1, 2, 4, 8), so every timed CPU
+   row has a parity row at its own thread count.
+3. Tests on synthetic policies assert the 1e-4 criterion, not a tighter one. A synthetic σ = 0.004
+   entry makes float32 rounding of μ reach about 1e-5 through random weights; the real graphs sit
+   near 1e-6 (§3).
+
+**9. Checks.**
+- `scripts/bench.py --check` exits 0, with the tree left clean. It reported:
+  - `selection.csv`, `closed_loop_parity.csv`, `closed_loop_episodes.csv` and
+    `closed_loop_controls.csv` byte-identical;
+  - the four graph SHA-256s equal;
+  - `parity.csv` OK.
+- SHA-256 of the committed files:
+  - `selection.csv` `6631a51d…`, `parity.csv` `7c1adf87…`;
+  - `closed_loop_parity.csv` `8e939663…`, `closed_loop_episodes.csv` `63c753e3…`,
+    `closed_loop_controls.csv` `a9e5af4b…`;
+  - `h5.csv` `20af1666…`, `latency.csv` `7f5abcdf…`, `e2e_budget.csv` `a29c3516…`.
+- `make test lint` is green: 756 passed, 1 skipped by design (`test_platform.py:191`, P2-D1),
+  804 s; ruff, ruff-format and mypy --strict are clean. That is 33 new `tests/test_deploy_*.py`
+  tests, the CUDA one included.
+- `make_episodes.py --check` passes 5/5 (content and file hashes). `scripts/report.py --check`
+  is byte-identical: `results/results.md` and `results/e07/hypotheses.csv` are untouched, so H5
+  still reads "pending" there until the Phase 9 render. The P3-D1 block SHA-256 is
+  `21465588…`, unchanged.
+- *Not done here:* the `results-skeptic` review and `/phase-gate 8`.
 
 ## Gates
 | gate | date | result | note |
