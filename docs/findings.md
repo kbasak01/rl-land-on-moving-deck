@@ -43,8 +43,30 @@ the DLinear-OLS forecaster stay outside it.
   0.03–0.06 m/s from PyTorch's.
   - So at these SS6 episodes the closed loop is sensitive to float32 rounding, and the flips are
     consistent with no export defect.
-  - The pre-registered criterion is still not met. The user decides how Gate 8 and the plan §7
-    check read it.
+  - The pre-registered criterion is still not met.
+- **Gate 8 does not pass (user, 2026-10-05).** P8-D1 §7 stays as written; the flips were then
+  investigated under a design fixed in advance (P8-D3, results in P8-D4,
+  `results/latency/closed_loop_investigation/`).
+- **The investigation finds rounding sensitivity, not an export defect.** That is the fixed P8-D3
+  reading, and every condition was met.
+  - *Export error on the inputs actually flown.* The graph matches SB3 to ≤ 9.5e-7 on all
+    13 755 recorded steps of the 50 episodes, including both clip regimes (`same_input.csv`).
+    ORT's graph optimisations change no output.
+  - *Divergence.* The first act already differs, by ≤ 3.6e-7. The trajectory difference then grows
+    exponentially, by e about every 2.4 control steps, to a median of 8 mm at touchdown
+    (`trace_summary.csv`). Flipped episodes look like non-flipped ones.
+  - *Noise floor.* Over the whole `id` SS6 cell (200 episodes × 4 policies), ONNX flips 16 of 800
+    outcomes. Twenty random one-ulp input perturbations of the PyTorch path flip 10–21 each
+    (median 15). Every ONNX flip is an episode that some perturbation also flips
+    (`noise_distribution.csv`).
+  - *Float64.* A float64 PyTorch reference differs from the committed float32 path on 9 of those
+    800 (`flips.csv`). On about 7 % of SS6 policy-episodes the outcome class is not determined at
+    float32 precision.
+  - *What it means for the criterion, post hoc.* Only 2 of the 20 perturbed PyTorch paths would
+    have passed §7 on its 50 episodes.
+  - *What it cannot show.* It cannot rule out a defect on inputs that were never flown; the
+    random-input parity above bounds that. Options for the gate are listed in P8-D4 §10 and are
+    the user's.
 
 ### 2. Latency and the control budget
 

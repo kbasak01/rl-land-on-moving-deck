@@ -5151,6 +5151,178 @@ Gate 8 criteria. Any deviation is the user's decision after P8-D4.
 `scripts/closed_loop_investigation.py --check` re-runs and byte-compares every file except the
 `onnx_cuda` rows (CUDA kernel selection is not guaranteed bit-reproducible) and `run_info.json`.
 
+### P8-D4 — Closed-loop parity investigation: results (2026-10-05)
+
+*Status.* This is the P8-D3 design, run once from `74ff936`, the commit after the P8-D3 entry
+`5ff4a83` and the code. The environment stamp reads `74ff936-dirty`; the only dirty path is the
+untracked `.claude/worktrees/`. The run took 605 s on 24 CPU workers, plus 8 for `onnx_cuda`. It
+flew 21 712 episodes and traced 600.
+- Outputs are in `results/latency/closed_loop_investigation/`. `scripts/closed_loop_investigation.py
+  --check` reproduces every file byte for byte except the excluded `onnx_cuda` rows (§8).
+- **Nothing here changes P8-D1 §7, its verdict, or the Gate 8 criteria.** Closed-loop parity
+  remains **not met** (P8-D2 §4), and Gate 8 does not pass (user, 2026-10-05). The P3-D1 block
+  SHA-256 stays `21465588…`.
+
+**1. Validity of the instrument.**
+- The `torch` arm's rows are byte-identical to the committed e05/e06 rows: 238 of 238 for each of
+  the four policies.
+- Every traced episode's outcome equals its runner row (600 of 600).
+- Re-evaluating SB3 at batch 1 on the recorded inputs reproduces every recorded action bit for bit
+  (13 755 of 13 755 steps).
+- `onnx_noopt` passes P8-D1 §6 numeric parity on all 20 draws (`noopt_parity.csv`).
+- Arms on SS3–SS5 (E50's 38 episodes there): `onnx`, `onnx_noopt`, `onnx_cuda`, `torch_folded` and
+  `torch_fp64` flip **no** episode against `torch`. Every difference in this entry is in SS6.
+
+**2. Reading, by P8-D3's fixed rules applied mechanically: ROUNDING SENSITIVITY**
+(`verdict.csv`).
+- All five "rounding sensitivity" conditions hold, and none of the five "export defect"
+  conditions does.
+  - A1 max |Δa| = 9.5e-7 ≤ 1e-5.
+  - A2 |Δa(k0)| ≤ 3.6e-7 ≤ 1e-6.
+  - ‖Δp‖ grows ≥ 4 decades before touchdown in 3 of 3 flipped episodes.
+  - Every policy has flips(`onnx`) ≤ max_k flips(`ulp_k`).
+  - Pooled, 0 ONNX flips lie outside S.
+
+**3. A1, export error on the inputs actually flown** (`same_input.csv`). Every `torch` step of E50,
+re-evaluated on the identical input at batch 1:
+
+| policy | steps | ORT CPU max \|Δa\| | input-clip steps (max \|Δa\|) | output-clip steps (max \|Δa\|) | bit-identical to SB3 |
+|---|---|---|---|---|---|
+| `ppo` s0 | 3 079 | 4.8e-7 | 0 (—) | 0 (—) | 2 |
+| `ppo` s4 | 3 121 | 4.8e-7 | 8 (1.3e-7) | 0 (—) | 1 |
+| `residual_ppo_forecast` s0 | 3 790 | 8.3e-7 | 6 (1.8e-7) | 1 312 (8.3e-7) | 5 |
+| `residual_ppo_forecast` s4 | 3 765 | 9.5e-7 | 7 (1.5e-7) | 1 331 (4.6e-7) | 6 |
+
+- The export error on flown inputs is at the float32 rounding level everywhere, and it is not larger
+  in either clip regime.
+- `onnx_noopt` gives the same values as `onnx` in every column: ORT's graph optimisations change no
+  output on these inputs.
+
+**4. A2, how the trajectories diverge** (`trace_summary.csv`, `traces_T.csv.gz`; set T, 48
+policy-episodes).
+- *The very first act differs.* k0 = 0 in all 48 ONNX pairs, at |Δa(k0)| ≤ 3.6e-7. In the three
+  flipped episodes it is 2.5e-7, 1.2e-7 and 1.2e-7.
+- *The physics-state difference grows exponentially.*
+  - ‖Δp‖ goes from 1e-8 m to 1e-4 m in 8–36 control steps (median 19; 47 of 48 pairs reach
+    1e-4 m).
+  - A log-linear fit gives R² median 0.96 (min 0.83).
+  - The e-folding time has a median of **2.4 control steps** (range 0.9–6.7), about 80 ms model
+    scale.
+  - ‖Δp‖ crossed 1e-4 m before touchdown in 45 of 48 episodes. At touchdown it is a median
+    **8 mm** and a maximum of 26 mm.
+- *Flipped episodes look like the controls.* Their e-folding times (1.4, 3.0 and 2.0 steps), first
+  differences and growth fall inside the controls' ranges.
+- *No discontinuity.* The largest single-step jump of log10‖Δp‖ is 0.4–2.1 decades. 16 of 48 fall
+  at steps where a clip is active on the PyTorch trajectory, which is mostly the residual policy's
+  saturated output; same-input error there is ≤ 8.3e-7 (§3). None falls at a contact onset.
+- *`torch_folded` against `torch`* gives the same picture: k0 ∈ {0, 1}, e-folding median 2.2 steps,
+  ‖Δp‖ at touchdown median 5 mm.
+- *Reading.* The closed loop (policy, `DSLPIDControl` and PyBullet at 30 Hz) amplifies a 1e-7
+  action difference by about e every two control steps. Two float32 evaluations of the same policy
+  therefore land millimetres to centimetres apart. Where a touchdown sits near a classification
+  boundary, the class flips. In P8-D2 those touchdowns were at 12–16° relative tilt against the
+  15° limit.
+
+**5. B, why `torch_folded` flipped none on E50.**
+- It is **not** bit-identical to SB3: it agrees on only 6–22 of about 3 000–3 800 steps per policy
+  (`same_input.csv`). So it is a genuinely different float32 path.
+- On SS6-200 it flips 1, 3, 2 and 4 episodes (10 pooled), all in S (`flips.csv`).
+- Its 0 flips on E50 is therefore one draw, and it carries little information on its own.
+
+**6. C, ONNX against the rounding-noise distribution** (`noise_distribution.csv`; SS6-200;
+K = 20).
+
+| policy | ONNX flips | ulp-draw flips: min / median / max | ONNX rank | \|S\| | ONNX flips in S | success Δ ONNX (ulp range) |
+|---|---|---|---|---|---|---|
+| `ppo` s0 | 4 | 0 / 2 / 5 | 0.90 | 9 | 4 / 4 | 0 (−3 … +1) |
+| `ppo` s4 | 4 | 1 / 3 / 6 | 0.70 | 12 | 4 / 4 | −2 (−3 … +1) |
+| `residual_ppo_forecast` s0 | 4 | 2 / 4 / 8 | 0.58 | 16 | 4 / 4 | −2 (−5 … +1) |
+| `residual_ppo_forecast` s4 | 4 | 2 / 5 / 9 | 0.18 | 16 | 4 / 4 | −1 (−1 … +3) |
+| pooled (800) | 16 | 10 / 15 / 21 | 0.70 | 53 | 16 / 16 | −5 (−9 … +4) |
+
+- ONNX flips 2.0 % of SS6 episodes; a random one-ulp perturbation of the PyTorch input flips a
+  median 1.9 %. **Every ONNX flip is an episode that some ulp draw also flips.**
+- *The three P8-D2 episodes* flip under 4, 8 and 12 of the 20 ulp draws: `ppo` s0 SS6 #10, `ppo` s4
+  SS6 #9 and `residual_ppo_forecast` s4 SS6 #10 respectively.
+- 53 of 800 policy-episodes (6.6 %) at SS6 flip under at least one draw.
+- *Some committed float32 outcomes are themselves the minority class.* `ppo` s4 SS6 #140 flips in
+  19 of 20 draws, and `residual_ppo_forecast` s4 SS6 #48 in 20 of 20.
+
+**7. D, the float64 reference** (`flips.csv`, reference `torch_fp64`).
+- *On E50*, `torch_fp64` has the same outcome as float32 `torch` in all 200 episodes, so the three
+  ONNX flips are also flips against float64.
+- *On SS6-200*, float64 differs from float32 `torch`, the evaluated path, in 1, 2, 3 and 3 episodes
+  (9 of 800), all in S.
+  - Against float64: ONNX differs in 16, `torch_folded` in 9, and float32 `torch` in 9.
+- *Reading.* At the S-episodes the outcome class is not determined at float32 precision, and no
+  float32 path, the committed one included, is "the" answer there.
+
+**8. E, ORT settings** (`flips.csv`).
+- *`onnx_noopt`* has rows identical to `onnx` (outcome, steps, touchdown speeds, tilt) in all 952
+  policy-episodes. The optimisation level is irrelevant.
+- *`onnx_cuda` (TF32 off)*
+  - On E50 it flips the same three episodes. `ppo` s4 SS6 #9 ends as `bounce` there instead of
+    `hard_landing`.
+  - On SS6-200 it flips 3, 4, 5 and 6 (18 pooled, within the ulp range 10–21). 15 of those are in
+    S and **3 are not**: `ppo` s4 #176, `residual_ppo_forecast` s0 #102 and #178.
+  - This arm is descriptive under P8-D3 and does not enter the reading. Three of 18 outside S fits
+    S being estimated from 20 draws (an episode with flip probability 0.05 is missed with
+    probability 0.36), but it was not tested further.
+  - `torch_folded`, `torch_fp64` and ORT CPU have 0 flips outside S.
+- *Bit-reproducibility.* The CUDA rows are excluded from `--check` (P8-D3).
+
+**9. What the evidence supports, plainly.**
+- **No export defect was found.** The graph matches SB3 to ≤ 9.5e-7 on every flown input,
+  including both clip regimes. The ORT optimisation level makes no difference.
+- **The three P8-D1 §7 flips are explained by rounding sensitivity of the closed loop.** The
+  sequence is:
+  1. a ulp-level difference at the first act;
+  2. exponential growth with an e-folding time of about two control steps;
+  3. millimetre-to-centimetre differences at touchdown;
+  4. flips only at episodes that equally-valid float32 perturbations of the PyTorch path also flip,
+     at a rate indistinguishable from theirs.
+- **Strength.** Strong for "ONNX on ORT CPU is indistinguishable from ulp-level rounding noise on
+  these 238 episodes". The mechanical reading meets every condition with a wide margin: the
+  thresholds are 1e-5 and 1e-6, and the measured values are about 1e-6 and 4e-7.
+- **Limits.**
+  - It cannot exclude a defect that never fires on the flown inputs; P8-D2 §3's random-input
+    parity bounds that separately.
+  - S is a 20-draw estimate.
+  - This is one episode list, at λ = 1/25, in simulation.
+- **What it means for P8-D1 §7, descriptively (post hoc).** §7 asks for identical classes on 50
+  episodes. On E50's SS6 episodes:
+  - only 2 of the 20 random-ulp PyTorch paths would have passed it for all four policies;
+  - a median of 3 of 4 policies pass per draw;
+  - ONNX passed 1 of 4.
+
+  As written, §7 is failed by most equally-valid float32 evaluations of the committed policies.
+
+**10. Options for the user** (stated as options; nothing here is decided).
+- **(a)** Keep §7 and the gate as they are. Record closed-loop parity as not met, with this
+  attribution, carry it into the README as a limitation, and leave Gate 8 not passed.
+- **(b)** A dated deviation that restates closed-loop parity against the measured float32 floor.
+  For example: on a list fixed in advance, the deployed runtime's flip count lies within the range
+  of K independent ulp-perturbed PyTorch paths, and all its flips lie in the rounding-sensitive set.
+  - This is post hoc: the floor was measured after §7 failed. It would have to say so.
+  - ORT CPU meets it on the data above.
+- **(c)** A dated deviation that moves the closed-loop check from outcome identity to per-step
+  action parity along the flown trajectories (A1: ≤ 9.5e-7 against 1e-4). Outcome-rate equivalence
+  would be reported beside it.
+- *Not recommended:* choosing a different 50-episode set, or a different seed, until §7 passes. That
+  would be selection on the outcome.
+
+**11. Checks.**
+- `make bench-investigate-check` is byte-identical on all 8 files (the `onnx_cuda` rows of
+  `outcomes.csv` and `flips.csv` are excluded, as P8-D3 fixed). SHA-256 of the committed files:
+  - `outcomes.csv` `44cf31a2…`, `flips.csv` `97582756…`, `noise_distribution.csv` `11090cd0…`;
+  - `same_input.csv` `eff31d19…`, `trace_summary.csv` `86b40eb8…`, `traces_T.csv.gz` `372c6fcc…`;
+  - `noopt_parity.csv` `8a5722bf…`, `verdict.csv` `67a00991…`.
+- `make bench-check` still passes: selection, the graph SHA-256s, parity and the three closed-loop
+  files are unchanged.
+- `make test lint` is green: 760 passed, 1 skipped by design (`test_platform.py:191`), 829 s;
+  ruff, ruff-format and mypy --strict are clean.
+- The P3-D1 block SHA-256 is `21465588…`, unchanged.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|
