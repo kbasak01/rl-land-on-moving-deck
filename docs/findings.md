@@ -20,7 +20,7 @@ the DLinear-OLS forecaster stay outside it.
 
 | H | part | number | verdict |
 |---|---|---|---|
-| H5 | batch-1 p50, `ppo` graph: GPU provider / ORT CPU (1 thread) | ORT CUDA **4.72×** (0.217 vs 0.046 ms); ORT TensorRT **3.94×** (0.181 vs 0.046 ms); p99 5.57× and 6.97× | **supported** |
+| H5 | batch-1 p50, `ppo` graph: GPU provider / ORT CPU (1 thread) | ORT CUDA **4.72×** (0.217 vs 0.046 ms); ORT TensorRT **3.94×** (0.181 vs 0.046 ms); p99 5.57× and 6.97×; one measurement per configuration, no CI (a 20-iteration smoke read ORT CUDA 9.35×, P8-D2 addendum) | **supported** |
 
 ### 1. Parity
 
@@ -85,7 +85,8 @@ the DLinear-OLS forecaster stay outside it.
       |Δa| on the recorded inputs).
     - It is biased toward fewer successes, through the bounce channel: 16 of the 18 draws that
       change pooled success lower it, and success→bounce happens 65 times against 19 for
-      bounce→success.
+      bounce→success. This is pooled: for `residual_ppo_forecast` s4 the ulp draws raise success
+      (+16; 3 of 15 success-changing draws lower it).
     - On SS6-200, ONNX against `torch_folded` gives 18 flips and success −9, and against
       `torch_fp64` 16 flips and −6. For comparison, `torch_folded` and `torch_fp64` flip 10 and 9
       against `torch`.
@@ -177,7 +178,8 @@ No multiplicity correction was applied (P3-D4 #9).
     per-seed p95 vs a single run; `results/e07/matrix/aggregate.csv`,
     `results/e07/matrix/carried_summary_e01.csv`). That is an unpaired reading; no paired test was
     run.
-- **Residual RL beat the PID it is built on at SS6 (H1b), by a margin the bounce rule can erase.**
+- **Residual RL beat the PID it is built on at SS6 (H1b), by a margin the bounce rule can erase**
+  (see also Phase 8: rounding-level per-seed SS6 shifts of the same order as the margin).
   - *The numbers.* +6.0 [+2.0, +10.2] points at `id` SS6: 965/1 000 against 181/200. The line is
     5 points.
   - *What this cell is.* SS6 is outside every method's training distribution.

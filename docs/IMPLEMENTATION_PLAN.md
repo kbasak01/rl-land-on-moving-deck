@@ -654,6 +654,27 @@ committed; H5 scored.
 
 ### Phase 9 — Documentation, figures, release (1 day) · owner: main thread + `results-skeptic`
 
+**Before you start (added after Gate 8, 2026-10-05).**
+
+(a) **H5 is scored but not yet rendered.** `results/e07/hypotheses.csv` and `results/results.md` still read
+"pending". Do not edit the committed Phase 7 file; render H5 into `results.md` from
+`results/latency/h5.csv` via `scripts/report.py`, and keep `report.py --check` byte-reproducible.
+
+(b) **Carry both Phase 8 "Before you start" lists into the README:** items (d) from Gate 7 and (e) from
+Phase 8. Closed-loop parity is reported with both verdicts (P8-D1 §7 not met; post-hoc P8-D5 met for
+ORT CPU only, with its lenient-yardstick disclosure from P8-D6; ORT CUDA would fail it; TensorRT never
+flown closed loop). The H1b sentence must carry the float32-resolution caveat.
+
+(c) **Latency wording.** Quote only ratios measured here, one measurement per configuration, on a
+desktop RTX A4000 under WSL2. No embedded-target or real-flight implication. The e2e budget's
+deployed-side sum omits `DSLPIDControl`, which is booked with physics.
+
+(d) **`make all`** now includes a real `bench` stage; the Gate 9 dry-run must list it and
+`bench-investigate`.
+
+**First task:** render H5 into `results/results.md` from `results/latency/h5.csv` (report.py), then
+draft the README hypotheses and limitations sections from `docs/findings.md`.
+
 README (Project 4 structure: headline figure → results tables with baselines → hypotheses →
 limitations → reproduce), landing GIFs, `docs/findings.md`, `docs/protocol.md`, citations,
 `THIRD_PARTY_NOTICES.md` (gym-pybullet-drones MIT, dmf MIT). `/full-audit` run last.
