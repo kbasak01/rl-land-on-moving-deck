@@ -5323,6 +5323,93 @@ K = 20).
   ruff, ruff-format and mypy --strict are clean.
 - The P3-D1 block SHA-256 is `21465588…`, unchanged.
 
+### P8-D5 — DEVIATION (post hoc, user, option b): closed-loop parity judged against the measured float32 noise floor (2026-10-05)
+
+*Status.* **This is a deviation, and it is post hoc.**
+- The user decided it on 2026-10-05, choosing option (b) of P8-D4 §10, **after** P8-D2 §4 (closed
+  loop not met) and P8-D4 (the investigation's results) had been read.
+- The criterion below was written knowing that ORT CPU meets it.
+- P8-D1 §7 is **not** edited or removed, and P8-D2 and P8-D4 stand as written.
+- No other threshold or gate criterion changes. The P3-D1 block SHA-256 stays `21465588…`.
+
+**1. The original verdict, kept beside it.** *P8-D1 §7 as written: **not met** (3 of 4 policies at
+49/50; P8-D2 §4).*
+
+**2. The deviation's criterion.** It is judged on the episode list P8-D3 already fixed, before any
+of its outcomes were seen: **SS6-200**, the whole frozen `id` SS6 cell (`index` 0–199, aft pad,
+JONSWAP, noise off, λ = 1/25). E50's 12 SS6 episodes are reported beside it and are not judged.
+For each of the four exported policies (`ppo` s0, s4; `residual_ppo_forecast` s0, s4), the
+runtime passes closed-loop parity when both of the following hold.
+- **(i)** flips(runtime) ≤ max over k of flips(`ulp_k`). A flip is an episode whose outcome class
+  differs from the committed float32 PyTorch path (`torch`, byte-identical to e05/e06).
+- **(ii)** Every runtime flip lies in S. S is the set of SS6-200 episodes that flip under at
+  least one `ulp_k`.
+
+The noise paths are fixed by P8-D3:
+- **K = 20** paths `ulp_1` … `ulp_20`;
+- each is the unchanged SB3 float32 path with every raw input entry independently nudged one
+  float32 ulp up or down (probability ½) at every step;
+- the generator is `np.random.default_rng(SeedSequence([20261005, k, episode_seed]))`, re-created
+  at every episode reset.
+
+**3. Scope.**
+- **ORT CPU is the closed-loop provider.** It is the provider P8-D1 §7 flies (1 thread, default
+  optimisations) and the one the end-to-end budget uses. It is the only provider judged here.
+- **ORT CUDA is descriptive only and is not judged under this criterion.** On SS6-200 it flips 18
+  episodes pooled, and **3 of those 18 lie outside S**: `ppo` s4 #176, `residual_ppo_forecast` s0
+  #102 and #178. This is **not a pass**. It is not a fail under P8-D5 either; it was not evaluated
+  against this criterion.
+- `onnx_noopt` (ORT CPU with optimisations disabled) produced rows identical to ORT CPU
+  (P8-D4 §8). It is recorded, not judged separately.
+- No other provider was flown in closed loop.
+
+**4. Verdict, ORT CPU** (from the committed `results/latency/closed_loop_investigation/
+noise_distribution.csv`, unchanged):
+
+| policy | flips(ORT CPU), SS6-200 | max_k flips(`ulp_k`) | (i) | \|S\| | ORT CPU flips in S | (ii) | P8-D5 |
+|---|---|---|---|---|---|---|---|
+| `ppo` s0 | 4 | 5 | yes | 9 | 4 / 4 | yes | **pass** |
+| `ppo` s4 | 4 | 6 | yes | 12 | 4 / 4 | yes | **pass** |
+| `residual_ppo_forecast` s0 | 4 | 8 | yes | 16 | 4 / 4 | yes | **pass** |
+| `residual_ppo_forecast` s4 | 4 | 9 | yes | 16 | 4 / 4 | yes | **pass** |
+
+- |S| is 53 of 800 policy-episodes in total (6.6 %).
+- *E50, reported and not judged.* ORT CPU flips 1, 1, 0 and 1 of the 12 E50 SS6 episodes against
+  per-policy noise maxima of 2, 2, 0 and 1 there, and each flip is in S. E50's 38 SS3–SS5 episodes
+  have no flip under any arm flown there. The `ulp_k` paths were not flown on SS3–SS5.
+- **Closed-loop parity under P8-D5: met for ORT CPU, all four policies.**
+- **P8-D1 §7 as written: not met.** Both verdicts stand side by side. Which one Gate 8 reads is the
+  gate's business; this entry does not run the gate.
+
+**5. Limitations.**
+- **S is a 20-draw estimate.** An episode whose flip probability under one-ulp noise is p is missed
+  with probability (1 − p)^20, which is 0.36 at p = 0.05. (ii) is therefore as strong as S is
+  complete.
+- **Inputs never flown are bounded only by the random-input parity** of P8-D2 §3 (1 000 × 5 draws,
+  max error ≤ 9.5e-7). The criterion says nothing about states the policies did not visit.
+- **One list, in simulation.** It is one frozen SS6 cell at λ = 1/25, aft pad, noise off, on this
+  machine's float32 kernels. It is not a real-flight or real-hardware statement.
+- **Post hoc.** The noise floor was measured after §7 failed, and the criterion was chosen with ORT
+  CPU's result in view.
+
+**6. Carried to the README (Phase 9).** Recorded in the plan's Phase 8 note and in
+`docs/findings.md`: outcome classes at SS6 near the 15° tilt limit are not determined at float32
+precision. About 6.6 % of SS6-200 policy-episodes are rounding-sensitive (53 of 800 flip under at
+least one of 20 one-ulp perturbations).
+- This qualifies the per-episode resolution of every committed SS6 success count.
+- *For example:* one one-ulp noise draw changes the class of a median of 2–5 of a policy's 200
+  SS6 episodes (P8-D4 §6). The float64 reference differs from the committed float32 path on 9 of
+  800 (P8-D4 §7).
+
+**7. Files.** No result file is changed: the verdict is read from the committed P8-D3 outputs.
+`make bench-check`, `make bench-investigate-check` and `make test lint` were re-run on this
+entry's tree.
+- `bench-check`: OK.
+- `bench-investigate-check`: byte-identical on all 8 files.
+- `make test lint`: 760 passed, 1 skipped by design (`test_platform.py:191`), 819 s; ruff,
+  ruff-format and mypy --strict clean.
+- The P3-D1 block SHA-256 is `21465588…`, unchanged.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|

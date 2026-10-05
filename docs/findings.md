@@ -67,6 +67,19 @@ the DLinear-OLS forecaster stay outside it.
   - *What it cannot show.* It cannot rule out a defect on inputs that were never flown; the
     random-input parity above bounds that. Options for the gate are listed in P8-D4 §10 and are
     the user's.
+- **Deviation P8-D5 (post hoc; user, option b, 2026-10-05).** Closed-loop parity is judged against
+  the measured float32 noise floor on SS6-200. For each policy two things must hold: the runtime's
+  flips are no more than the maximum of K = 20 one-ulp-perturbed PyTorch paths, and every runtime
+  flip lies in the rounding-sensitive set S.
+  - *ORT CPU: met for all four policies.* It flips 4, 4, 4 and 4, against maxima of 5, 6, 8 and 9,
+    and all 16 flips lie in S (|S| = 9, 12, 16 and 16).
+  - *ORT CUDA is descriptive only and not judged.* 3 of its 18 flips lie outside S.
+  - *P8-D1 §7 as written stays **not met*** (3 of 4 policies at 49/50). Both verdicts are
+    reported.
+- **Carry to the README (Phase 9).** Outcome classes at SS6 near the 15° tilt limit are not
+  determined at float32 precision. About 6.6 % of SS6-200 policy-episodes are rounding-sensitive
+  (53 of 800 flip under at least one of 20 one-ulp perturbations). This qualifies the per-episode
+  resolution of every committed SS6 success count.
 
 ### 2. Latency and the control budget
 

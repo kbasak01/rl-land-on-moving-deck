@@ -627,6 +627,13 @@ readings that are easy to overstate:
 - the white-noise perception arm, whose σ is larger than the deck motion at SS3–SS4;
 - unaudited tunnelled successes outside clean `id`.
 
+(e) **Carry into the README (Phase 9), from Phase 8 (P8-D5, added 2026-10-05).** Outcome classes at
+SS6 near the 15° tilt limit are not determined at float32 precision. About 6.6 % of SS6-200
+policy-episodes are rounding-sensitive (53 of 800 flip under at least one of 20 one-ulp input
+perturbations; P8-D4 §6). This qualifies the per-episode resolution of every committed SS6 success
+count. Report closed-loop parity with both verdicts: P8-D1 §7 as written, not met; P8-D5's post-hoc
+noise-floor criterion, met for ORT CPU; ORT CUDA not judged.
+
 **First task:** export the `ppo` actor (seed 0) with the `VecNormalize` mean and variance folded into
 the graph, opset 18, dynamic batch, and pass the 1 000 × 5 parity on ORT CPU.
 
