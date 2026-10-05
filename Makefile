@@ -36,7 +36,7 @@ BENCH_WORKERS ?= 16
 
 .PHONY: test lint format throughput throughput-landing env-sanity \
         deck-stats baselines dmf-forecasters forecast-report mss-export train-bg sweep tune eval bench \
-        bench-check report all
+        bench-check bench-investigate bench-investigate-check report all
 
 # --- implemented ------------------------------------------------------------------
 
@@ -163,6 +163,10 @@ eval:
 # with the committed files; latency, e2e and H5 are measurements and are not byte-checked.
 bench:       ; $(PY) scripts/bench.py --workers $(BENCH_WORKERS)
 bench-check: ; $(PY) scripts/bench.py --check --workers $(BENCH_WORKERS)
+# P8-D3 closed-loop parity investigation (about 22 000 short episodes; run in the background).
+# `--check` re-runs it and byte-compares everything but the onnx_cuda rows.
+bench-investigate:       ; $(PY) scripts/closed_loop_investigation.py --workers $(WORKERS)
+bench-investigate-check: ; $(PY) scripts/closed_loop_investigation.py --check --workers $(WORKERS)
 # Phase 7/9 -- eval-auditor: re-render results/results.md from the committed CSVs only
 # (`$(PY) scripts/report.py --check` re-renders and compares bytes, writing nothing).
 report:          ; $(PY) scripts/report.py
