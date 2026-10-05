@@ -3993,7 +3993,7 @@ written in `results/e07/hypotheses.csv` (`d5a82daa…`), and every contrast behi
 | H3 | secondary: `unseen_vessel` SS5 half-rule | `unseen_vessel` vs `id` SS5 | same | r(uv) −2.0 % [−3.6, −0.3]; r(id) −0.8 % | half-rule | **not applicable — no id gain to shrink** | P7-D1 §2: r(`id`) ≤ 0 |
 | H3 | secondary: `unseen_vessel` SS6 half-rule | `unseen_vessel` vs `id` SS6 | same | r(uv) +0.04 % [−1.9, +2.6] ≤ 0.5 × r(id) = 0.5 × 1.88 % = 0.94 % | half-rule | **holds** (relabelled "not scored (no supported id gain)" in P7-D5) | P7-D1 §2, judged on point estimates |
 | H4 | drop difference | `id` SS5 | drop_sin − drop_jon, mean paired success, one shared episode set | **+0.0** [+0.0, +0.0]; all four legs 1 000/1 000 | ≥ +10 points | **not supported** | P7-D1a #1: lower bound 0 is not > 0 |
-| H5 | ORT CPU vs GPU p50 latency | batch 1 | — | — | ≥ 2× | **pending — scored at Gate 8** (scored in P8-D2 §7: **supported**, CUDA 4.72×, TensorRT 3.94×) | P7-D1 §7 |
+| H5 | ORT CPU vs GPU p50 latency | batch 1 | — | — | ≥ 2× | **pending — scored at Gate 8** → scored at Gate 8, P8-D2 | P7-D1 §7 |
 
 No combined H1 or H3 verdict exists (P3-D4 #5, P7-D1a #2).
 
@@ -4026,7 +4026,7 @@ No combined H1 or H3 verdict exists (P3-D4 #5, P7-D1a #2).
   every seed. At SS6 the two read 97.3 % and 98.2 % (IQM). That SS6 comparison is unpaired between
   methods and not tested.
 
-**4. H5** is "pending — scored at Gate 8" (P7-D1 §7; the user's decision of 2026-10-01). *(Scored at Gate 8 in P8-D2 §7: supported.)*
+**4. H5** is "pending — scored at Gate 8" (P7-D1 §7; the user's decision of 2026-10-01). → scored at Gate 8, P8-D2.
 
 **5. No multiplicity correction** is applied across H1a, H1b, H2, H3 and H4 (P3-D4 #9).
 - All contrasts share bootstrap seed 20260926, so their replicate draws are correlated (P7-D1a #11).
@@ -4941,7 +4941,7 @@ one child process per configuration, TF32 off on every row. Selected rows, milli
   interpreter and the torch import (dmf's caveat). The TensorRT rows reach 2.48 GiB host and
   368 MiB device.
 
-**6. End-to-end control-step budget** (`e2e_budget.csv`). In real episodes: the 50 §7 episodes,
+**6. End-to-end control-step budget** (`e2e_budget.csv`). In full simulated episodes: the 50 §7 episodes,
 ONNX policy, one process, one thread, one untimed warmup episode. Milliseconds per control step,
 against the 33.3 ms period:
 
@@ -4960,6 +4960,10 @@ against the 33.3 ms period:
 | | ship-motion feed `advance_to` (residual) | 0.547 | 0.742 | |
 
 - The p50 and p99 of the sum are taken over per-step sums, not summed percentiles.
+- **The velocity tracker is in the simulation bucket.** `DSLPIDControl.computeControl`
+  (velocity setpoint to motor RPM) runs inside `env.step`, so "physics step" includes it, and the
+  deployment sum omits a component of the deployed control stack. It was not re-timed. *(Added at
+  the Gate 8 review, m4.)*
 - In the loop the policy call costs about twice its microbenchmark (0.095 against 0.046 ms p50).
   The likely cause is cache state between physics steps; it was not isolated. The in-loop figure
   is what the loop pays.
@@ -4982,10 +4986,11 @@ at 1 thread (p50 0.0460 ms, p99 0.0824 ms):
 - *Caveats.*
   - These are ratios of rows measured on this machine only: an RTX A4000 and an i9-10980XE under
     WSL2, with one measurement per configuration and no CI.
-  - The GPU rows include the host-device copies by design (host to host, P8-D1 §5). For a
-    0.5-MFLOP MLP those copies and the launches dominate.
-  - The A4000 stands in for an embedded GPU. **Nothing here measures an embedded target, and
-    nothing implies real flight.**
+  - The GPU rows include the host-device copies by design (host to host, P8-D1 §5). The likely
+    causes of the GPU penalty were not measured separately: host↔device copies over PCIe and
+    kernel launches dominating a 0.5-MFLOP MLP, and WSL2's GPU paravirtualisation.
+  - The rows are from a desktop RTX A4000 under WSL2. **No embedded target was measured, and
+    nothing implies real flight.** *(Wording corrected at the Gate 8 review, m1/m2.)*
 
 **8. Additions to and readings of P8-D1, recorded.**
 1. The closed-loop controls in §4 and `closed_loop_controls.csv` are new and post hoc. `--check`
@@ -5015,6 +5020,68 @@ at 1 thread (p50 0.0460 ms, p99 0.0824 ms):
   still reads "pending" there until the Phase 9 render. The P3-D1 block SHA-256 is
   `21465588…`, unchanged.
 - *Not done here:* the `results-skeptic` review and `/phase-gate 8`.
+
+**Addendum (2026-10-05, Gate 8 review MJ3, m1, m6).** This is added to P8-D2. The text above is
+unchanged except for the m1/m2/m4 wording marked in §6 and §7.
+
+*Runs before the recorded one (MJ3).* §"Status" says `make bench` ran once, from `96d5f5d`. That is
+true of the recorded run, but it was not the first time the stages ran.
+- **Before P8-D1.** At 09:28 EDT, a prototype exported `ppo` s4 and ran one parity draw on ORT CPU,
+  CUDA and TensorRT and on torch CPU and CUDA. P8-D1's preamble records it. Nothing was timed.
+- **Between `2f24763` (P8-D1, 09:30:54) and `96d5f5d` (09:54:35).** These ran from uncommitted
+  code in `src/rld/deploy/`. Outputs went to the session's scratch directory and were never
+  committed. All times are EDT, 2026-10-05.
+  1. *09:40:49–09:41:14*, `bench.py --stage selection export parity`.
+     - Seen: the median seeds (4, 4) and the four graphs.
+     - Seen: all parity rows pass, with worst max error per graph 5.4e-7, 5.4e-7, 9.5e-7 and
+       8.3e-7.
+  2. *About 09:41:52*, `--stage closed-loop`, before the controls existed. Seen: 49, 49, 50 and
+     49 of 50, with the same three flips as P8-D2 §4. This is the "first closed-loop result" that
+     `closed_loop.py`'s docstring refers to.
+  3. *About 09:42–09:44*, a scratch script flew the `torch_folded` and `+1 ulp` controls on E50.
+     Seen: the result now in `closed_loop_controls.csv`. The controls were then added to
+     `closed_loop.py`, and a scratch `--stage closed-loop` at 09:45:50 reproduced both results.
+  4. *09:46:08–09:49:19*, a harness smoke test, `--stage latency --warmup-iters 5
+     --timed-iters 20`. That is 20 timed iterations, not the method's 2 000.
+     - All 44 configurations ran, and their numbers were seen.
+     - So was the smoke `h5.csv`: "supported", with ORT CUDA 9.35× and TensorRT 3.75× against
+       ORT CPU at batch-1 p50 (0.049 ms).
+     - These numbers are not reported anywhere. **H5 was therefore seen once, at a reduced
+       iteration count, before the recorded run.** P8-D1, with H5's rule, had been committed
+       16 minutes earlier, and nothing in it changed afterwards.
+  5. *09:49:36–09:50:05*, an e2e smoke, `--stage e2e`. Seen: deployment-sum p50 of 0.19 ms
+     (`ppo`) and 0.85 ms (`residual_ppo_forecast`).
+  6. Then the tests and lint, the commit `96d5f5d`, and the recorded `make bench` (09:54:47–
+     09:59:39).
+- *Code changes after the smoke tests.* To my record, no file under `src/rld/deploy/` changed
+  after the latency smoke at 09:46. The edits between it and `96d5f5d` were the tests and the
+  Makefile.
+- *Disclosure gap.* These runs should have been recorded in this entry when it was written. They
+  were not.
+
+*P8-D1 §5's test claim, corrected (m6).* P8-D1 §5 says "a test pins the rank-2 loop's structure
+(warmup count, timed count, refusal, synchronisation)". At `96d5f5d` that over-stated the tests.
+- *What was pinned:* `BenchConfig`'s 200 / 2 000 / `synchronize=True` defaults and the job's
+  configuration, the refusal of parity-refused configurations, and the refusal of unsynchronised
+  CUDA torch timing.
+- *What was not tested:* the ORT loop's per-iteration synchronisation, and its refusal of a
+  silently-fallen-back provider.
+- *Added at the Gate 8 review:* `test_ort_gpu_path_synchronises_every_timed_iteration` covers both,
+  using a fake GPU session. It checks warmup and timed call counts, one synchronise after the warmup
+  and one after every timed iteration, and the refusal when the session realizes CPU.
+
+*P8-D1's wording (m1, m2).* P8-D1 is a pre-registration and is not edited. Read its "stand in for
+an embedded flight computer" (§10) as "a desktop RTX A4000 and i9-10980XE under WSL2; no embedded
+target was measured". Read "real environment episodes" (§9) as "full simulated episodes".
+
+*`h5.csv` (review NOTE, m5).*
+- The torch-eager CUDA context row now reads `verdict = context (not scored)` instead of
+  `supported`. It was re-scored from the committed `latency.json` and `latency.csv` through the
+  pipeline's render path (`bench.py --stage h5`). Nothing was re-timed, and the two scored rows
+  are byte-identical.
+- `score_h5` now returns "not scored" when a GPU provider that passed parity was not timed; it
+  previously dropped such a row. No row of this run is in that state: 44 of 44 were timed.
+- `bench.py --check` now re-scores `h5.csv` and compares bytes.
 
 ### P8-D3 — Closed-loop parity investigation: design, fixed before any new outcome is seen (2026-10-05)
 
@@ -5265,9 +5332,15 @@ K = 20).
     `hard_landing`.
   - On SS6-200 it flips 3, 4, 5 and 6 (18 pooled, within the ulp range 10–21). 15 of those are in
     S and **3 are not**: `ppo` s4 #176, `residual_ppo_forecast` s0 #102 and #178.
-  - This arm is descriptive under P8-D3 and does not enter the reading. Three of 18 outside S fits
-    S being estimated from 20 draws (an episode with flip probability 0.05 is missed with
-    probability 0.36), but it was not tested further.
+  - This arm is descriptive under P8-D3 and does not enter the reading.
+  - *How unusual 3 of 18 outside S is.* This sentence replaced the earlier one at the Gate 8
+    review (MJ2); the earlier wording, now withdrawn, read "Three of 18 outside S fits S being
+    estimated from 20 draws". The leave-one-out check (`posthoc_loo.csv`, post hoc):
+    - A noise draw flips an episode outside the S built from the other 19 draws in **9 of 291**
+      of its flips (3.1 %).
+    - If ORT CUDA behaved like one more noise draw, P(≥ 3 of its 18 flips outside S) = **0.017**.
+    - So ORT CUDA's flips are **not** well described as one-ulp noise at this resolution. Why was
+      not investigated.
   - `torch_folded`, `torch_fp64` and ORT CPU have 0 flips outside S.
 - *Bit-reproducibility.* The CUDA rows are excluded from `--check` (P8-D3).
 
@@ -5359,9 +5432,14 @@ The noise paths are fixed by P8-D3:
   episodes pooled, and **3 of those 18 lie outside S**: `ppo` s4 #176, `residual_ppo_forecast` s0
   #102 and #178. This is **not a pass**. It is not a fail under P8-D5 either; it was not evaluated
   against this criterion.
+  - *Added at the Gate 8 review (MJ2).* Had it been judged, (ii) would **fail for 2 of 4
+    policies**: `ppo` s4 (#176) and `residual_ppo_forecast` s0 (#102, #178).
+  - **ORT CUDA was scoped out after this was seen.**
+  - Leave-one-out: P(≥ 3 of 18 outside S) = 0.017 if CUDA were one more noise draw (P8-D4 §8).
 - `onnx_noopt` (ORT CPU with optimisations disabled) produced rows identical to ORT CPU
   (P8-D4 §8). It is recorded, not judged separately.
-- No other provider was flown in closed loop.
+- No other provider was flown in closed loop. **ORT TensorRT and torch-eager CUDA were never flown
+  closed loop**, so they have numeric parity only (P8-D2 §3).
 
 **4. Verdict, ORT CPU** (from the committed `results/latency/closed_loop_investigation/
 noise_distribution.csv`, unchanged):
@@ -5382,6 +5460,25 @@ noise_distribution.csv`, unchanged):
   gate's business; this entry does not run the gate.
 
 **5. Limitations.**
+- **The floor is a larger, biased yardstick** (added at the Gate 8 review, MJ1; post hoc,
+  `posthoc_same_input.csv`, `posthoc_bias.csv`).
+  - *It is larger.* The floor is a per-step dithering perturbation. On the recorded E50 inputs, one
+    ulp-perturbed SB3 call moves the action by a median **2.0, 2.0, 4.0 and 2.25×** the ONNX
+    difference (max |Δa| 1.0e-6, 1.0e-6, 4.4e-6 and 2.5e-6, against ONNX's 4.8e-7, 4.8e-7, 8.3e-7
+    and 9.5e-7).
+  - *It is biased toward fewer successes, through the bounce channel.* Of the 18 pooled draws that
+    change success, 16 lower it. Across all draws, success→bounce happens 65 times against 19 for
+    bounce→success.
+  - *ONNX against the near-unbiased float32/float64 paths, on SS6-200:*
+    - ONNX against `torch_folded`: 18 flips, success −9.
+    - ONNX against `torch_fp64`: 16 flips, success −6.
+    - For context, against `torch`: ONNX flips 16 (success −5), `torch_folded` 10 (+4) and
+      `torch_fp64` 9 (+1).
+  - ONNX's 16 flips lie above `torch_folded`'s 10 and `torch_fp64`'s 9, and inside the ulp draws'
+    10–21.
+  - The criterion's yardstick is therefore more lenient than a perturbation matched to the export
+    error would be, and it leans the same way ONNX does. No matched-size or unbiased floor was
+    flown.
 - **S is a 20-draw estimate.** An episode whose flip probability under one-ulp noise is p is missed
   with probability (1 − p)^20, which is 0.36 at p = 0.05. (ii) is therefore as strong as S is
   complete.
@@ -5400,6 +5497,7 @@ least one of 20 one-ulp perturbations).
 - *For example:* one one-ulp noise draw changes the class of a median of 2–5 of a policy's 200
   SS6 episodes (P8-D4 §6). The float64 reference differs from the committed float32 path on 9 of
   800 (P8-D4 §7).
+- *H1b (added at the Gate 8 review, MJ4).* H1b's 1.0-point margin at `id` SS6 is of the same order as the rounding-level per-seed shifts in SS6 success measured here: −2.5 to +1.5 points under one-ulp noise and −0.5 to +1.5 under the float64 reference, per seed of the exported policies. `residual_ppo` itself was not re-flown, and about 30 % of flip events (88 of 291 ulp flips) go through the bounce channel, the rule H1b is already noted to be fragile to.
 
 **7. Files.** No result file is changed: the verdict is read from the committed P8-D3 outputs.
 `make bench-check`, `make bench-investigate-check` and `make test lint` were re-run on this
@@ -5407,6 +5505,115 @@ entry's tree.
 - `bench-check`: OK.
 - `bench-investigate-check`: byte-identical on all 8 files.
 - `make test lint`: 760 passed, 1 skipped by design (`test_platform.py:191`), 819 s; ruff,
+  ruff-format and mypy --strict clean.
+- The P3-D1 block SHA-256 is `21465588…`, unchanged.
+
+### P8-D6 — Gate 8 review fold-in (MJ1–MJ4, m1–m7, NOTE) (2026-10-05)
+
+*Status.* The `results-skeptic` reviewed Phase 8 at `ebb9aae` and found 0 BLOCKING, 5 MAJOR and
+7 MINOR issues. This entry indexes what was changed.
+- **No criterion, no P8-D5 rule and no verdict changes:**
+  - P8-D1 §7 is not met;
+  - P8-D5 is met for ORT CPU, with ORT CUDA not judged;
+  - H5 is supported;
+  - the P8-D3 reading is "rounding sensitivity".
+- Every addition is disclosure. The ones computed after the results were read are labelled post
+  hoc. The P3-D1 block SHA-256 stays `21465588…`.
+- *Commits.*
+  - `46f7e55`: code and tests.
+  - `628e460`: results. The investigation was re-run at `46f7e55`; every earlier file reproduced
+    byte for byte, and only `run_info.json` (wall times, stamp `46f7e55-dirty`, from docs and
+    result edits in the working tree) and the three new post-hoc files changed.
+  - This entry's commit: the docs.
+- MJ5 is the coordinator's (the Gate 8 row); nothing was done for it here.
+
+**MJ1 — the ulp floor is larger than, and biased against, the export error.**
+- (a) New, post hoc: `posthoc_same_input.csv`. On the recorded E50 inputs, |Δa| against the
+  recorded float32 SB3 action, median / max:
+
+| policy | ONNX | one-ulp SB3 call (k = 1…20) | ratio of medians | `torch_folded` | `torch_fp64` |
+|---|---|---|---|---|---|
+| `ppo` s0 | 6.0e-8 / 4.8e-7 | 1.2e-7 / 1.0e-6 | 2.0 | 4.5e-8 / 3.6e-7 | 1.7e-8 / 1.4e-7 |
+| `ppo` s4 | 6.0e-8 / 4.8e-7 | 1.2e-7 / 1.0e-6 | 2.0 | 3.0e-8 / 3.0e-7 | 1.6e-8 / 1.4e-7 |
+| `residual_ppo_forecast` s0 | 8.9e-8 / 8.3e-7 | 3.6e-7 / 4.4e-6 | 4.0 | 7.8e-8 / 8.0e-7 | 2.1e-8 / 2.0e-7 |
+| `residual_ppo_forecast` s4 | 8.9e-8 / 9.5e-7 | 2.0e-7 / 2.5e-6 | 2.25 | 6.0e-8 / 9.8e-7 | 1.9e-8 / 1.9e-7 |
+
+  The skeptic's scratch figures were on 2 000 random inputs; these are on the flown ones. The ratio
+  of medians is 2–4× here, against the skeptic's 3.4–3.9×. The direction is the same.
+- *Bias* (`posthoc_bias.csv`, SS6-200):
+  - Of the 18 pooled ulp draws that change success, **16 lower it**. The skeptic counted 15; 16 is
+    the recount from `outcomes.csv`.
+  - success→bounce happens 65 times against 19 for bounce→success.
+  - ONNX against `torch_folded`: 18 flips, success −9. Against `torch_fp64`: 16 flips, −6.
+  - Against `torch`: ONNX 16 (−5), `torch_folded` 10 (+4), `torch_fp64` 9 (+1).
+- (b) `closed_loop.py`'s docstring no longer claims the `+1 ulp` control is "the same size" as the
+  export error.
+- (c) Added to P8-D5 §5 and `findings.md`.
+
+**MJ2 — the CUDA wording.**
+- P8-D4 §8's "fits S being a 20-draw estimate" is replaced, and the old wording is quoted there.
+- The new text gives the leave-one-out figure (`posthoc_loo.csv`). Verified: a noise draw lands
+  outside the S of the other 19 draws in **9 of 291** flips (3.09 %). So P(≥ 3 of 18) =
+  **0.0170**.
+- P8-D5 §3 now says that (ii) would fail for 2 of 4 policies (`ppo` s4 #176;
+  `residual_ppo_forecast` s0 #102 and #178), and that ORT CUDA was scoped out after this was seen.
+- It also says ORT TensorRT and torch-eager CUDA were never flown closed loop.
+
+**MJ3 — runs before the recorded one.** A dated addendum to P8-D2 lists them, with times and what
+was seen. In short, between `2f24763` and `96d5f5d`, from uncommitted code into the scratch
+directory:
+- selection, export and parity (all pass);
+- the closed loop (the same three flips);
+- the two controls;
+- a latency smoke at 20 timed iterations: all 44 configurations, and a smoke H5 of "supported",
+  9.35× and 3.75×;
+- an e2e smoke.
+
+P8-D1 had been committed before all of these. To my record, no deploy code changed after the
+latency smoke.
+
+**MJ4 — H1b.** One sentence, in P8-D5 §6, plan Phase 8 (e) and `findings.md`:
+- H1b's 1.0-point margin is of the same order as the rounding-level per-seed SS6 shifts: −2.5 to
+  +1.5 points under ulp noise, −0.5 to +1.5 under float64;
+- `residual_ppo` was not re-flown;
+- 88 of 291 ulp flips (30 %) go through the bounce channel.
+
+**MINOR.**
+- **m1, m2.** "Stand in for an embedded GPU / flight computer" became "a desktop RTX A4000 under
+  WSL2; no embedded target was measured", and "real episodes" became "full simulated episodes".
+  - Changed in `findings.md`, P8-D2 §6–7, `src/rld/deploy/__init__.py` and `e2e.py`.
+  - The likely causes of the GPU penalty are named as likely and unmeasured: PCIe copies and
+    launches for a tiny MLP, and WSL2 GPU paravirtualisation.
+  - P8-D1 is a pre-registration and is not edited; the P8-D2 addendum gives the reading.
+- **m3.** In `findings.md`, 6.6 % is now attributed to the ulp-union S, and float64-vs-float32 to
+  9/800 = 1.1 %.
+- **m4.** P8-D2 §6, `findings.md` and the `e2e.py` docstring now say that
+  `DSLPIDControl.computeControl` is inside `env.step`, so it is booked as physics, and the
+  deployment sum omits it. It was not re-timed.
+- **m5.** `score_h5` returns "not scored" if a GPU provider passes parity but is not timed. This
+  is tested (`test_h5_context_row_and_failed_gpu_row`). All 44 of 44 rows were timed, so the
+  scored rows of `h5.csv` are byte-identical.
+- **m6.** The P8-D2 addendum corrects P8-D1 §5's test claim. A structural test of the ORT GPU
+  sync and refusal path was added (`test_ort_gpu_path_synchronises_every_timed_iteration`).
+- **m7.** The P7-D3 H5 rows in `protocol.md` (the table row and §4) and the Phase 7 H5 table row
+  and bullet in `findings.md` are restored to the `908aed8` text, plus "→ scored at Gate 8,
+  P8-D2". `git diff 908aed8` on those lines shows only the appended forward reference.
+- **NOTE.** In `h5.csv`, the torch-eager CUDA row reads `verdict = context (not scored)`. It was
+  re-scored through `bench.py --stage h5` from the committed `latency.json` and `latency.csv`,
+  with nothing re-timed. `bench.py --check` now re-scores and compares `h5.csv`.
+
+**New file SHA-256.**
+- `posthoc_same_input.csv` `7f0bc3e4…`, `posthoc_bias.csv` `dc2aaaf9…`, `posthoc_loo.csv`
+  `fceb731b…`.
+- `h5.csv` `01e458ef…`, superseding `20af1666…` (P8-D2 §9); only the context row's last column
+  changed.
+
+**Checks** (at `628e460`, with this entry's docs in the working tree).
+- `make bench-check`: OK. It found selection, the four graph SHA-256s, parity and the three
+  closed-loop files byte-identical, and the `h5.csv` re-score byte-identical.
+- `make bench-investigate-check`: byte-identical on all 11 files, the three post-hoc files
+  included.
+- `make test lint`: 763 passed, 1 skipped by design (`test_platform.py:191`), 803 s; ruff,
   ruff-format and mypy --strict clean.
 - The P3-D1 block SHA-256 is `21465588…`, unchanged.
 
