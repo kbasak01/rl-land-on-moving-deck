@@ -748,7 +748,9 @@ def score_h5(rows: Sequence[LatencyRow], architecture: str) -> tuple[str, list[l
 
     Returns:
         ``(verdict, table rows)``: one row per GPU configuration at batch 1 (ORT CUDA and ORT
-        TensorRT scored; torch-eager CUDA as context), with ratios ``other / ORT CPU``.
+        TensorRT scored; torch-eager CUDA as context), with ratios ``other / ORT CPU``. A
+        context row's ``verdict`` reads ``"context (not scored)"``. A scored provider that passed
+        parity but was not timed makes the verdict ``"not scored - ..."``.
 
     Raises:
         ValueError: If the ORT CPU batch-1 1-thread row was not timed.
@@ -776,11 +778,19 @@ def score_h5(rows: Sequence[LatencyRow], architecture: str) -> tuple[str, list[l
         (find("torch-eager", "cuda"), False),
     ]
     scored_ratios: list[float] = []
+    unscorable: list[str] = []
     table: list[list[str]] = []
     for other, scored in others:
         if other is None:
+            if scored:
+                unscorable.append("a GPU provider row is missing")
             continue
         res = other.result
+        # A refused row failed parity and is outside H5 by definition ("every parity-passing GPU
+        # provider"). A row that passed parity but was not timed (status "failed: ...") makes H5
+        # unscorable: dropping it would score H5 on a subset of the providers it names.
+        if scored and res is None and other.status != "refused":
+            unscorable.append(f"{other.job.label} passed parity but was not timed ({other.status})")
         is_scored = scored and res is not None
         if res is None:
             ratio50 = ratio99 = float("nan")
@@ -809,14 +819,16 @@ def score_h5(rows: Sequence[LatencyRow], architecture: str) -> tuple[str, list[l
                 "" if res is None else str(ratio50 >= H5_THRESHOLD),
             ]
         )
-    if not scored_ratios:
+    if unscorable:
+        verdict = "not scored - " + "; ".join(unscorable)
+    elif not scored_ratios:
         verdict = "not scored - no parity-passing GPU provider"
     elif all(r >= H5_THRESHOLD for r in scored_ratios):
         verdict = "supported"
     else:
         verdict = "not supported"
-    for line in table:
-        line.append(verdict)
+    for line, (_other, scored) in zip(table, [o for o in others if o[0] is not None], strict=True):
+        line.append(verdict if scored else "context (not scored)")
     return verdict, table
 
 

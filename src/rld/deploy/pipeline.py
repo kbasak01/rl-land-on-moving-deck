@@ -21,7 +21,9 @@ against those graphs, and compares (P8-D1 §11): bytes for ``selection.csv``,
 ``closed_loop_parity.csv``, ``closed_loop_episodes.csv``, ``closed_loop_controls.csv`` and the
 CPU rows of ``parity.csv``; for the GPU rows the verdicts, n, ``|y|max`` and threshold byte for
 byte and the error below the threshold; the graph SHA-256s against ``run_info.json``. Latency,
-e2e and H5 are measurements and are not re-checked. ``--check`` writes nothing under ``results/``.
+e2e and H5 are measurements and are not re-checked, except that ``h5.csv`` is re-scored from the
+committed ``latency.json`` and ``latency.csv`` (stage ``h5``, no timing; Gate 8 review).
+``--check`` writes nothing under ``results/``.
 
 Units: latencies milliseconds; times seconds model scale.
 """
@@ -72,7 +74,7 @@ DEFAULT_OUT_DIR: Path = REPO_ROOT / "results" / "latency"
 RUN_ROOT: Path = REPO_ROOT / "artifacts" / "runs"
 
 #: Stages, in order.
-STAGES: tuple[str, ...] = ("selection", "export", "parity", "closed-loop", "latency", "e2e")
+STAGES: tuple[str, ...] = ("selection", "export", "parity", "closed-loop", "latency", "e2e", "h5")
 
 #: The timed seed of each architecture: the median seed (P8-D1 §2, §3).
 TIMED_SEED: dict[str, int] = {"ppo": 4, "residual_ppo_forecast": 4}
@@ -383,6 +385,52 @@ def stage_latency(
     return rows, latency_csv(rows), h5_csv(table), verdict
 
 
+def render_h5(specs: Sequence[dict[str, Any]], out_dir: Path) -> str:
+    """Re-score H5 from the committed ``latency.json`` and ``latency.csv`` (no timing).
+
+    The latency rows are rebuilt from the job grid, each timed row's result from
+    ``latency.json`` (dmf's ``bench_result_from_payload``) and each row's status from
+    ``latency.csv``; then :func:`rld.deploy.latency.score_h5` renders ``h5.csv`` exactly as the
+    latency stage does.
+
+    Returns:
+        ``h5.csv`` text.
+
+    Raises:
+        RuntimeError: If a timed row has no result in ``latency.json``.
+    """
+    import csv
+
+    from dmf.deploy.harness import bench_result_from_payload
+
+    from rld.deploy.latency import LatencyRow, h5_csv, latency_jobs, score_h5
+
+    payload = json.loads((out_dir / "latency.json").read_text(encoding="utf-8"))
+    results = {r["label"]: bench_result_from_payload(r) for r in payload["results"]}
+    with (out_dir / "latency.csv").open(encoding="utf-8", newline="") as handle:
+        status = {r["label"]: r["status"] for r in csv.DictReader(handle)}
+    timed = [
+        (
+            str(s["method"]),
+            int(s["seed"]),
+            str(s["architecture"]),
+            Path(s["onnx_path"]),
+            Path(s["run_dir"]),
+        )
+        for s in _timed_specs(specs)
+    ]
+    rows = []
+    for job in latency_jobs(timed):
+        st = status[job.label]
+        res = results.get(job.label) if st == "timed" else None
+        if st == "timed" and res is None:
+            raise RuntimeError(f"{job.label}: timed in latency.csv but absent from latency.json")
+        rows.append(LatencyRow(job, st, res))
+    h5_arch = next(str(s["architecture"]) for s in _timed_specs(specs) if s["method"] == H5_METHOD)
+    _, table = score_h5(rows, h5_arch)
+    return h5_csv(table)
+
+
 # --------------------------------------------------------------------------- e2e
 
 
@@ -489,6 +537,8 @@ def run_check(args: argparse.Namespace) -> int:
         compare("closed_loop_parity.csv", summary)
         compare("closed_loop_episodes.csv", episodes)
         compare("closed_loop_controls.csv", controls)
+    # h5.csv: re-scored from the committed latency.json / latency.csv (no timing).
+    compare("h5.csv", render_h5(_graph_specs(args.onnx_dir), out_dir))
     _log("check: " + ("OK" if not failures else f"FAILED ({len(failures)})"))
     return 0 if not failures else 1
 
@@ -509,6 +559,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     onnx_dir: Path = args.onnx_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     stages = [s for s in STAGES if s in args.stage]
+    if stages == ["h5"]:
+        # Render-only: re-score H5 from the committed latency files; run_info.json (the timed
+        # run's environment stamp) is left untouched.
+        text = render_h5(_graph_specs(onnx_dir), out_dir)
+        (out_dir / "h5.csv").write_text(text, encoding="utf-8")
+        _log("h5.csv re-scored from latency.json / latency.csv (no timing)")
+        return 0
     _update_run_info(out_dir, "environment", environment_stamp())
 
     def timed_stage(name: str, fn: Callable[[], Any]) -> Any:
@@ -601,6 +658,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             _update_run_info(
                 out_dir, "e2e_vs_closed_loop", e2e_check_outcomes(payload, episodes_csv)
             )
+    if "h5" in stages and "latency" not in stages:
+        (out_dir / "h5.csv").write_text(render_h5(specs, out_dir), encoding="utf-8")
     _update_run_info(
         out_dir,
         "threads_env",

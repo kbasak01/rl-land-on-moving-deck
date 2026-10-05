@@ -7,9 +7,9 @@
 * :mod:`rld.deploy.closed_loop` -- PyTorch vs ONNX on 50 frozen episodes;
 * :mod:`rld.deploy.latency` -- a rank-2 mirror of Project 4's harness, one subprocess per
   configuration, and the H5 score;
-* :mod:`rld.deploy.e2e` -- the per-step control budget inside real episodes;
+* :mod:`rld.deploy.e2e` -- the per-step control budget inside full simulated episodes;
 * :mod:`rld.deploy.pipeline` -- ``make bench`` and its ``--check``.
 
-Everything is simulation. The RTX A4000 and the desktop CPU stand in for an embedded target;
-nothing here measures one.
+Everything is simulation. Latency is measured on a desktop RTX A4000 and i9-10980XE under WSL2;
+no embedded target was measured.
 """

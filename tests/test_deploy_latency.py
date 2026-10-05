@@ -194,3 +194,57 @@ def test_benchmark_functions_run(tmp_path: Path) -> None:
             folded_actor(policy), inputs, BenchConfig(device="cuda", synchronize=False), "z"
         )
     json.dumps(res.env)
+
+
+def test_h5_context_row_and_failed_gpu_row() -> None:
+    _, table = score_h5(_h5_rows(0.05, 0.40, 0.15), ARCH)
+    assert [r[-1] for r in table] == ["supported", "supported", "context (not scored)"]
+    rows = _h5_rows(0.05, 0.40, 0.15)
+    trt = rows[2].job
+    rows[2] = LatencyRow(trt, "failed: child exited 1", None)  # passed parity, not timed
+    verdict, table = score_h5(rows, ARCH)
+    assert verdict.startswith("not scored") and trt.label in verdict
+    assert table[1][-1] == verdict and table[2][-1] == "context (not scored)"
+
+
+def test_ort_gpu_path_synchronises_every_timed_iteration(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Structure of the rank-2 ORT loop on a (faked) GPU provider: warmup, timed, sync, refusal."""
+    import onnxruntime as ort
+
+    import rld.deploy.latency as lat
+
+    calls = {"run": 0, "sync": 0}
+
+    class FakeSession:
+        realized = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+
+        def get_providers(self) -> list[str]:
+            return list(self.realized)
+
+        def run(self, *args: object) -> list[np.ndarray]:
+            del args
+            calls["run"] += 1
+            return [np.zeros((1, 3), dtype=np.float32)]
+
+    def fake_sync(*args: object) -> None:
+        del args
+        calls["sync"] += 1
+
+    monkeypatch.setattr(ort, "InferenceSession", FakeSession)
+    monkeypatch.setattr(lat.torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(lat.torch.cuda, "synchronize", fake_sync)
+    monkeypatch.setattr(lat, "_cuda_free_bytes", lambda: 0)
+    monkeypatch.setattr(lat, "environment_stamp", lambda: {})
+    graph = Path(__file__)  # any existing file: the fake session never reads it
+    inputs = np.zeros((8, 25), dtype=np.float32)
+    cfg = BenchConfig(warmup_iters=7, timed_iters=11, batch_size=1, device="cuda")
+    res = benchmark_ort(graph, inputs, cfg, "x", providers=("CUDAExecutionProvider",))
+    assert calls["run"] == 7 + 11
+    assert calls["sync"] == 1 + 11  # once after the warmup, once after every timed iteration
+    assert res.providers_realized[0] == "CUDAExecutionProvider"
+    FakeSession.realized = ["CPUExecutionProvider"]  # silent ORT fallback -> refused
+    with pytest.raises(ValueError, match="realized"):
+        benchmark_ort(graph, inputs, cfg, "x", providers=("CUDAExecutionProvider",))

@@ -148,3 +148,31 @@ def test_fixed_readings() -> None:
     assert inv.verdict_rows([_same(5e-7)], clean, _noise(1, 3, 2))[0] == "export defect"
     late = [_summary_row(True, 1e-7, "5", "", "50")]  # no 4-decade growth before touchdown
     assert inv.verdict_rows([_same(5e-7)], late, _noise(1, 3, 0))[0] == "inconclusive"
+
+
+def _outcomes_for_posthoc() -> tuple[inv.Outcomes, list[tuple[str, int]]]:
+    ss6 = [("SS6", i) for i in range(6)]
+    base = dict.fromkeys(ss6, "success")
+    out: inv.Outcomes = {("m", 0, "torch"): dict(base)}
+    for arm in ("onnx", "onnx_cuda", "torch_folded", "torch_fp64"):
+        out[("m", 0, arm)] = dict(base)
+    out[("m", 0, "onnx")][("SS6", 1)] = "bounce"
+    out[("m", 0, "onnx_cuda")][("SS6", 5)] = "hard_landing"  # outside S
+    for k, arm in enumerate(inv.ulp_arms()):
+        o = dict(base)
+        o[("SS6", 1 if k % 2 else 2)] = "bounce" if k % 2 else "hard_landing"
+        out[("m", 0, arm)] = o
+    return out, ss6
+
+
+def test_posthoc_bias_and_loo() -> None:
+    outcomes, ss6 = _outcomes_for_posthoc()
+    bias = inv.posthoc_bias_rows(outcomes, ss6)
+    onnx = next(r for r in bias if r[0] == "m" and r[2] == "onnx" and r[3] == "torch")
+    assert onnx[5:8] == ["1", "-1", "1"]  # one flip, success -1, success->bounce
+    ulp = next(r for r in bias if r[0] == "m" and r[2] == "ulp")
+    assert ulp[5] == "20" and ulp[13] == "20" and ulp[14] == "20"
+    assert float(ulp[12]) == 0.5
+    loo = inv.posthoc_loo_rows(outcomes, ss6)
+    pooled = loo[-1]
+    assert pooled[2:4] == ["20", "0"] and pooled[5:7] == ["1", "1"]

@@ -1,4 +1,4 @@
-"""End-to-end control-step budget, measured inside real environment episodes (P8-D1 §9).
+"""End-to-end control-step budget, measured inside full simulated episodes (P8-D1 §9).
 
 The ONNX policy of each timed architecture flies the closed-loop episodes
 (:func:`rld.deploy.closed_loop.closed_loop_episodes`) in **one** process with every component at
@@ -18,8 +18,10 @@ Reported separately, as **simulation**, not deployment:
 
 * ``feed_advance`` -- the ship-motion feed's ``advance_to`` (analytic dmf motion standing in for a
   ship motion sensor; forecast methods only);
-* ``physics_step`` -- ``env.step`` minus its observation build (8 PyBullet substeps, contact
-  polling, reward).
+* ``physics_step`` -- ``env.step`` minus its observation build: the velocity tracker
+  ``DSLPIDControl.computeControl`` (setpoint to motor RPM), 8 PyBullet substeps, contact polling and
+  reward. The velocity tracker is part of the deployed control stack but sits inside ``env.step``,
+  so it is booked here, and ``deployment_sum`` omits it (Gate 8 review m4; not re-timed).
 
 The step loop is :func:`rld.eval.runner.run_chunk`'s with the policy's ``act`` unrolled into
 timed pieces, in ``ResidualPolicy.act``'s order (network, then base, then composition). One

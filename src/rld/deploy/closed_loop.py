@@ -23,8 +23,10 @@ the closed loop's own sensitivity to float32 rounding. Neither changes the P8-D1
 * ``torch_folded`` -- the policy with ``network_action`` replaced by the folded torch module
   (:class:`rld.deploy.export.FoldedActor`): the graph's arithmetic, executed by PyTorch;
 * ``torch_obs_plus_1ulp`` -- the unchanged SB3 path with every raw input entry nudged up by one
-  float32 ulp (``np.nextafter``) before normalisation: a perturbation the same size as the
-  per-call ONNX-vs-PyTorch difference, with no ONNX involved.
+  float32 ulp (``np.nextafter``) before normalisation, with no ONNX involved. Its size was **not**
+  matched to the export error: measured afterwards on the recorded inputs (P8-D6,
+  ``posthoc_same_input.csv``), a one-ulp input perturbation moves the action several times more
+  than the ONNX-vs-PyTorch difference does.
 
 ``closed_loop_controls.csv`` puts the ONNX arm and both controls side by side, each against the
 PyTorch arm.

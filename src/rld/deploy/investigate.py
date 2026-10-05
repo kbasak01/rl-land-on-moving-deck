@@ -1029,3 +1029,273 @@ def make_specs(
         )
         out.append((method, seed, spec))
     return out
+
+
+# ------------------------------------------------------------------ post hoc (Gate 8 review)
+# Added at the Gate 8 review (P8-D6), after every P8-D3 result had been read. Descriptive only:
+# none of these enters the P8-D3 readings or the P8-D5 criterion.
+
+
+POSTHOC_SAME_INPUT_COLUMNS: tuple[str, ...] = (
+    "method",
+    "seed",
+    "comparator",
+    "n_evaluations",
+    "max_abs_d_action",
+    "p99_abs_d_action",
+    "median_abs_d_action",
+    "mean_abs_d_action",
+    "median_ratio_to_onnx",
+)
+
+
+def posthoc_same_input_rows(
+    graphs: Sequence[tuple[str, int, Path, Path]], traces: Sequence[Trace], cfgs: EvalConfigs
+) -> list[list[str]]:
+    """Post hoc (review MJ1): the ulp perturbation's size against the export error, same inputs.
+
+    On every recorded ``torch`` input of E50, |Δa| against the recorded float32 SB3 action for:
+    ``onnx`` (ORT CPU, batch 1), ``torch_folded`` (batch 1), ``torch_fp64`` (the float64
+    reference) and ``ulp`` -- one one-ulp-perturbed SB3 call per step (batch 1), for each of
+    k = 1..20 with ``default_rng(SeedSequence([ULP_ENTROPY, k, 0]))`` drawing the signs, pooled.
+
+    Returns:
+        Rows of ``posthoc_same_input.csv``.
+    """
+    import copy
+
+    from rld.rl.train import build_policy
+
+    rows: list[list[str]] = []
+    for method, seed, run_dir, onnx_path in graphs:
+        policy = build_policy(cfgs, run_dir=run_dir)
+        assert policy.normalizer is not None
+        constants = normalizer_constants(policy)
+        folded = folded_actor(policy)
+        sb3 = cast(Any, policy.model.policy)
+        net64 = copy.deepcopy(torch.nn.Sequential(sb3.mlp_extractor.policy_net, sb3.action_net))
+        net64 = net64.double().eval()
+        session = _session(onnx_path, "onnx")
+        mine = [t for t in traces if t.method == method and t.seed == seed and t.arm == "torch"]
+        x = np.concatenate([t.x for t in mine]).astype(np.float32)
+        ref = np.concatenate([t.a_net for t in mine]).astype(np.float64)
+        diffs: dict[str, np.ndarray] = {}
+        onnx = np.stack(
+            [
+                np.clip(session.run([], {INPUT_NAME: r.reshape(1, -1)})[0].reshape(-1), -1, 1)
+                for r in x
+            ]
+        )
+        diffs["onnx"] = np.abs(onnx - ref).ravel()
+        with torch.no_grad():
+            fo = np.stack(
+                [folded(torch.from_numpy(r.reshape(1, -1))).numpy().reshape(-1) for r in x]
+            )
+            z = np.clip(
+                (x.astype(np.float64) - constants.mean) / constants.std,
+                -constants.clip_obs,
+                constants.clip_obs,
+            )
+            f64 = np.clip(net64(torch.from_numpy(z)).numpy(), -1.0, 1.0)
+        diffs["torch_folded"] = np.abs(fo - ref).ravel()
+        diffs["torch_fp64"] = np.abs(f64 - ref).ravel()
+        ulp = []
+        for k in range(1, K_ULP + 1):
+            rng = np.random.default_rng(np.random.SeedSequence([ULP_ENTROPY, k, 0]))
+            up = rng.random(x.shape) < 0.5
+            xp = np.where(
+                up, np.nextafter(x, np.float32(np.inf)), np.nextafter(x, np.float32(-np.inf))
+            ).astype(np.float32)
+            for i in range(xp.shape[0]):
+                zz = np.asarray(policy.normalizer.normalize_obs(xp[i : i + 1]), dtype=np.float32)
+                a, _ = policy.model.predict(zz, deterministic=True)
+                ulp.append(
+                    np.abs(np.clip(np.asarray(a, dtype=np.float64).reshape(-1), -1, 1) - ref[i])
+                )
+        diffs["ulp_k1-20"] = np.concatenate(ulp)
+        med_onnx = float(np.median(diffs["onnx"]))
+        for name, d in diffs.items():
+            med = float(np.median(d))
+            rows.append(
+                [
+                    method,
+                    str(seed),
+                    name,
+                    str(d.size),
+                    repr(float(d.max())),
+                    repr(float(np.percentile(d, 99))),
+                    repr(med),
+                    repr(float(d.mean())),
+                    repr(med / med_onnx) if med_onnx > 0 else "nan",
+                ]
+            )
+    return rows
+
+
+POSTHOC_BIAS_COLUMNS: tuple[str, ...] = (
+    "method",
+    "seed",
+    "arm",
+    "reference",
+    "n_policy_episode_draws",
+    "n_flips",
+    "success_delta",
+    "success_to_bounce",
+    "bounce_to_success",
+    "success_to_hard_landing",
+    "hard_landing_to_success",
+    "other_flips",
+    "bounce_share_of_flips",
+    "n_draws_changing_success",
+    "n_draws_lowering_success",
+)
+
+
+def posthoc_bias_rows(outcomes: Outcomes, ss6: Sequence[tuple[str, int]]) -> list[list[str]]:
+    """Post hoc (review MJ1/MJ4): flip direction and success change per arm, SS6-200.
+
+    Per policy and pooled. ``ulp`` pools k = 1..20 (each draw counted once per episode). The
+    ``n_draws_*`` columns count, for ``ulp``, the (policy, k) draws whose success changed (per
+    policy) or the per-k sums over policies that changed (pooled row). ONNX is also compared with
+    ``torch_folded`` and ``torch_fp64`` as references.
+    """
+    policies = sorted({(m, s) for m, s, _ in outcomes})
+    plan: list[tuple[str, tuple[str, ...], str]] = [
+        ("onnx", ("onnx",), "torch"),
+        ("onnx_cuda", ("onnx_cuda",), "torch"),
+        ("torch_folded", ("torch_folded",), "torch"),
+        ("torch_fp64", ("torch_fp64",), "torch"),
+        ("ulp", ulp_arms(), "torch"),
+        ("onnx", ("onnx",), "torch_folded"),
+        ("onnx", ("onnx",), "torch_fp64"),
+    ]
+    rows: list[list[str]] = []
+    for label, arms, ref_arm in plan:
+        pooled = np.zeros(8, dtype=np.int64)
+        pooled_k = np.zeros(len(arms), dtype=np.int64)
+        for method, seed in [*policies, ("pooled", -1)]:
+            if method == "pooled":
+                counts = pooled
+                nz = int(np.count_nonzero(pooled_k))
+                low = int(np.sum(pooled_k < 0))
+                key = ("pooled", "")
+            else:
+                ref = outcomes[(method, seed, ref_arm)]
+                counts = np.zeros(8, dtype=np.int64)
+                deltas = []
+                for j, arm in enumerate(arms):
+                    got = outcomes[(method, seed, arm)]
+                    d = sum(got[k] == "success" for k in ss6) - sum(
+                        ref[k] == "success" for k in ss6
+                    )
+                    deltas.append(d)
+                    pooled_k[j] += d
+                    for k in ss6:
+                        a, b = ref[k], got[k]
+                        if a == b:
+                            continue
+                        counts[0] += 1
+                        if (a, b) == ("success", "bounce"):
+                            counts[2] += 1
+                        elif (a, b) == ("bounce", "success"):
+                            counts[3] += 1
+                        elif (a, b) == ("success", "hard_landing"):
+                            counts[4] += 1
+                        elif (a, b) == ("hard_landing", "success"):
+                            counts[5] += 1
+                        else:
+                            counts[6] += 1
+                        counts[7] += int("bounce" in (a, b))
+                    counts[1] += d
+                pooled += counts
+                nz = sum(1 for d in deltas if d)
+                low = sum(1 for d in deltas if d < 0)
+                key = (method, str(seed))
+            n_draws = len(ss6) * len(arms) * (len(policies) if method == "pooled" else 1)
+            rows.append(
+                [
+                    key[0],
+                    key[1],
+                    label,
+                    ref_arm,
+                    str(n_draws),
+                    str(int(counts[0])),
+                    str(int(counts[1])),
+                    *(str(int(c)) for c in counts[2:7]),
+                    repr(float(counts[7]) / float(counts[0])) if counts[0] else "nan",
+                    str(nz),
+                    str(low),
+                ]
+            )
+    return rows
+
+
+POSTHOC_LOO_COLUMNS: tuple[str, ...] = (
+    "method",
+    "seed",
+    "ulp_flips",
+    "ulp_flips_outside_S_minus_k",
+    "rate",
+    "onnx_cuda_flips",
+    "onnx_cuda_outside_S",
+    "p_at_least_observed_binomial",
+)
+
+
+def posthoc_loo_rows(outcomes: Outcomes, ss6: Sequence[tuple[str, int]]) -> list[list[str]]:
+    """Post hoc (review MJ2): leave-one-out rate at which a noise draw flips outside S.
+
+    For each (policy, k), the flips of ``ulp_k`` outside S built from the other 19 draws. The
+    pooled rate p gives the binomial probability of seeing at least the observed number of ORT
+    CUDA flips outside S among its flips, if CUDA behaved like one more noise draw.
+    """
+    policies = sorted({(m, s) for m, s, _ in outcomes})
+    rows: list[list[str]] = []
+    tot = out = cuda_n = cuda_out = 0
+    per: list[tuple[str, str, int, int, int, int]] = []
+    for method, seed in policies:
+        ref = outcomes[(method, seed, "torch")]
+        flips = {
+            a: {k for k in ss6 if outcomes[(method, seed, a)][k] != ref[k]} for a in ulp_arms()
+        }
+        sens = set().union(*flips.values())
+        n = sum(len(f) for f in flips.values())
+        o = sum(
+            len(f - set().union(*[flips[b] for b in flips if b != a])) for a, f in flips.items()
+        )
+        cuda = {k for k in ss6 if outcomes[(method, seed, "onnx_cuda")][k] != ref[k]}
+        per.append((method, str(seed), n, o, len(cuda), len(cuda - sens)))
+        tot, out = tot + n, out + o
+        cuda_n, cuda_out = cuda_n + len(cuda), cuda_out + len(cuda - sens)
+
+    def binom_tail(n: int, k: int, p: float) -> float:
+        return 1.0 - sum(math.comb(n, i) * p**i * (1 - p) ** (n - i) for i in range(k))
+
+    p_pool = out / tot if tot else float("nan")
+    for name, seed_text, n, o, cn, co in per:
+        rate = o / n if n else float("nan")
+        rows.append(
+            [
+                name,
+                seed_text,
+                str(n),
+                str(o),
+                repr(rate),
+                str(cn),
+                str(co),
+                repr(binom_tail(cn, co, p_pool)),
+            ]
+        )
+    rows.append(
+        [
+            "pooled",
+            "",
+            str(tot),
+            str(out),
+            repr(p_pool),
+            str(cuda_n),
+            str(cuda_out),
+            repr(binom_tail(cuda_n, cuda_out, p_pool)),
+        ]
+    )
+    return rows

@@ -10,6 +10,8 @@ Writes ``results/latency/closed_loop_investigation/``:
 * ``trace_summary.csv`` and ``traces_T.csv.gz`` -- A2;
 * ``noopt_parity.csv`` -- P8-D1 §6 parity of the ``ORT_DISABLE_ALL`` session;
 * ``verdict.csv`` -- P8-D3's readings applied mechanically;
+* ``posthoc_same_input.csv``, ``posthoc_bias.csv``, ``posthoc_loo.csv`` -- added at the Gate 8
+  review (P8-D6), after every P8-D3 result had been read; descriptive only;
 * ``run_info.json`` -- validity checks, environment, wall times (not byte-checked).
 
 ``--check`` recomputes everything and compares bytes, excluding the ``onnx_cuda`` rows of
@@ -200,6 +202,16 @@ def run(workers: int, cuda_workers: int) -> tuple[dict[str, bytes], dict[str, An
         ).encode(),
         "verdict.csv": inv.write_csv(inv.VERDICT_COLUMNS, verdict).encode(),
     }
+    # Post hoc (Gate 8 review, P8-D6): descriptive only, never read by the P8-D3 readings.
+    files["posthoc_same_input.csv"] = inv.write_csv(
+        inv.POSTHOC_SAME_INPUT_COLUMNS, inv.posthoc_same_input_rows(graphs, traces, cfgs)
+    ).encode()
+    files["posthoc_bias.csv"] = inv.write_csv(
+        inv.POSTHOC_BIAS_COLUMNS, inv.posthoc_bias_rows(outcomes, sets["SS6-200"])
+    ).encode()
+    files["posthoc_loo.csv"] = inv.write_csv(
+        inv.POSTHOC_LOO_COLUMNS, inv.posthoc_loo_rows(outcomes, sets["SS6-200"])
+    ).encode()
     info["episodes"] = {name: len(v) for name, v in sets.items()}
     info["k_ulp"] = inv.K_ULP
     info["n_episode_rows"] = len(out_rows)
