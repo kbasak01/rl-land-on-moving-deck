@@ -627,6 +627,14 @@ readings that are easy to overstate:
 - the white-noise perception arm, whose σ is larger than the deck motion at SS3–SS4;
 - unaudited tunnelled successes outside clean `id`.
 
+(e) **Carry into the README (Phase 9), from Phase 8 (P8-D5, added 2026-10-05).** Outcome classes at
+SS6 near the 15° tilt limit are not determined at float32 precision. About 6.6 % of SS6-200
+policy-episodes are rounding-sensitive (53 of 800 flip under at least one of 20 one-ulp input
+perturbations; P8-D4 §6). This qualifies the per-episode resolution of every committed SS6 success
+count. Report closed-loop parity with both verdicts: P8-D1 §7 as written, not met; P8-D5's post-hoc
+noise-floor criterion, met for ORT CPU; ORT CUDA not judged (it would fail (ii) for 2 of 4
+policies; P8-D5 §3). H1b's 1.0-point margin at `id` SS6 is of the same order as the rounding-level per-seed shifts in SS6 success measured here: −2.5 to +1.5 points under one-ulp noise and −0.5 to +1.5 under the float64 reference, per seed of the exported policies. `residual_ppo` itself was not re-flown, and about 30 % of flip events (88 of 291 ulp flips) go through the bounce channel, the rule H1b is already noted to be fragile to.
+
 **First task:** export the `ppo` actor (seed 0) with the `VecNormalize` mean and variance folded into
 the graph, opset 18, dynamic batch, and pass the 1 000 × 5 parity on ORT CPU.
 
@@ -645,6 +653,27 @@ the graph, opset 18, dynamic batch, and pass the 1 000 × 5 parity on ORT CPU.
 committed; H5 scored.
 
 ### Phase 9 — Documentation, figures, release (1 day) · owner: main thread + `results-skeptic`
+
+**Before you start (added after Gate 8, 2026-10-05).**
+
+(a) **H5 is scored but not yet rendered.** `results/e07/hypotheses.csv` and `results/results.md` still read
+"pending". Do not edit the committed Phase 7 file; render H5 into `results.md` from
+`results/latency/h5.csv` via `scripts/report.py`, and keep `report.py --check` byte-reproducible.
+
+(b) **Carry both Phase 8 "Before you start" lists into the README:** items (d) from Gate 7 and (e) from
+Phase 8. Closed-loop parity is reported with both verdicts (P8-D1 §7 not met; post-hoc P8-D5 met for
+ORT CPU only, with its lenient-yardstick disclosure from P8-D6; ORT CUDA would fail it; TensorRT never
+flown closed loop). The H1b sentence must carry the float32-resolution caveat.
+
+(c) **Latency wording.** Quote only ratios measured here, one measurement per configuration, on a
+desktop RTX A4000 under WSL2. No embedded-target or real-flight implication. The e2e budget's
+deployed-side sum omits `DSLPIDControl`, which is booked with physics.
+
+(d) **`make all`** now includes a real `bench` stage; the Gate 9 dry-run must list it and
+`bench-investigate`.
+
+**First task:** render H5 into `results/results.md` from `results/latency/h5.csv` (report.py), then
+draft the README hypotheses and limitations sections from `docs/findings.md`.
 
 README (Project 4 structure: headline figure → results tables with baselines → hypotheses →
 limitations → reproduce), landing GIFs, `docs/findings.md`, `docs/protocol.md`, citations,

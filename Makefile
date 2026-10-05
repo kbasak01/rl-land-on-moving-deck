@@ -31,10 +31,12 @@ THROUGHPUT_CSV ?= results/env_throughput.csv
 # Phase 2 throughput: the same measurement with the deck body and the motion bridge in the
 # loop. Written to its own file so the committed Gate 0 artifact is left exactly as it was.
 THROUGHPUT_LANDING_CSV ?= results/env_throughput_landing.csv
+# Phase 8: runner processes for the closed-loop parity flights (rows do not depend on it).
+BENCH_WORKERS ?= 16
 
 .PHONY: test lint format throughput throughput-landing env-sanity \
         deck-stats baselines dmf-forecasters forecast-report mss-export train-bg sweep tune eval bench \
-        report all
+        bench-check bench-investigate bench-investigate-check report all
 
 # --- implemented ------------------------------------------------------------------
 
@@ -152,8 +154,19 @@ eval:
 	@if [ -d artifacts/mss/records ]; then $(PY) scripts/make_episodes.py --mss --check --workers $(WORKERS); else echo "eval: artifacts/mss/records absent -- MSS list check skipped (run make mss-export)"; fi
 	$(PY) scripts/eval_phase7.py --arm all --workers $(WORKERS)
 	$(PY) scripts/eval_phase7.py --arm all --compress
-# Phase 8 -- deploy-benchmarker: ONNX export, parity, latency -> results/latency*
-bench:           ; @echo "not implemented: phase 8"
+# Phase 8 -- deploy-benchmarker: ONNX export (VecNormalize folded in), numeric parity per provider,
+# closed-loop parity on 50 frozen id episodes, latency (Project 4's method: 200 warmup + 2 000
+# timed, one child process per configuration, refused providers never timed), the end-to-end
+# control-step budget and H5 -> results/latency/ (P8-D1). Latency is measured one configuration
+# at a time: run nothing else on the machine meanwhile. `make bench-check` re-exports to a temp
+# dir and compares selection, parity (CPU rows byte for byte, GPU verdicts) and the closed loop
+# with the committed files; latency, e2e and H5 are measurements and are not byte-checked.
+bench:       ; $(PY) scripts/bench.py --workers $(BENCH_WORKERS)
+bench-check: ; $(PY) scripts/bench.py --check --workers $(BENCH_WORKERS)
+# P8-D3 closed-loop parity investigation (about 22 000 short episodes; run in the background).
+# `--check` re-runs it and byte-compares everything but the onnx_cuda rows.
+bench-investigate:       ; $(PY) scripts/closed_loop_investigation.py --workers $(WORKERS)
+bench-investigate-check: ; $(PY) scripts/closed_loop_investigation.py --check --workers $(WORKERS)
 # Phase 7/9 -- eval-auditor: re-render results/results.md from the committed CSVs only
 # (`$(PY) scripts/report.py --check` re-renders and compares bytes, writing nothing).
 report:          ; $(PY) scripts/report.py

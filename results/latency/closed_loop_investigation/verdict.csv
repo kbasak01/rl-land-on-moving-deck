@@ -1,0 +1,12 @@
+reading,condition,value,met
+export defect,A1 max |da| > 1e-4 on any flown step,9.5367431640625e-07,False
+export defect,A1 clip-regime max > 1e-5 and > 10x the unclipped max,8.344650268554688e-07 vs 9.5367431640625e-07,False
+export defect,A2 |da(k0)| > 1e-5 in a flipped episode,2.5331974029541016e-07,False
+export defect,C flips(onnx) > max_k flips(ulp_k) for some policy,none,False
+export defect,C pooled ONNX flips outside S >= 2,0,False
+rounding sensitivity,A1 max |da| <= 1e-5 in every regime,9.5367431640625e-07,True
+rounding sensitivity,A2 |da(k0)| <= 1e-6 in flipped and control episodes,3.5762786865234375e-07,True
+rounding sensitivity,A2 d_pos grows >= 4 decades before touchdown (flipped),3/3,True
+rounding sensitivity,C every policy flips(onnx) <= max_k flips(ulp_k),none,True
+rounding sensitivity,C pooled ONNX flips outside S <= 1,0,True
+READING,P8-D3 fixed readings applied,rounding sensitivity,

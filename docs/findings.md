@@ -3,6 +3,125 @@
 Phase-by-phase record of what was found, including every claim withdrawn and what replaced it.
 Written at each gate. Hypotheses are scored here exactly as pre-registered in P3-D1.
 
+## Phase 8 — ONNX export, parity and latency (2026-10-05)
+
+**Scope.** Simulation only. The latencies are measurements of a desktop RTX A4000 and an
+i9-10980XE under WSL2. **No embedded target was measured, and nothing here implies real flight.** Only ratios of rows measured on this machine are quoted. Sources:
+`results/latency/`. Definitions are in P8-D1, and the full record is in P8-D2.
+
+**What was exported.** `ppo` (the best pure RL method) and `residual_ppo_forecast` (the best
+residual by the same rule; its CI overlaps `residual_ppo`'s, so this is a selection, not a result),
+seeds 0 and 4. Seed 4 is the median seed of each at `id` SS6. Each graph is the deterministic
+actor, a 512×2 tanh MLP, with the frozen `VecNormalize` folded in: the observation clip and the
+action clip are inside the graph. The residual's `pid_feedforward` base, the α = 0.3 composition and
+the DLinear-OLS forecaster stay outside it.
+
+### Verdict (P8-D2 §7; `results/latency/h5.csv`)
+
+| H | part | number | verdict |
+|---|---|---|---|
+| H5 | batch-1 p50, `ppo` graph: GPU provider / ORT CPU (1 thread) | ORT CUDA **4.72×** (0.217 vs 0.046 ms); ORT TensorRT **3.94×** (0.181 vs 0.046 ms); p99 5.57× and 6.97×; one measurement per configuration, no CI (a 20-iteration smoke read ORT CUDA 9.35×, P8-D2 addendum) | **supported** |
+
+### 1. Parity
+
+- **Numeric parity passes on every provider that was timed.** The check covered ORT CPU, CUDA and
+  TensorRT and the folded torch module on CPU and CUDA, all four graphs, 1 000 observations × 5
+  draws, with TF32 off. The worst max error is 9.5e-7 against a threshold of 1e-4
+  (`parity.csv`). The draws push about 12 % of normalised entries past the ±10 clip, and the
+  reference reaches the ±1 action clip, so both clips are exercised. **No configuration was
+  refused.**
+- **Closed-loop parity is not met as pre-registered.** 50 frozen `id` episodes, noise off, ORT CPU
+  against PyTorch (`closed_loop_parity.csv`).
+  - `residual_ppo_forecast` seed 0 has identical outcome classes in 50/50.
+  - `ppo` seeds 0 and 4 and `residual_ppo_forecast` seed 4 have 49/50 each. Each differs in one
+    SS6 episode, `success` ↔ `hard_landing`.
+  - On the PyTorch side those episodes land at 12–16° relative tilt against the 15° limit.
+- **Attribution (post hoc, P8-D2 §4).** The ONNX graph differs from PyTorch by ≤ 1e-6 per call. A
+  one-ulp nudge of the PyTorch policy's input, with no ONNX involved, flips exactly the same three
+  episodes in the same direction (`closed_loop_controls.csv`). Every arm's touchdown v_z drifts
+  0.03–0.06 m/s from PyTorch's.
+  - So at these SS6 episodes the closed loop is sensitive to float32 rounding, and the flips are
+    consistent with no export defect.
+  - The pre-registered criterion is still not met.
+- **Gate 8 does not pass (user, 2026-10-05).** P8-D1 §7 stays as written; the flips were then
+  investigated under a design fixed in advance (P8-D3, results in P8-D4,
+  `results/latency/closed_loop_investigation/`).
+- **The investigation finds rounding sensitivity, not an export defect.** That is the fixed P8-D3
+  reading, and every condition was met.
+  - *Export error on the inputs actually flown.* The graph matches SB3 to ≤ 9.5e-7 on all
+    13 755 recorded steps of the 50 episodes, including both clip regimes (`same_input.csv`).
+    ORT's graph optimisations change no output.
+  - *Divergence.* The first act already differs, by ≤ 3.6e-7. The trajectory difference then grows
+    exponentially, by e about every 2.4 control steps, to a median of 8 mm at touchdown
+    (`trace_summary.csv`). Flipped episodes look like non-flipped ones.
+  - *Noise floor.* Over the whole `id` SS6 cell (200 episodes × 4 policies), ONNX flips 16 of 800
+    outcomes. Twenty random one-ulp input perturbations of the PyTorch path flip 10–21 each
+    (median 15). Every ONNX flip is an episode that some perturbation also flips
+    (`noise_distribution.csv`).
+  - *Float64.* A float64 PyTorch reference differs from the committed float32 path on 9 of those
+    800, i.e. 1.1 % (`flips.csv`).
+  - *The 6.6 % is a different measure.* It is the union S of the 20 ulp draws: 53 of 800
+    policy-episodes flip under at least one of them. That is the share of SS6 policy-episodes
+    whose class this test shows to be not determined at float32 precision. (Attribution
+    corrected at the Gate 8 review, m3.)
+  - *What it means for the criterion, post hoc.* Only 2 of the 20 perturbed PyTorch paths would
+    have passed §7 on its 50 episodes.
+  - *What it cannot show.* It cannot rule out a defect on inputs that were never flown; the
+    random-input parity above bounds that. Options for the gate are listed in P8-D4 §10 and are
+    the user's.
+- **Deviation P8-D5 (post hoc; user, option b, 2026-10-05).** Closed-loop parity is judged against
+  the measured float32 noise floor on SS6-200. For each policy two things must hold: the runtime's
+  flips are no more than the maximum of K = 20 one-ulp-perturbed PyTorch paths, and every runtime
+  flip lies in the rounding-sensitive set S.
+  - *ORT CPU: met for all four policies.* It flips 4, 4, 4 and 4, against maxima of 5, 6, 8 and 9,
+    and all 16 flips lie in S (|S| = 9, 12, 16 and 16).
+  - *ORT CUDA is descriptive only and not judged.* 3 of its 18 flips lie outside S, so (ii) would
+    fail for 2 of 4 policies. It was scoped out after this was seen. A noise draw lands outside a
+    leave-one-out S in only 9 of 291 flips, so P(≥ 3 of 18) ≈ 0.017 (`posthoc_loo.csv`). ORT
+    TensorRT and torch-eager CUDA were never flown closed loop.
+  - *The yardstick is lenient and biased* (post hoc, Gate 8 review; `posthoc_same_input.csv`,
+    `posthoc_bias.csv`).
+    - The floor is a per-step dithering perturbation, about 2–4× larger than the export error (median
+      |Δa| on the recorded inputs).
+    - It is biased toward fewer successes, through the bounce channel: 16 of the 18 draws that
+      change pooled success lower it, and success→bounce happens 65 times against 19 for
+      bounce→success. This is pooled: for `residual_ppo_forecast` s4 the ulp draws raise success
+      (+16; 3 of 15 success-changing draws lower it).
+    - On SS6-200, ONNX against `torch_folded` gives 18 flips and success −9, and against
+      `torch_fp64` 16 flips and −6. For comparison, `torch_folded` and `torch_fp64` flip 10 and 9
+      against `torch`.
+  - *P8-D1 §7 as written stays **not met*** (3 of 4 policies at 49/50). Both verdicts are
+    reported.
+- **Carry to the README (Phase 9).** Outcome classes at SS6 near the 15° tilt limit are not
+  determined at float32 precision. About 6.6 % of SS6-200 policy-episodes are rounding-sensitive
+  (53 of 800 flip under at least one of 20 one-ulp perturbations). This qualifies the per-episode
+  resolution of every committed SS6 success count. H1b's 1.0-point margin at `id` SS6 is of the same order as the rounding-level per-seed shifts in SS6 success measured here: −2.5 to +1.5 points under one-ulp noise and −0.5 to +1.5 under the float64 reference, per seed of the exported policies. `residual_ppo` itself was not re-flown, and about 30 % of flip events (88 of 291 ulp flips) go through the bounce channel, the rule H1b is already noted to be fragile to.
+
+### 2. Latency and the control budget
+
+- *Batch 1, one CPU thread* (`latency.csv`). ORT CPU runs the 25-input policy in 0.046 ms p50
+  (0.082 ms p99). With 2–8 threads it takes 0.018–0.021 ms.
+  - The GPU rows are slower: ORT CUDA 0.217 ms, ORT TensorRT 0.181 ms, torch-eager CUDA 0.404 ms.
+    They include host-device copies by design (Project 4's host-to-host method). The likely
+    causes of the GPU penalty were not measured separately: host↔device copies over PCIe and
+    kernel launches dominating a tiny MLP, and WSL2's GPU paravirtualisation.
+  - At batch 32, ORT CPU at 1 thread is still the fastest ORT row: 0.156 against 0.243 (CUDA) and
+    0.196 ms (TensorRT).
+- *End-to-end per control step, in full simulated episodes* (`e2e_budget.csv`), one thread, ONNX policy:
+  - `ppo`: observation build + policy = 0.19 ms p50 and 0.30 ms p99, i.e. 0.9 % of the 33.3 ms
+    period at p99.
+  - `residual_ppo_forecast`: observation build + DLinear-OLS forecaster + policy + base + compose
+    = 0.85 ms p50 and 1.13 ms p99, i.e. 3.4 %. The forecaster is the largest part (0.53 ms p50).
+  - Physics stepping (1.5 ms p50, 13 ms p99) is simulation and is reported apart. So is the
+    ship-motion feed (0.55 ms p50).
+  - *Not in the deployed totals:* the velocity tracker `DSLPIDControl.computeControl` (setpoint to
+    motor RPM). It runs inside `env.step`, so the e2e budget books it in the physics bucket, and
+    the deployment sums above omit it. It was not re-timed (Gate 8 review m4).
+- **What this does and does not say.** On this machine, a 512×2 MLP at batch 1 runs fastest on
+  one CPU thread, and the timed per-step software stack (velocity tracker excluded) uses a few
+  percent of the control period.
+  It says nothing about any embedded computer's CPU or GPU, which were not measured.
+
 ## Phase 7 — evaluation under shift and ablations (2026-10-02)
 
 **Scope.** Everything below is simulation:
@@ -42,7 +161,7 @@ review corrections below and the hashes that supersede P7-D2's are recorded in P
 | H3 secondary | `residual_ppo_forecast` vs `residual_ppo`, `id` SS5 / SS6 | −0.8 % [−2.4, +0.9] / +1.9 % [+0.4, +3.8] | **not supported** / **inconclusive** |
 | H3 secondary | `unseen_vessel` half-rule, SS5 / SS6 | r(uv) −2.0 % [−3.6, −0.3] / +0.04 % [−1.9, +2.6] | **not applicable** / **not scored (no supported id gain)** (relabelled from "holds" at `182cdea`, no number changed; P7-D5) |
 | H4 | drop_sin − drop_jon, `id` SS5 | +0.0 [+0.0, +0.0] (degenerate: every episode a success) | **not supported**; **novelty claim withdrawn** (D0.4 and P3-D1 §8 both fired) |
-| H5 | ORT CPU vs GPU latency | — | **pending — scored at Gate 8** |
+| H5 | ORT CPU vs GPU latency | — | **pending — scored at Gate 8** → scored at Gate 8, P8-D2 |
 
 No multiplicity correction was applied (P3-D4 #9).
 
@@ -59,7 +178,8 @@ No multiplicity correction was applied (P3-D4 #9).
     per-seed p95 vs a single run; `results/e07/matrix/aggregate.csv`,
     `results/e07/matrix/carried_summary_e01.csv`). That is an unpaired reading; no paired test was
     run.
-- **Residual RL beat the PID it is built on at SS6 (H1b), by a margin the bounce rule can erase.**
+- **Residual RL beat the PID it is built on at SS6 (H1b), by a margin the bounce rule can erase**
+  (see also Phase 8: rounding-level per-seed SS6 shifts of the same order as the margin).
   - *The numbers.* +6.0 [+2.0, +10.2] points at `id` SS6: 965/1 000 against 181/200. The line is
     5 points.
   - *What this cell is.* SS6 is outside every method's training distribution.
@@ -93,7 +213,7 @@ No multiplicity correction was applied (P3-D4 #9).
     (`results/e07/matrix/aggregate.csv`). Under σ_p = 4 cm noise it is 6–11 points below `ppo` at
     every sea state, e.g. 69.7 vs 79.8 at SS3 with 0 steps (`results/e07/noise/sigma4cm_lat*/aggregate.csv`).
     *(Scope narrowed at the Gate 7 review.)*
-- **H5** waits for Phase 8.
+- **H5** waits for Phase 8. → scored at Gate 8, P8-D2.
 
 ### 2. Success under shift, per regime (main matrix, aft pad, JONSWAP, λ = 1/25)
 

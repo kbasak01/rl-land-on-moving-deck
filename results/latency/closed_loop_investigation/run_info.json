@@ -1,0 +1,40 @@
+{
+  "environment": {
+    "cpu": "Intel(R) Core(TM) i9-10980XE CPU @ 3.00GHz",
+    "cpu_count": "36",
+    "cuda": "13.0",
+    "cudnn": "92000",
+    "git_commit": "46f7e55-dirty",
+    "gpu": "NVIDIA RTX A4000",
+    "nvidia_driver": "596.71",
+    "onnx": "1.22.0",
+    "onnxruntime": "1.29.0",
+    "onnxruntime_package": "onnxruntime-gpu",
+    "platform": "Linux-6.6.114.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "tensorrt": "10.16.1.11",
+    "torch": "2.13.0+cu130",
+    "torch_default_threads": "1"
+  },
+  "episodes": {
+    "E50": 50,
+    "SS6-200": 200,
+    "U": 238
+  },
+  "k_ulp": 20,
+  "n_episode_rows": 21712,
+  "noopt_parity_all_pass": true,
+  "parity_tolerance": 0.0001,
+  "reading": "rounding sensitivity",
+  "sb3_reproduces_recorded_torch_actions": true,
+  "torch_rows_byte_identical_to_committed_of_238": {
+    "ppo_s0": 238,
+    "ppo_s4": 238,
+    "residual_ppo_forecast_s0": 238,
+    "residual_ppo_forecast_s4": 238
+  },
+  "trace_outcome_mismatches_vs_runner": [],
+  "wall_s_flights": 575.7,
+  "wall_s_total": 715.7,
+  "wall_s_traces": 31.6
+}
