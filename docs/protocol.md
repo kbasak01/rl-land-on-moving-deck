@@ -5016,6 +5016,141 @@ at 1 thread (p50 0.0460 ms, p99 0.0824 ms):
   `21465588…`, unchanged.
 - *Not done here:* the `results-skeptic` review and `/phase-gate 8`.
 
+### P8-D3 — Closed-loop parity investigation: design, fixed before any new outcome is seen (2026-10-05)
+
+*Status.* **User decision (2026-10-05): Gate 8 does not pass, and the closed-loop failure is to be
+investigated.** P8-D1 §7 stays as written: it is not redefined, and no relaxing deviation is
+added. This entry fixes the investigation's arms, episode sets, seeds and readings, and it is
+committed **alone, before anything new is flown or traced**.
+- The only outcomes known when it was written are those in P8-D2 §4: the ONNX arm, and the
+  deterministic `+1 ulp` and `torch_folded` controls on the 50 §7 episodes.
+- It changes no threshold, list or criterion, and the P3-D1 block SHA-256 stays `21465588…`.
+- The results go to P8-D4. Outputs go under `results/latency/closed_loop_investigation/`, each
+  labelled P8-D3.
+
+**Question.** Are the three P8-D2 §4 flips caused by the export (a defect in the graph or in a
+runtime path), or by the closed loop amplifying float32 rounding differences that any
+equally-valid float32 computation would also produce?
+
+**Policies.** The four exported (method, seed) pairs: `ppo` s0 and s4, `residual_ppo_forecast` s0
+and s4. Final checkpoints and the committed graphs (`results/latency/run_info.json` SHA-256s).
+
+**Episode sets.** All are on the frozen `id` list, aft pad, JONSWAP, noise off, λ = 1/25.
+- **E50**: P8-D1 §7's 50 episodes.
+- **SS6-200**: the whole `id` SS6 cell, listed `index` 0–199. All three flips are SS6 episodes.
+- **U** = E50 ∪ SS6-200: 238 episodes. E50's 12 SS6 episodes are in SS6-200.
+- **T** (per-step traces stored): `id` SS6 `index` 0–11, the 12 SS6 episodes of E50. This set
+  holds all three flipped episodes and 45 non-flipped policy-episodes as controls. It is fixed by
+  index, not picked by outcome.
+
+**Arms.** Each is the e05/e06 policy (`rld.rl.train.build_policy`) with only `network_action`
+replaced. Each flies through the unchanged runner loop.
+
+| arm | network | episodes |
+|---|---|---|
+| `torch` | SB3 float32, unchanged (the evaluated path) | U |
+| `onnx` | the graph on ORT CPU, 1 thread, default optimisations (P8-D2's arm) | U |
+| `onnx_noopt` | the graph on ORT CPU, 1 thread, `GraphOptimizationLevel.ORT_DISABLE_ALL` | U |
+| `onnx_cuda` | the graph on ORT CUDA (TF32 off: `NVIDIA_TF32_OVERRIDE=0`, `use_tf32=0`) | U |
+| `torch_folded` | the folded torch module, float32 | U |
+| `torch_fp64` | float64 reference: the raw input cast to float64, normalised with the float64 `obs_rms` (clip ±10), SB3's `policy_net` and `action_net` cast to double, mean action clipped to ±1. Residual composition and the forecast block are unchanged (the forecast block stays float32 from its own ORT graph; `compose_residual` computes in float64 and rounds once to float32, as in production) | U |
+| `ulp_k`, k = 1…20 | SB3 float32 on the raw input with **every entry independently nudged one float32 ulp up or down** (`np.nextafter` toward ±∞, probability ½ each) at every step. The generator is `np.random.default_rng(SeedSequence([20261005, k, episode_seed]))`, re-created at every episode reset, so a row depends only on (k, episode) | SS6-200 |
+
+- *Why K = 20 rather than the suggested 10.* It halves the resolution step of the noise
+  distribution to 5 %, at a cost of about 16 000 extra short episodes.
+- *Why the float64 and ORT arms fly SS6-200 as well as E50.* The flips live in SS6, and 12
+  episodes per policy is too few to compare flip sets.
+- `onnx_cuda` flies in its own runner pool, with 8 workers to bound GPU memory. Every other arm
+  uses 24 workers. Rows do not depend on the worker count.
+
+**Arm A — divergence and export error on the inputs actually flown.**
+- *A1, same-input export error.*
+  - On every step of the `torch` trajectories of all 4 policies × E50, the recorded raw policy
+    input is re-evaluated by SB3 (which must reproduce the recorded action bit for bit, as a
+    validity check), by ORT CPU (`onnx`), by `onnx_noopt` and by `torch_folded`.
+  - Recorded per comparator: max and p99 of |Δa|, and the fraction of steps that are bit-identical.
+  - Also the max |Δa| restricted to steps where the input clip is active (some |z| > 10) and to
+    steps where the output clip is active (some pre-clip mean |a| ≥ 1).
+- *A2, closed-loop traces on T.* Pairs `torch` vs `onnx` and `torch` vs `torch_folded`. Per step:
+  - the network-action difference;
+  - ‖Δ drone position‖ and ‖Δ drone velocity‖ (PyBullet physics state, float64, metres and
+    metres per second model scale);
+  - |Δ relative tilt| (degrees).
+
+  Reported per episode:
+  - the first step k0 where the network actions differ, and |Δa(k0)|;
+  - the first steps at which ‖Δp‖ exceeds 1e-8, 1e-6, 1e-4 and 1e-2 m;
+  - a least-squares fit of log10‖Δp‖ against step between the 1e-8 and 1e-3 m crossings (slope,
+    e-folding steps, R²);
+  - the largest single-step increase of log10‖Δp‖, and the step and event at it (contact onset,
+    clip activation, none);
+  - whether a touchdown happened within the fit window.
+  - Each traced arm's outcome and step count must equal its runner row (validity).
+
+**Arm B — why `torch_folded` flipped none.** From A1: the fraction of steps on which
+`torch_folded` is bit-identical to SB3 on the same input. From A2: its k0 and divergence on T.
+From the U flights: its flip set.
+- *Reading.* If it is bit-identical on every step, its 0 flips carries **no** information, and
+  P8-D4 says so.
+- Otherwise it is one more equally-valid float32 path, read against the noise distribution of
+  arm C.
+
+**Arm C — rounding-noise distribution.** On SS6-200, per policy, count:
+- flips(`onnx`): episodes whose outcome class differs from `torch`;
+- flips(`ulp_k`) for k = 1…20.
+
+Then form the rounding-sensitive set S = the episodes that flip under at least one `ulp_k`.
+Reported per policy and pooled over the four:
+- the 20 flip counts (min, median, max);
+- ONNX's percentile rank among them;
+- |S|, and how many ONNX flips lie in S;
+- the success-count change against `torch` for `onnx` and for each `ulp_k`.
+
+**Arm D — float64 reference.** On U: flips of `torch` (float32), `onnx` and `torch_folded`, each
+against `torch_fp64`. Also: whether `torch_fp64` itself differs from `torch` on S-episodes only.
+
+**Arm E — ORT settings.** On U: the flip sets of `onnx_noopt` and `onnx_cuda` against `torch`,
+compared with `onnx`'s. `onnx_noopt` also gets the P8-D1 §6 numeric parity (5 draws × 1 000, CPU)
+on the four graphs.
+
+**Readings, fixed now.**
+1. **Export defect (evidence for).** Any one of:
+   - A1 max |Δa| > 1e-4 on any flown step, or > 1e-5 concentrated in a clip regime (the clip-regime
+     max more than 10× the unclipped max);
+   - A2 |Δa(k0)| > 1e-5 in a flipped episode;
+   - C: for some policy, flips(`onnx`) > max_k flips(`ulp_k`);
+   - C: pooled over the four policies, ≥ 2 ONNX flips outside S.
+2. **Rounding sensitivity, not an export defect (evidence for).** All of:
+   - A1 max |Δa| ≤ 1e-5 in every regime;
+   - A2 k0 at ulp level (|Δa(k0)| ≤ 1e-6) in flipped and control episodes alike;
+   - ‖Δp‖ growing over ≥ 4 decades before touchdown;
+   - C: every policy's flips(`onnx`) ≤ max_k flips(`ulp_k`), and all ONNX flips in S except at most
+     one pooled.
+3. **Inconclusive** otherwise. Each failing condition is named.
+- *Strength (stated before the run).* Reading 2 can show that ONNX is indistinguishable from
+  ulp-level noise **on these episodes at this K**. It cannot prove the absence of a defect that
+  never fires on the flown inputs; A1 and P8-D2 §3 bound that separately. With K = 20, an episode
+  whose flip probability under noise is p is missed by S with probability (1 − p)^20 (0.36 at
+  p = 0.05).
+- *D and E are descriptive.* They change no reading by themselves.
+  - If the float64 reference also disagrees with float32 PyTorch on S-episodes, then those
+    episodes' outcome is not determined at float32 precision, and no float32 path is "the" right
+    answer there.
+  - If the flip set changes across ORT configurations that each pass numeric parity, then the
+    flips track last-bit rounding choices.
+
+**What this does not change.** P8-D1 §7's criterion, its verdict (not met, P8-D2 §4) and the
+Gate 8 criteria. Any deviation is the user's decision after P8-D4.
+
+**Outputs** (`results/latency/closed_loop_investigation/`):
+- `outcomes.csv` (one row per arm × policy × episode) and `flips.csv`;
+- `noise_distribution.csv`;
+- `same_input.csv`, `trace_summary.csv` and `traces_T.csv.gz` (per step, set T);
+- `noopt_parity.csv` and `run_info.json`.
+
+`scripts/closed_loop_investigation.py --check` re-runs and byte-compares every file except the
+`onnx_cuda` rows (CUDA kernel selection is not guaranteed bit-reproducible) and `run_info.json`.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|
