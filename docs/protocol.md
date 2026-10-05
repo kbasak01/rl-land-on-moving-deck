@@ -3665,10 +3665,12 @@ prediction, no episode list and no success criterion.** The P3-D1 block SHA-256 
 - *Velocity noise (user: position and velocity).* σ_v = σ_p / τ, with τ = 0.2 s model (1 s full
   scale), giving σ_v ∈ {0, 0.05, 0.10, 0.20} m/s model scale.
   - Rationale: a relative-velocity estimate smoothed over about 1 s full scale. It is a stated
-    modelling choice, not a measured estimator.
+    modelling choice, not a measured estimator. (Limitation recorded in P7-D6: the noise as
+    implemented is white, i.i.d. per control step.)
   - The SS5 `id` deck v_z std is about 0.36 m/s for comparison (plan D0.1, scouting numbers).
+    (corrected in P7-D6)
 - *Hold.* 30 Hz, i.e. no hold.
-- *Scope.* Noise and latency apply to the six relative-pad entries only (`configs/env/noise.yaml`).
+- *Scope.* Noise and latency apply to the six relative-pad entries only (`configs/env/noise.yaml`). *(Superseded by the P7-D4 deviation: the stand-in now perceives the deck, and every deck-derived entry is perceived.)*
   The drone's own state is clean. **The forecast feed of `ppo_forecast` and
   `residual_ppo_forecast` stays ideal**, and that is stated beside them.
 - *Flown.* Every method (all 6 learned × 5 seeds and the 6 baselines), all four `id` sea states,
@@ -3801,7 +3803,7 @@ Every flown cell has N = 200 listed episodes, and every learned cell has all 5 s
 | `cg` | pad overridden to CG | the 13 non-static cells | 6 learned × 5 seeds + `pid_feedforward_lowvz_cut` | 5 baselines from `results/e02` | 80 600 | 1 908.0 s |
 | `sinusoid` | sinusoid test motion (P7-D1 §1) | `id` SS3–SS6 (aft) | 6 learned × 5 seeds + 6 baselines | – | 28 800 | 540.2 s |
 | `lambda` | `lam15`, `lam40` | the 13 non-static cells (aft) | `ppo` × 5 seeds + `pid_feedforward`, `pid_track_descend`, `oracle_gated` | – | 20 800 each | 481.1 s, 482.2 s |
-| `noise` | 11 non-clean (σ_p, latency) conditions (P7-D1 §4) | `id` SS3–SS6 (aft) | 6 learned × 5 seeds + 6 baselines | clean column = `matrix` rows | 28 800 each, 316 800 in all | 612.4–792.7 s each |
+| `noise` (superseded by P7-D4; now `noise_superseded_p7d1/`; current hashes P7-D5 §3) | 11 non-clean (σ_p, latency) conditions (P7-D1 §4) | `id` SS3–SS6 (aft) | 6 learned × 5 seeds + 6 baselines | clean column = `matrix` rows | 28 800 each, 316 800 in all | 612.4–792.7 s each |
 | `mss` | `mss_transfer`, `mss_transfer_corpus` | `results/episodes_mss/` (aft and CG) | 6 learned × 5 seeds + 6 baselines | – | 28 800 | 3 409.0 s |
 
 - **578 600 episodes flown** in all, plus the carried baseline rows.
@@ -3829,7 +3831,7 @@ Every flown cell has N = 200 listed episodes, and every learned cell has all 5 s
 | `cg` | 09:05:35–09:40:06 | `6b83e5c` | `fba9e51` | true |
 | `sinusoid` | 09:40:06–09:50:02 | `6b83e5c` | `fba9e51` | true |
 | `lambda` | 09:50:02–10:08:41 | `6b83e5c` | `fba9e51` | true |
-| `noise` | 10:08:41–12:25:23 | `6b83e5c` | `fba9e51` | true |
+| `noise` (superseded by P7-D4; now `noise_superseded_p7d1/`; current hashes P7-D5 §3) | 10:08:41–12:25:23 | `6b83e5c` | `fba9e51` | true |
 | `mss` | 12:26:18–13:25 | `3582735` | `3582735` | true |
 
 - **Why four arms record `fba9e51`.** `artifacts/e07_run.sh` launched the five arms one process
@@ -3947,17 +3949,17 @@ are deterministic for a given zlib.
 | `sinusoid` | `9b7b683f2cd28a0d5f6c8dd23da9f1715bb149b07ede12aa0844a80d9cbcceca` | `d2442b0ffe47eb9405c2209c3c88d7d34d087a99446a82e0bc40f4a04cccb753` | `0b7b484eefeabc48adec267341175cf37dfea318fcb3e274b3f688ccd270a47e` | `c89725863df63836fffa4f5125e8488d2cab7f24ad3e136285ed9115c4f53b80` |
 | `lambda/lam15` | `408cc19f2124de540e43a2955da97abe3cd730d69a478d0b67b019a2bc71daeb` | `db7e91da333767982ee81c9bc3f27e23619fbb64bb0ee8a9e62ce5a342e2cf2e` | `15206f5bb38a6b0e443bbcbf65df5b52a72266f8b37f7ab50a18743f67ea2152` | `813712cb5ff80064fc5a71df6d4e325ed91fd087384bf03b76477f255587a1cb` |
 | `lambda/lam40` | `87f4c480424e703c4df7e0ccc45153b275b43c1221f7ad06ff71ca18996dbf17` | `3c6ebe2f409289c4d2312bbf0104140529e9a7fe387497f907fc35036fb3acc1` | `c35900f86920c7a70d53ba1c769f13dafaf2c3d6621969511b517c07b903c44a` | `0a6d25d556f4b19d5f1b37f2d714e967346287312d482ff508a2f491149d537e` |
-| `noise/sigma1cm_lat0step` | `d2edf45870e5124ee1cdeee9f9bc73169d54bda635c294d025584654d77fc56a` | `2c0063288b328c6b3243f073cf846f4e4594d64033086ea8c186f02fe24c5d68` | `9dcf6941d9222f2f99d70e6820b21410f0bc69f29c560f2562bbced45ef3da1f` | `03d091bfca35960639755de16edd41c2d2928b4b45b22facba0b748b09411c58` |
-| `noise/sigma2cm_lat0step` | `845704cdfea07b9333f7e4fb2dc38753e639e03d77f1665bc278dbdf2ddae7c3` | `9544d4296da55abeeab35292a425fb1114f81111ef6e02bcb2afb5ac15ea1f7d` | `08faedbfb979774c008d242cc6c7a7169a99df5d963d287bed8c14c29b0dd1e9` | `0de28870959ae8a042ef625b5ceb96a5b54b847d30e515810f6bdc674edf306f` |
-| `noise/sigma4cm_lat0step` | `48e4c707191c71ead6b0fc67bbc3ff5da7067b6758eb8e6eb4e2d092c4dd2394` | `f65076c685c3919722850561baa82ec7303d04e980c6dbc767591824fd4758a2` | `03a2b24849316097d62c5df23edbfd464d463b21ffb527583f4dd8e01a90003f` | `607f14d600ace4ecd5eb7805bb08229f681aa36382e7905827a8b4e65f82e251` |
-| `noise/sigma0cm_lat1step` | `8da8a13c439cba44dbe2adf2403a80fcea999ab55f76a7f4d4d5022a073eb8e2` | `90339ed2e85763ecda7f6019e295882e5b032e04104b25bf267131fbf249db0f` | `fcefd562858d8e5ba3badfce52136863ef5061ed540223eea8552b90b62bc2e1` | `16c5b2efdb2bb4173f2bbf3d8676895afd0cf5816e8fa00bf0660b0176a55fb6` |
-| `noise/sigma1cm_lat1step` | `da80f43784668c107631a03cf724e2ca02f86ec338b3a525712da3c582b797e2` | `025221b79f3b322960e933167143e3a659b4f740d96036c377580c70a32dc902` | `c1b9d831243114cc38810d5662f83bf69e387be9a2b1cb3ba232c2e6590d1fdb` | `4e9bad2d100a00acf668681bbc4e5e54d1226afa0cb14c85a4e9776b23e623aa` |
-| `noise/sigma2cm_lat1step` | `6ad4b167f1edbad579e6d26214394b45e2a3cf6d560956001381aa8d24dfd9b5` | `4d91e6b9244c5f67c19378b03ae5ae11fd56c1fc69bb8399decb3d2b74fb4b72` | `deeecd1564f0b1f5afd7fb9baa74603dbd512b305316820b2499dd826a443c96` | `f102d2293dfda7da80c899fba7becaaf18d23f6fe3518c9223c7f780bba107ed` |
-| `noise/sigma4cm_lat1step` | `77a7395f1a084abc06ebf5e452240fd8fa2f10af5a56ffe775dddcf8d1f0a906` | `06404f4965007afdb189d0fb362130a33d9c77fa4c1eacec96c8bdafd23baa49` | `efe71388722b018db48114c62025df3ca680dcd5f8377d40923172c7007f1158` | `7a5cd216622e614881220fb095443f9bc853c16691f44e151ae6a1592119cff6` |
-| `noise/sigma0cm_lat2step` | `8d8b11adff40515de64bc8b789ccf30bf1733ea5feca110235c7e575e2952682` | `33532960b5d862651a1ef45d1537fbc1a57cb62dfd3520151b5d08c1c921cba7` | `70fb5eb6427165d436f555543ae1e920329cf92c81e9cd07b13275279d504f38` | `0bfbe0ac215581556efe9b322fcf445d4ad1617762b09d6c79f6fe3d926a904d` |
-| `noise/sigma1cm_lat2step` | `d48f57050defabf19594f2fb4c87450db672ec600f1f82956a506484e2f1cf79` | `75e6a663cd5e92bec3f435ba2b74cbcfee3533f2970e1142be32f6eb0d3ae391` | `57106556cbe21a4e5002f3d8ed57321f8dd24438a295e0158dc1366652519f17` | `dd4c951bf3abb320e170b06b0c36e994d181637c291671e27cbc93ea124a68f7` |
-| `noise/sigma2cm_lat2step` | `84c32e9c20f94682a1b01455d8112c7875e44f0305fb8c4a0a56ba923b0ac458` | `cfd9a7ebe8536e9f5d95d6408e9afbd015302618cd0386bd4d18d08f22615ba8` | `136d251f7894afe565d1b56e8ef1ac9c6af3e82f5b72a8ae52668e0d732287c3` | `eae89ce387d2371e88143bea45cca1efe72544bbd274e0fb09ad0906718e8f0f` |
-| `noise/sigma4cm_lat2step` | `2ee64db7e7cdbe5118e4fbe3c5b9d3b0ddd4b4b397ab96e025f9f59bbe37461f` | `e6bf7911b85f5e8b10f1db1e590ef0d3f6cc2955badc6a0ef7c794449471923c` | `42b114336793ac08e3e044d4226fefe763ec21029e4e9afbd7d34d1b72d89b8d` | `245d498584ba74e638a1db943b50d63d395a278f5f6cf2a3f526ca7e056178e6` |
+| `noise/sigma1cm_lat0step` (superseded by P7-D4; now `noise_superseded_p7d1/`; current hashes P7-D5 §3) | `d2edf45870e5124ee1cdeee9f9bc73169d54bda635c294d025584654d77fc56a` | `2c0063288b328c6b3243f073cf846f4e4594d64033086ea8c186f02fe24c5d68` | `9dcf6941d9222f2f99d70e6820b21410f0bc69f29c560f2562bbced45ef3da1f` | `03d091bfca35960639755de16edd41c2d2928b4b45b22facba0b748b09411c58` |
+| `noise/sigma2cm_lat0step` (superseded by P7-D4; now `noise_superseded_p7d1/`; current hashes P7-D5 §3) | `845704cdfea07b9333f7e4fb2dc38753e639e03d77f1665bc278dbdf2ddae7c3` | `9544d4296da55abeeab35292a425fb1114f81111ef6e02bcb2afb5ac15ea1f7d` | `08faedbfb979774c008d242cc6c7a7169a99df5d963d287bed8c14c29b0dd1e9` | `0de28870959ae8a042ef625b5ceb96a5b54b847d30e515810f6bdc674edf306f` |
+| `noise/sigma4cm_lat0step` (superseded by P7-D4; now `noise_superseded_p7d1/`; current hashes P7-D5 §3) | `48e4c707191c71ead6b0fc67bbc3ff5da7067b6758eb8e6eb4e2d092c4dd2394` | `f65076c685c3919722850561baa82ec7303d04e980c6dbc767591824fd4758a2` | `03a2b24849316097d62c5df23edbfd464d463b21ffb527583f4dd8e01a90003f` | `607f14d600ace4ecd5eb7805bb08229f681aa36382e7905827a8b4e65f82e251` |
+| `noise/sigma0cm_lat1step` (superseded by P7-D4; now `noise_superseded_p7d1/`; current hashes P7-D5 §3) | `8da8a13c439cba44dbe2adf2403a80fcea999ab55f76a7f4d4d5022a073eb8e2` | `90339ed2e85763ecda7f6019e295882e5b032e04104b25bf267131fbf249db0f` | `fcefd562858d8e5ba3badfce52136863ef5061ed540223eea8552b90b62bc2e1` | `16c5b2efdb2bb4173f2bbf3d8676895afd0cf5816e8fa00bf0660b0176a55fb6` |
+| `noise/sigma1cm_lat1step` (superseded by P7-D4; now `noise_superseded_p7d1/`; current hashes P7-D5 §3) | `da80f43784668c107631a03cf724e2ca02f86ec338b3a525712da3c582b797e2` | `025221b79f3b322960e933167143e3a659b4f740d96036c377580c70a32dc902` | `c1b9d831243114cc38810d5662f83bf69e387be9a2b1cb3ba232c2e6590d1fdb` | `4e9bad2d100a00acf668681bbc4e5e54d1226afa0cb14c85a4e9776b23e623aa` |
+| `noise/sigma2cm_lat1step` (superseded by P7-D4; now `noise_superseded_p7d1/`; current hashes P7-D5 §3) | `6ad4b167f1edbad579e6d26214394b45e2a3cf6d560956001381aa8d24dfd9b5` | `4d91e6b9244c5f67c19378b03ae5ae11fd56c1fc69bb8399decb3d2b74fb4b72` | `deeecd1564f0b1f5afd7fb9baa74603dbd512b305316820b2499dd826a443c96` | `f102d2293dfda7da80c899fba7becaaf18d23f6fe3518c9223c7f780bba107ed` |
+| `noise/sigma4cm_lat1step` (superseded by P7-D4; now `noise_superseded_p7d1/`; current hashes P7-D5 §3) | `77a7395f1a084abc06ebf5e452240fd8fa2f10af5a56ffe775dddcf8d1f0a906` | `06404f4965007afdb189d0fb362130a33d9c77fa4c1eacec96c8bdafd23baa49` | `efe71388722b018db48114c62025df3ca680dcd5f8377d40923172c7007f1158` | `7a5cd216622e614881220fb095443f9bc853c16691f44e151ae6a1592119cff6` |
+| `noise/sigma0cm_lat2step` (superseded by P7-D4; now `noise_superseded_p7d1/`; current hashes P7-D5 §3) | `8d8b11adff40515de64bc8b789ccf30bf1733ea5feca110235c7e575e2952682` | `33532960b5d862651a1ef45d1537fbc1a57cb62dfd3520151b5d08c1c921cba7` | `70fb5eb6427165d436f555543ae1e920329cf92c81e9cd07b13275279d504f38` | `0bfbe0ac215581556efe9b322fcf445d4ad1617762b09d6c79f6fe3d926a904d` |
+| `noise/sigma1cm_lat2step` (superseded by P7-D4; now `noise_superseded_p7d1/`; current hashes P7-D5 §3) | `d48f57050defabf19594f2fb4c87450db672ec600f1f82956a506484e2f1cf79` | `75e6a663cd5e92bec3f435ba2b74cbcfee3533f2970e1142be32f6eb0d3ae391` | `57106556cbe21a4e5002f3d8ed57321f8dd24438a295e0158dc1366652519f17` | `dd4c951bf3abb320e170b06b0c36e994d181637c291671e27cbc93ea124a68f7` |
+| `noise/sigma2cm_lat2step` (superseded by P7-D4; now `noise_superseded_p7d1/`; current hashes P7-D5 §3) | `84c32e9c20f94682a1b01455d8112c7875e44f0305fb8c4a0a56ba923b0ac458` | `cfd9a7ebe8536e9f5d95d6408e9afbd015302618cd0386bd4d18d08f22615ba8` | `136d251f7894afe565d1b56e8ef1ac9c6af3e82f5b72a8ae52668e0d732287c3` | `eae89ce387d2371e88143bea45cca1efe72544bbd274e0fb09ad0906718e8f0f` |
+| `noise/sigma4cm_lat2step` (superseded by P7-D4; now `noise_superseded_p7d1/`; current hashes P7-D5 §3) | `2ee64db7e7cdbe5118e4fbe3c5b9d3b0ddd4b4b397ab96e025f9f59bbe37461f` | `e6bf7911b85f5e8b10f1db1e590ef0d3f6cc2955badc6a0ef7c794449471923c` | `42b114336793ac08e3e044d4226fefe763ec21029e4e9afbd7d34d1b72d89b8d` | `245d498584ba74e638a1db943b50d63d395a278f5f6cf2a3f526ca7e056178e6` |
 | `mss` | `b76c4f487eeebcdc1fa8f1663ba377cb3e0d1f6f9d13facaf0e8e0fc746d46ff` | `3b5f7ff931daf65313f6cb8f89c1d32697d0d620d52c763a81f1fc11d88d3963` | `246e8688690e83dc07ef2fe13c399ba4e923a61315686e9a5802690bdd3fced5` | `e09f3a727029fc5b3609486d555aa2c7dad506b650a00d1b31782e14dd0467a8` |
 
 `run_info.json` files hold the non-deterministic facts (times, workers, digests, the worker-count
@@ -4474,6 +4476,164 @@ only change since P7-D3 is the m6 word in item 5.
 - H4 not supported, novelty claim withdrawn; H5 pending — scored at Gate 8.
 - No hypothesis reads the noise or λ arm. The M3 artifact and the M4 counts do not move any
   scored statistic across a verdict boundary (items 6–8).
+
+### P7-D6 — Re-review fold-in: noise-to-deck ratios, untested mechanisms, and text errata (2026-10-04)
+
+*Status.*
+- This entry records the text fixes from the `results-skeptic` re-review of `7be11a7` (MJ1,
+  m1–m7 and two notes).
+- Nothing is re-flown or re-scored. No results CSV changes. It changes no success criterion,
+  no episode list, no hypothesis, no threshold and **no verdict**. P3-D1's block SHA-256 stays
+  `21465588…`, and MANIFEST `e6f30e55…` is untouched.
+- P7-D1, P7-D2 and P7-D3 are not edited in place. P7-D1 §4 and P7-D2 carry short appended
+  markers, listed with each item.
+- The only code change is one bullet in `rld.eval.results_md._NOISE_STANDIN`, the
+  `results/results.md` §4 stand-in definition (item 7).
+
+**1. Erratum to P7-D1 §4: noise magnitude against deck motion (review MJ1).**
+- *What P7-D1 §4 said.* "The SS5 `id` deck v_z std is about 0.36 m/s for comparison (plan D0.1,
+  scouting numbers)." `docs/findings.md` §4 inherited it as "σ_v = 0.2 m/s is more than half the
+  SS5 deck v_z standard deviation".
+- *Why it is wrong.* Plan D0.1's scouting table flagged its own sign as unverified. P1-D2 showed
+  that it used the wrong sign: SS5 180° 12 kn is 0.367 m/s with the wrong sign and 0.222 m/s with
+  the right one. It was also one head-seas cell, not the `id` sea state.
+- *The committed values.* The rows are the aft rows of `results/deck_stats.csv` for the 12
+  `id`-regime cells: frigate, headings 45 / 90 / 135 / 180°, speeds 0 / 6 / 12 kn. Each cell's
+  `z_std_model_m` and `vz_std_model_m_s` is over its 40 realizations, at λ = 1/25, model scale.
+  The deck SD of a sea state is the unweighted mean over its 12 cells.
+  - Check: restricting to the 384 realizations the `id` list draws from (seeds 32–39, via
+    `results/deck_stats_seeds.csv`) moves no value by more than 0.0008 m/s or 0.13 mm.
+  - The scouting cell itself (SS5, 180°, 12 kn) is z SD 4.43 cm and v_z SD 0.2215 m/s in the
+    committed row (P1-D2 quoted its recomputation as 0.222).
+
+| sea state | deck z SD, cm (cell range) | deck v_z SD, m/s (cell range) | σ_p / z SD at σ_p = 1 / 2 / 4 cm | σ_v / v_z SD at σ_v = 0.05 / 0.10 / 0.20 m/s |
+|---|---|---|---|---|
+| SS3 | 1.04 (0.39–1.95) | 0.046 (0.015–0.084) | 0.96 / 1.93 / 3.86 | 1.08 / 2.16 / 4.31 |
+| SS4 | 2.08 (1.23–3.42) | 0.086 (0.042–0.145) | 0.48 / 0.96 / 1.92 | 0.58 / 1.17 / 2.33 |
+| SS5 | 3.41 (2.57–5.23) | 0.134 (0.070–0.227) | 0.29 / 0.59 / 1.17 | 0.37 / 0.74 / 1.49 |
+| SS6 | 4.10 (2.71–5.39) | 0.147 (0.068–0.226) | 0.24 / 0.49 / 0.98 | 0.34 / 0.68 / 1.36 |
+
+- *So* σ_v = 0.2 m/s is about 1.5× the deck v_z SD at SS5 and 4.3× at SS3. σ_p = 4 cm is 3.9×
+  SS3's deck z SD and 1.2× SS5's. **SS3 has the worst noise-to-signal ratio** of the four sea
+  states. The noise is per world axis; these ratios compare it with the vertical deck motion
+  only.
+- *Changed in `docs/findings.md` §4.*
+  - The 0.36 m/s comparison is replaced by the table and the ratios.
+  - The bold "**SS3 included**" is replaced by the SS3 ratio.
+  - §8 item 5's "0 % even at SS3" now reads "0–0.5 % at every sea state", followed by the SS3
+    ratio. The `pid_feedforward` counts at 4 cm are 0–1 of 200 per cell.
+- *Marker.* "(corrected in P7-D6)" is appended to the P7-D1 §4 sentence.
+
+**2. Untested mechanisms stated as fact (review m1).** `docs/findings.md` §4 says "No mechanism has
+been tested". Two passages nevertheless asserted one, and no run noised or withheld the forecast
+feed. Both now read "consistent with … (untested)":
+- `residual_ppo_forecast` falling to 3.5–5.7 % "because its `pid_feedforward` base reads the
+  perceived deck";
+- `ppo_forecast`'s 4 cm robustness "comes from an ideal side channel" / "is not a property of the
+  forecast block". This was in §4 and in §8 item 6.
+
+**3. `oracle_gated` under noise (review m2).** "Ideal commit timing does not save it" was wrong.
+Only the future trajectory is ideal; the timing and the gates read the perceived observation.
+Line references verified at `7be11a7`:
+- *Window placement.* The true-future window is placed at `predicted_touchdown_s` =
+  t + max(clearance, 0) / descent rate (`src/rld/control/gated.py` l.153). The oracle calls it at
+  `src/rld/control/oracle.py` l.145–147. Under P7-D4 the clearance is computed from the perceived
+  (noisy) deck.
+- *At-hover check.* A commit needs |clearance − 0.3 m| ≤ 0.05 m on the perceived clearance
+  (`gated.py` l.182). `fallback_commit_s` is null in `configs/control/oracle_gated.yaml`.
+- *Lateral gate.* The gate is set from the perceived lateral error (`src/rld/control/pid.py`
+  l.170–175) and read at `gated.py` l.179–181.
+  - The review cited `pid.py` l.168–172 and `gated.py` l.179–180. Lines 168–169 are the docstring
+    and `cfg = self.pid`, and the gate itself runs to l.175. `gated.py` l.181 is the second read
+    of `lateral_ok`.
+- §4's "Two channels stay ideal" bullet is reworded to match.
+
+**4. Latency alone (review m3).** "Latency alone costs almost nothing" was too strong. It now
+reads "nothing measurable for any learned method; up to 15 points for the PID baselines".
+- *Source.* `results/e07/contrasts.csv` `noise/sigma0cm_lat2step.pid_feedforward_lowvz.id.SS5`:
+  +15.0 [+9.0, +21.0], clean 95.5 % → 80.5 % (`value_a1` 0.955, `value_a2` 0.805).
+- *Learned methods.* None of the 48 latency-only learned contrasts separates. The largest
+  learned point estimate is `sac` SS6 at 2 steps, +5.3 [−2.0, +11.2].
+- §8 item 5's "latency alone moves almost nothing" is corrected the same way.
+
+**5. "The pure PPO policies sit above every classical baseline" under noise (review m4).** The claim
+is narrowed to `ppo` and `ppo_forecast`, and the overlaps are named.
+- *How it was checked.* In each of the 9 σ_p > 0 conditions × 4 sea states (`aggregate.csv` IQM
+  seed CI against `baselines_summary.csv` Wilson CIs, privileged baseline included), the seed-CI
+  lower bound of `ppo` and of `ppo_forecast` is above the highest baseline Wilson upper bound.
+- *`ppo_sinusoid` overlaps `pid_feedforward_lowvz_cut` in two cells:*
+  - SS6, 4 cm, 2 steps: 66.7 [50.2, 74.5] against 45.0 [38.3, 51.9] (90/200), as the reviewer
+    said;
+  - SS5, 2 cm, 2 steps: 97.3 [93.8, 98.8] against 91.5 [86.8, 94.6] (183/200), which the review
+    did not list.
+- At σ_p = 0 with latency, SS3 (both latencies) and SS4 (1 step) tie at the 100 % ceiling.
+
+**6. Tunnelled share of `pid_feedforward_lowvz_cut`'s 4 cm successes (review m5).**
+- Added to the 4 cm success bullet in `docs/findings.md` §4, from
+  `results/e07/noise/sigma4cm_lat*/tunnelled_success.csv` (`n_success_tunnelled` /
+  `n_success`).
+- *0 steps, SS3–SS6:* 26/83, 18/85, 20/93, 14/78.
+- *1 step:* 25/85, 20/85, 17/86, 21/84.
+- *2 steps:* 16/81, 19/80, 29/81, 35/90.
+- That is 17.9–38.9 % of successes across the twelve 4 cm cells. The review's numbers all verify.
+
+**7. White noise: erratum and limitation for P7-D1 §4's rationale (review m6).**
+- *What P7-D1 §4 said.* σ_v was sized as "a relative-velocity estimate smoothed over about 1 s
+  full scale". Such an estimator's error would be correlated over about 0.2 s model, i.e. about
+  6 control steps at 30 Hz.
+- *What is implemented.* `rld.envs.noise.PerceptionNoise.perceive` draws fresh N(0, σ²) per
+  world axis at every 33.3 ms control step (hold 30 Hz, i.e. 1 step). It draws position and
+  velocity independently. So the noise is **white, i.i.d. per control step**.
+- **A correlated estimator error of the same σ was not tested.** This is a limitation of the
+  arm, and the result may depend on it.
+- *Where stated.* `docs/findings.md` §4 (the definition and §8 item 5) and the `results.md` §4
+  stand-in definition (`src/rld/eval/results_md.py` `_NOISE_STANDIN`, one bullet added).
+- *Descriptive, verified from `results/e07/noise/sigma4cm_lat0step/episodes.csv.gz`.* At SS3
+  (4 cm, 0 steps):
+  - all 120 crashes of `gated` and all 120 of `oracle_gated` are `tilt_gt_crash` with
+    `n_contacts` = 0;
+  - 88 of `pid_feedforward`'s 90 crashes are the same, and the other 2 are `off_plate_strike`
+    with contact.
+
+  Whether a correlated error would give the same in-air crashes was not tested.
+- *Marker.* "(Limitation recorded in P7-D6 …)" is appended to P7-D1 §4's rationale sentence.
+
+**8. P7-D2's superseded noise rows (review m7).**
+- *Rows.* P7-D2 §1's and §2's `noise` rows, and its eleven §5 `noise/sigma…` hash rows.
+- *Why marked.* They describe the arm flown at `6b83e5c`. That arm moved unchanged to
+  `results/e07/noise_superseded_p7d1/` at `8ebfd94`, and the path they name,
+  `results/e07/noise/`, now holds the re-flown arm's different bytes.
+- *Marker.* Each row now carries "(superseded by P7-D4; now `noise_superseded_p7d1/`; current
+  hashes P7-D5 §3)".
+- *Still in force.* The §5 hashes stay the authority for the superseded bytes. They are
+  hard-coded in `rld.eval.superseded`, which checks them on every `eval_phase7.py --check`.
+
+**9. Notes, recorded and not changed.**
+- *`hypotheses.csv` sources.* The `sources` column of the four H3 half-rule rows cites "P7-D4 (m6
+  wording)". The relabel itself is recorded in P7-D5 §5; P7-D4 only announced it. The CSV is not
+  changed: changing it would change a scored file's bytes for a citation.
+- *`91f3447`'s message.* It says the noise arm was flown from `182cdea` with a "clean tree".
+  All 11 `run_info.json` record `git_dirty` true. The dirty paths are untracked only:
+  `.claude/worktrees/` everywhere, plus the output directory `results/e07/noise/` in 10 of 11
+  (not in `sigma1cm_lat0step`, the first). The preflight guard checks only `src`, `configs`,
+  `scripts`, `Makefile` and `pyproject.toml`, so "clean" meant "no tracked or untracked change
+  under the code paths". P7-D5 §2 already states this correctly.
+
+**10. Checks and hashes** (this entry's working tree, uncommitted):
+- `results/results.md` is now 2 773 lines, SHA-256
+  `6e84adba62676963072f76d76c69c93f119a51759dcf6b3d6b814ec2c798f2b7`. That supersedes P7-D5
+  §3's `7f737727…`; the only diff is the one added §4 line.
+- A second `scripts/report.py` render is byte-identical (`cmp`), and `scripts/report.py
+  --check` reports byte-identical.
+- `results/e07/contrasts.csv` (`d373299e…`), `results/e07/hypotheses.csv` (`27b4f6ce…`) and every
+  other results CSV are unchanged.
+- `scripts/eval_phase7.py --arm all --check` (read-only) exits 0 with 32 OK lines: 17 conditions,
+  the superseded record and its 11 conditions against P7-D2's hashes, `lambda/feasibility`,
+  `contrasts.csv` and `hypotheses.csv`. Afterwards `git status` shows only
+  `docs/findings.md`, `docs/protocol.md`, `results/results.md` and
+  `src/rld/eval/results_md.py` modified, plus the untracked `.claude/worktrees/`.
+- `make lint` is clean (ruff, ruff-format, mypy --strict). `pytest tests/test_eval_*`: 222
+  passed, 0 skipped.
 
 ## Gates
 | gate | date | result | note |

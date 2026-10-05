@@ -468,6 +468,10 @@ _NOISE_STANDIN: tuple[str, ...] = (
     "- Pad **position and velocity**: delayed by L and **noisy** — zero-mean Gaussian, "
     "independent per world axis, σp and σv = σp / 0.2 s (0 / 0.05 / 0.10 / 0.20 m/s model "
     "scale), drawn from a spawned child of the episode seed.",
+    "- The noise is **white**: drawn i.i.d. at every 33.3 ms control step, position and "
+    "velocity independently. A correlated estimator error of the same σ (P7-D1 §4's "
+    "rationale, a velocity estimate smoothed over about 1 s full scale, i.e. about 6 control "
+    "steps) was **not tested** (P7-D6).",
     "- Pad **orientation and deck normal**: delayed by L, **no noise**.",
     "- Every deck-derived observation entry — relative position, relative velocity, deck "
     "normal, relative tilt and pad-plane clearance — is computed from the perceived deck and "

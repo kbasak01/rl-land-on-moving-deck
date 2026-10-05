@@ -345,10 +345,36 @@ outcome breakdowns included, are in `results/results.md` §2.
 - Latency is **0, 1 or 2 control steps**, i.e. 0 / 33.3 / 66.7 ms model or 0 / 167 / 333 ms full
   scale (`noise_latency_steps` and `noise_latency_ms_effective` in each
   `results/e07/noise/*/summary.csv`).
+- **The noise is white** (P7-D6): drawn i.i.d. at every 33.3 ms control step, position and
+  velocity independently (`rld.envs.noise.PerceptionNoise.perceive`). P7-D1 §4 sized σ_v as a
+  relative-velocity estimate smoothed over about 1 s full scale, whose error would be correlated
+  over about 6 control steps. **A correlated estimator error of the same σ was not tested.**
+- **Noise against deck motion** (P7-D6). Deck SDs are the mean, over the 12 `id`-regime cells
+  (frigate, headings 45 / 90 / 135 / 180°, speeds 0 / 6 / 12 kn), of the per-cell
+  `z_std_model_m` and `vz_std_model_m_s` of the aft rows of `results/deck_stats.csv` (λ = 1/25,
+  model scale; each cell over its 40 realizations). Restricting to the 384 realizations the `id`
+  list draws from (seeds 32–39, `results/deck_stats_seeds.csv`) moves no value by more than
+  0.0008 m/s or 0.13 mm. The noise is per world axis; the comparison is with the vertical deck
+  motion only.
+
+| sea state | deck z SD, cm (cell range) | deck v_z SD, m/s (cell range) | σ_p / z SD at σ_p = 1 / 2 / 4 cm | σ_v / v_z SD at σ_v = 0.05 / 0.10 / 0.20 m/s |
+|---|---|---|---|---|
+| SS3 | 1.04 (0.39–1.95) | 0.046 (0.015–0.084) | 0.96 / 1.93 / 3.86 | 1.08 / 2.16 / 4.31 |
+| SS4 | 2.08 (1.23–3.42) | 0.086 (0.042–0.145) | 0.48 / 0.96 / 1.92 | 0.58 / 1.17 / 2.33 |
+| SS5 | 3.41 (2.57–5.23) | 0.134 (0.070–0.227) | 0.29 / 0.59 / 1.17 | 0.37 / 0.74 / 1.49 |
+| SS6 | 4.10 (2.71–5.39) | 0.147 (0.068–0.226) | 0.24 / 0.49 / 0.98 | 0.34 / 0.68 / 1.36 |
+
+  - So the noise is largest against the deck motion at **SS3**: at 4 cm, σ_p is 3.9× and σ_v
+    4.3× the deck SD there, against 1.2× and 1.5× at SS5. Under noise the calm sea state is not
+    the easy case.
+  - The earlier comparison with "about 0.36 m/s" (plan D0.1's scouting table, SS5 180° 12 kn)
+    is withdrawn. P1-D2 showed that table used the wrong sign; the committed value of that one
+    cell is 0.221 m/s, and the `id` SS5 mean is 0.134 m/s.
 - **Two channels stay ideal.** The forecast methods' past-only ship-motion feed (P7-D1 §4), and
-  `oracle_gated`'s privileged commit-timing context, which is built from the true deck trajectory
-  (`PrivilegedContext.from_env`). `oracle_gated`'s tracking reads the perceived observation, like
-  every other controller's.
+  `oracle_gated`'s privileged context, the true future deck trajectory
+  (`PrivilegedContext.from_env`). Only the trajectory is ideal: where `oracle_gated` places its
+  window, its at-hover check, its lateral gate and its tracking all read the perceived
+  observation, like every other controller's (see below; P7-D6).
 - **Superseded arm.** The arm first flown at `6b83e5c` under the Phase 2 stand-in is kept
   unchanged in `results/e07/noise_superseded_p7d1/`, and `scripts/eval_phase7.py --check`
   verifies its P7-D2 hashes. That stand-in delayed and noised only the six relative entries, so
@@ -500,7 +526,8 @@ Cell format: learned = IQM [95 % CI]; baselines = rate [Wilson 95 % CI] k/N; aft
 | `oracle_gated` (privileged) | 64.5 [57.7, 70.8] 129/200; T71 | 62.0 [55.1, 68.4] 124/200; B4 T72 | 7.5 [4.6, 12.0] 15/200; H2 B10 T173 | 0.0 [0.0, 1.9] 0/200; C125 O1 T74 | 60.5 [53.6, 67.0] 121/200; B2 T77 | 5.0 [2.7, 9.0] 10/200; B15 T175 | 0.0 [0.0, 1.9] 0/200; C121 O2 T77 |
 
 
-- **Latency alone costs almost nothing (review M1, corrected by P7-D4).**
+- **Latency alone costs nothing measurable for any learned method, and up to 15 points for the
+  PID baselines (review M1, corrected by P7-D4; wording corrected in P7-D6).**
   - At 2 steps (66.7 ms model, 333 ms full scale) with σ_p = 0, at `id` SS5
     (`noise/sigma0cm_lat2step`):
     - `pid_feedforward` 92.5 % [88.0, 95.4] (185/200);
@@ -511,8 +538,10 @@ Cell format: learned = IQM [95 % CI]; baselines = rate [Wilson 95 % CI] k/N; aft
     of them are PID baselines:
     - `pid_feedforward` at SS5: +2.5 [+0.5, +5.0] points at 1 step, +6.5 [+3.0, +10.5] at 2 steps;
     - `pid_feedforward_lowvz`: +7.0 [+2.5, +11.5] at SS5 and 1 step; +2.0 to +15.0 at SS3–SS6 and
-      2 steps, lost mostly to `bounce` (e.g. SS5 H1 B38 against B9 clean).
-    - No learned method, `gated` or `oracle_gated` separates under latency alone.
+      2 steps, lost mostly to `bounce` (e.g. SS5 H1 B38 against B9 clean). The largest is SS5 at
+      2 steps, +15.0 [+9.0, +21.0] (95.5 → 80.5 %).
+    - No learned method, `gated` or `oracle_gated` separates under latency alone. The largest
+      learned point estimate is `sac`'s +5.3 [−2.0, +11.2] at SS6, 2 steps.
   - *The superseded arm* read 0.0 % / 0.2 % / 35.3 % for the same three cells
     (`results/e07/noise_superseded_p7d1/sigma0cm_lat2step/`). Those numbers measured the Phase 2
     stand-in's mixed-timestamp deck velocity, v_pad(t−L) + v_drone(t) − v_drone(t−L), fed through
@@ -525,17 +554,25 @@ Cell format: learned = IQM [95 % CI]; baselines = rate [Wilson 95 % CI] k/N; aft
   - At 4 cm and 0 steps, SS3 / SS4 / SS5 / SS6 (`noise/sigma4cm_lat0step`):
     - `ppo_forecast` 96.3 / 95.2 / 95.8 / 89.8 % (its feed stays ideal; see below);
     - `ppo` 79.8 / 81.5 / 79.2 / 75.7, and `ppo_sinusoid` 69.7 / 73.5 / 70.0 / 68.5;
-    - `pid_feedforward_lowvz_cut` 41.5 / 42.5 / 46.5 / 39.0;
+    - `pid_feedforward_lowvz_cut` 41.5 / 42.5 / 46.5 / 39.0 (83 / 85 / 93 / 78 successes, of
+      which 26 / 18 / 20 / 14 are tunnelled; 18–39 % across the twelve 4 cm cells, and 35 of 90
+      at SS6, 2 steps; `tunnelled_success.csv`, table below);
     - `pid_track_descend` 21.5 / 22.5 / 22.0 / 24.5, and `sac` 19.2 / 16.5 / 15.8 / 10.5;
     - `pid_feedforward_lowvz` 5.5–9.0, `residual_ppo_forecast` 3.5–5.5, `residual_ppo` 2.5–3.2;
     - `pid_feedforward` 0.0 / 0.0 / 0.0 / 0.5 (1/200 at SS6), and `gated` and `oracle_gated`
-      0.0 at every sea state, **SS3 included**.
+      0.0 at every sea state. SS3 is where the noise is largest against the deck motion
+      (σ_p 3.9×, σ_v 4.3× the deck SD; table above).
   - The 1- and 2-step 4 cm conditions sit within a few points of these, e.g. `ppo` 73.2–80.2 and
     `ppo_forecast` 90.3–97.0. No noisy-vs-noisy contrast was computed, so that is a reading of the
     tables only.
   - *How they fail differs* (4 cm, 0 steps, SS3):
     - `pid_feedforward`: crashes, off-pad, timeouts (C90 O34 H20 B13 T43 of 200);
-    - `gated` / `oracle_gated`: crashes and timeouts (C120 T80 each);
+    - `gated` / `oracle_gated`: crashes and timeouts (C120 T80 each). All 120 crashes of each
+      are `tilt_gt_crash` with 0 contacts, i.e. tilt past 60° in the air; so are 88 of
+      `pid_feedforward`'s 90 (the other 2 are `off_plate_strike`). Read from
+      `noise/sigma4cm_lat0step/episodes.csv.gz` (`termination_reason`, `n_contacts`); descriptive
+      only. Whether a correlated estimator error of the same σ gives the same in-air crashes was
+      not tested;
     - `pid_track_descend`: bounces and timeouts (B95 T62);
     - `residual_ppo`: all classes (C170 O311 H302 B187 T1 per 1 000);
     - `ppo`: off-pad, hard landings, bounces (O44 H76 B77).
@@ -554,28 +591,45 @@ Cell format: learned = IQM [95 % CI]; baselines = rate [Wilson 95 % CI] k/N; aft
       methods, whose base it is;
     - velocity noise passes through the feedforward, which commands k_ff = 1.08 × the perceived
       pad velocity;
-    - σ_v = 0.2 m/s is more than half the SS5 deck v_z standard deviation of about 0.36 m/s
-      (plan D0.1, scouting numbers).
+    - σ_v = 0.2 m/s is 1.5× the `id` SS5 deck v_z SD (0.134 m/s) and 4.3× SS3's (0.046 m/s);
+      table above (corrected in P7-D6).
 
     `pid_track_descend` has no feedforward and still falls to 21.5–24.5 %. So that explanation
     could at best be partial. No run separated position noise from velocity noise.
-- **Under noise, the pure PPO policies sit above every classical baseline** (unpaired reading).
-  - At 4 cm the lowest `ppo` seed-CI bound in any cell is 67.5 %. The highest Wilson upper bound
-    of any classical baseline is 53.4 % (`pid_feedforward_lowvz_cut`, SS5, 0 steps).
+- **Under noise, `ppo` and `ppo_forecast` sit above every classical baseline; `ppo_sinusoid`
+  does in all but two cells** (unpaired reading; narrowed in P7-D6).
+  - At 4 cm the lowest `ppo` seed-CI bound in any cell is 67.5 %, and `ppo_forecast`'s 87.5 %.
+    The highest Wilson upper bound of any classical baseline is 53.4 %
+    (`pid_feedforward_lowvz_cut`, SS5, 0 steps).
+  - In every one of the 9 σ_p > 0 conditions × 4 sea states, the seed-CI lower bound of `ppo`
+    and of `ppo_forecast` is above the highest Wilson upper bound of the six baselines in that
+    cell (`aggregate.csv`, `baselines_summary.csv`).
+  - `ppo_sinusoid`'s CI overlaps `pid_feedforward_lowvz_cut`'s in two cells: SS6, 4 cm, 2 steps,
+    66.7 [50.2, 74.5] against 45.0 [38.3, 51.9] (90/200); and SS5, 2 cm, 2 steps, 97.3 [93.8,
+    98.8] against 91.5 [86.8, 94.6] (183/200).
   - No method-vs-method contrast was computed in this arm, and the intervals are of different
     kinds (seed bootstrap vs Wilson).
-  - Under latency alone, learned and classical controllers both stay near their clean values.
+  - Under latency alone, no learned controller separates from its clean value, and the PID
+    baselines lose up to 15 points (above). The SS3 cells, and SS4 at 1 step, are at the 100 %
+    ceiling for the pure PPO methods and the best baseline alike.
 - **`ppo_forecast`'s noise robustness is not evidence that forecasting helps (review M2).**
   - Under P7-D4 every deck-derived observation entry is perceived. What stays ideal is the
     forecast methods' ship-motion feed and `oracle_gated`'s privileged context.
   - `ppo_forecast` keeps 89.8–97.0 % at 4 cm, against `ppo`'s 73.2–81.5 %. It is the only pure
     policy with an undelayed, noise-free view of the ship's motion.
-  - `residual_ppo_forecast` has the same feed and still falls to 3.5–5.7 %, because its
-    `pid_feedforward` base reads the perceived deck.
-  - `oracle_gated`'s ideal commit timing does not save it: 0.0 % at every 4 cm cell, like
-    `gated`.
-  - Read the `ppo_forecast` result as how much a policy leans on an ideal side channel. It is not
-    a property of the forecast block.
+  - `residual_ppo_forecast` has the same feed and still falls to 3.5–5.7 %. That is consistent
+    with its `pid_feedforward` base reading the perceived deck (untested).
+  - `oracle_gated` is 0.0 % at every 4 cm cell, like `gated`. Its privileged context is the true
+    future deck trajectory, but its commit timing and its gates read the perceived observation
+    (corrected in P7-D6):
+    - the true-future window is placed at `predicted_touchdown_s`, t + max(clearance, 0) /
+      descent rate, from the perceived (noisy) clearance (`src/rld/control/gated.py` l.153,
+      called at `src/rld/control/oracle.py` l.145–147);
+    - a commit also needs the at-hover check on the perceived clearance (`gated.py` l.182,
+      ±5 cm of the 0.3 m hover height) and the lateral gate on the perceived lateral error
+      (`src/rld/control/pid.py` l.170–175, read at `gated.py` l.179–181).
+  - The `ppo_forecast` result is consistent with the policy leaning on its ideal side channel
+    (untested: no run noised or withheld the feed). It is not evidence for the forecast block.
 - **Measurement reliability under noise.**
   - *Detector disagreement* exceeds Gate 2's 1 % only in the three σ_p = 4 cm conditions:
     349 / 369 / 375 of 28 800 (1.21 / 1.28 / 1.30 %) at 0 / 1 / 2 steps. Every other condition
@@ -785,12 +839,16 @@ real ship**. MSS's spectrum match and Octave parity pass (P7-D2 §3). Sources:
    (§3). This is not explained.
 5. **The perception arm was re-flown (P7-D4).** The first arm's 2-step-latency collapse
    (`pid_feedforward`, `gated` and `oracle_gated` crashing in 200 of 200) was an artifact of the
-   Phase 2 stand-in's mixed timestamps. It is withdrawn. Under P7-D4, latency alone moves almost
-   nothing, and σ_p = 4 cm (σ_v = 0.2 m/s) takes `pid_feedforward`, `gated` and `oracle_gated` to
-   0 % even at SS3 (§4). Why noise does this was **not tested**.
-6. **`ppo_forecast`'s noise robustness comes from an ideal side channel** (§4). Under P7-D4 every
-   deck-derived observation entry is perceived. Only the forecast methods' ship-motion feed and
-   `oracle_gated`'s privileged context stay ideal. Do not read it as a forecasting result.
+   Phase 2 stand-in's mixed timestamps. It is withdrawn. Under P7-D4, latency alone moves no
+   learned method measurably and costs the PID baselines up to 15 points (`pid_feedforward_lowvz`,
+   SS5, 2 steps). σ_p = 4 cm (σ_v = 0.2 m/s) takes `pid_feedforward`, `gated` and `oracle_gated`
+   to 0–0.5 % at every sea state. SS3 has the worst noise-to-signal ratio: there σ_p is 3.9× and
+   σ_v 4.3× the deck SD (§4, P7-D6). The noise is white, i.i.d. per control step; a correlated
+   estimator error of the same σ was not tested. Why noise does this was **not tested**.
+6. **`ppo_forecast`'s noise robustness is consistent with an ideal side channel (untested)**
+   (§4). Under P7-D4 every deck-derived observation entry is perceived. Only the forecast
+   methods' ship-motion feed and `oracle_gated`'s privileged future trajectory stay ideal. No run
+   noised or withheld the feed. Do not read it as a forecasting result.
 7. **Tunnelling outside `id` is unaudited.**
    - P6-D5's bound (3 / 1 / 0 / 3 per 1 000) covers `id` SS6 only. The direct counts, which are a
      superset, are in §2 (matrix) and §4 (noise arm).

@@ -1031,6 +1031,7 @@ Each listed episode flown on the matched sinusoid built by the training builder 
 **Stand-in definition (P7-D4, a dated deviation from P7-D1 §4 and the Phase 2 stand-in).** What is perceived is the **deck**: the analytic deck sample at the pad. At control step k the perceived sample is the true sample of step k − L, with L the configured latency quantised down to whole control steps (warm-up: the oldest available sample; no hold, 30 Hz).
 
 - Pad **position and velocity**: delayed by L and **noisy** — zero-mean Gaussian, independent per world axis, σp and σv = σp / 0.2 s (0 / 0.05 / 0.10 / 0.20 m/s model scale), drawn from a spawned child of the episode seed.
+- The noise is **white**: drawn i.i.d. at every 33.3 ms control step, position and velocity independently. A correlated estimator error of the same σ (P7-D1 §4's rationale, a velocity estimate smoothed over about 1 s full scale, i.e. about 6 control steps) was **not tested** (P7-D6).
 - Pad **orientation and deck normal**: delayed by L, **no noise**.
 - Every deck-derived observation entry — relative position, relative velocity, deck normal, relative tilt and pad-plane clearance — is computed from the perceived deck and the drone's **current, true** state.
 - The drone's **own state** (attitude, rates, velocity), time, last action and contact flag: **current and clean**. Own velocity + relative velocity is therefore a consistent, stale deck velocity plus noise.
