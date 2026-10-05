@@ -4635,6 +4635,193 @@ is narrowed to `ppo` and `ppo_forecast`, and the overlaps are named.
 - `make lint` is clean (ruff, ruff-format, mypy --strict). `pytest tests/test_eval_*`: 222
   passed, 0 skipped.
 
+## Phase 8
+
+### P8-D1 — Phase 8 definitions: what is exported, parity, latency and how H5 is scored, fixed before any timing (2026-10-05)
+
+*Status.* This entry is committed **alone**, before any latency number is measured. The user made
+the decisions in §1–§4 on 2026-10-05, at the Phase 8 plan review. The other items are readings of
+P3-D1 §8 and of the plan's Phase 8 that this entry fixes so they cannot move after a number is seen.
+**It changes no threshold, no prediction, no episode list and no success criterion.** H5 is scored
+exactly as P3-D1 §8 states it. The P3-D1 block SHA-256 stays `21465588…`.
+
+*Before this entry.* A one-off prototype (scratch, uncommitted) exported the `ppo` seed-4 actor and
+ran one 1 000-observation draw through ORT CPU, CUDA and TensorRT and the folded torch module on
+CPU and CUDA, with TF32 off. Every max error was 3e-7 to 7e-7 against a threshold of 1e-4. Two
+facts from it shaped §5 and §10: the export is byte-reproducible (two exports, same SHA-256), and
+TensorRT's max error moved between two sessions (3.6e-7, then 7.2e-7). **Nothing was timed.**
+
+**1. Which methods (user, 2026-10-05).** The P7-D1 §3 rule, applied to each family: rank by IQM
+success at `id` SS6, aft pad, JONSWAP, in the committed e05/e06 `aggregate.csv`.
+- *Best pure RL:* **`ppo`**, IQM 0.9817 [0.980, 0.985] (`ppo_forecast` 0.9800). This is the
+  method P7-D1 §3 already selected.
+- *Best residual:* **`residual_ppo_forecast`**, IQM 0.9683 [0.965, 0.980], against `residual_ppo`
+  0.9617 [0.957, 0.978]. **The two CIs overlap.** The choice is a *selection* by the rule, not a
+  result: nothing here says `residual_ppo_forecast` is the better residual method.
+
+**2. Which seed (user, 2026-10-05).** The median seed by the selection cell.
+- *Rule.* Rank the five seeds worst to best by per-seed success at `id` SS6 aft
+  (`results/e05/seeds.csv`, `results/e06/seeds.csv`). Among equal success, the higher p95
+  `rel_vz_normal` ranks worse (lower is better). If both are equal, the lower seed ranks better.
+  Take the 3rd of 5.
+- *`ppo`:* success 0.985, 0.98, 0.98, 0.985, 0.98 for seeds 0–4. Order worst → best: 2, 1, **4**,
+  3, 0. **Seed 4.**
+- *`residual_ppo_forecast`:* success 0.985, 0.965, 0.97, 0.965, 0.97. Order: 1, 3, **4**, 2, 0.
+  **Seed 4.**
+- The user computed both. The values were checked against `seeds.csv` before this entry, and
+  `rld.deploy.selection` recomputes them into `results/latency/selection.csv` on every `make bench`.
+  The final tie-break (lower seed) is not exercised by either method.
+
+**3. What is exported (user, 2026-10-05).**
+- Four graphs: `ppo` seeds {0, 4} and `residual_ppo_forecast` seeds {0, 4}, each from its
+  `final/` checkpoint (`artifacts/runs/<method>/<seed>/final/{model.zip, vecnormalize.pkl}`).
+  Seed 0 is the plan's "first task"; seed 4 is §2's median.
+- Both methods are the same architecture: a 512×2 tanh MLP actor with a 3-wide linear mean head.
+  They differ only in input width, 25 (`ppo`) against 31 (`residual_ppo_forecast`, 25 + the 6-entry
+  forecast block).
+- **Parity is per seed** (all four graphs). **Latency is per architecture**: the timed graph of each
+  architecture is its median seed's (seed 4). Weights do not change an MLP's latency.
+- **H5 is scored on the `ppo` (25-input) graph** only. The 31-input graph is timed and reported
+  beside it, and it does not score H5.
+
+**4. The graph boundary (user, 2026-10-05).**
+- *Inside the graph:* raw observation `x` (float32, `[batch, D]`) →
+  `clip((x − μ) / √(σ² + ε), −c, c)` → actor MLP (`mlp_extractor.policy_net`) → mean action
+  (`action_net`) → `clip(·, −1, 1)`. μ and σ² are the frozen `VecNormalize` `obs_rms` statistics,
+  ε = 1e-8 and c = `clip_obs` = 10, all read from `vecnormalize.pkl` and held as float32 constants
+  (√(σ² + ε) is computed in float64, then cast once). This is exactly `LearnedPolicy.network_action`:
+  `normalize_obs`, SB3 `predict(deterministic=True)` (which clips the mean to the ±1 action box),
+  then clip ±1.
+- *Outside the graph, for `residual_ppo_forecast`:* the `pid_feedforward` base controller, the
+  α = 0.3 composition `rld.rl.residual.compose_residual` (`clip(a_base + α·π(o), −1, 1)`), and the
+  DLinear-OLS forecaster (`residual_interval`, ORT CPU, 1 thread) with its past-only ship-motion
+  feed that builds the 6-entry block. The base is stateful (integrator, descent latch) and the
+  forecaster is a second ONNX graph, so neither belongs in the policy graph. All three are costed in
+  the end-to-end budget (§9), not in H5.
+- Opset 18, dynamic batch axis only, TorchScript exporter (`dynamo=False`, as dmf's
+  `export_onnx`), input name `input`, output name `output` (dmf's `INPUT_NAME`/`OUTPUT_NAME`).
+- Each graph is written to `artifacts/onnx/<method>_s<seed>.onnx` (gitignored) with a sidecar JSON:
+  SHA-256 of `model.zip`, `vecnormalize.pkl` and the graph; obs dim; μ, σ², ε and c. The graph
+  SHA-256s are also committed in `results/latency/run_info.json`.
+
+**5. The harness: a rank-2 mirror of dmf's (user, 2026-10-05).**
+- dmf's `benchmark_onnxruntime`, `_batches` and `check_parity` require rank-3 `(n, L, C)` windows,
+  and this graph's input is rank 2. `third_party/` is read-only. So `rld.deploy` carries a thin
+  rank-2 loop that mirrors those functions **line for line**:
+  - 200 warmup iterations, then 2 000 timed;
+  - host to host: a NumPy batch in, a NumPy result out, per iteration;
+  - `torch.cuda.synchronize()` after every timed GPU iteration (and after the warmup);
+  - 64 distinct inputs cycled (dmf's `BENCH_N_WINDOWS`), seed 20260910 (dmf's
+    `BENCH_WINDOW_SEED`), drawn N(μ, σ̃) from the timed graph's own normaliser;
+  - ORT `intra_op_num_threads` = `inter_op_num_threads` = the configured thread count, read back;
+    `torch.set_num_threads` likewise;
+  - the realized provider is read back from `session.get_providers()`, and a configuration whose
+    requested provider is not realized is **refused**, never reported;
+  - peak host memory = `ru_maxrss` of the configuration's own process; device memory as dmf's.
+- *Reused from dmf unchanged:* `BenchConfig`, `BenchResult`, `_stats`, `environment_stamp`,
+  `write_benchmark_json`, `providers.preload_gpu_libraries`, `disable_tf32`, `session_providers`,
+  `tf32_environment`, `GPU_PROVIDERS`, `PARITY_SEEDS`, and the subprocess-per-configuration design
+  of `harness.run_job_subprocess` (one fresh child per configuration, run under
+  `tf32_environment()`).
+- The torch-eager reference rows mirror dmf's `benchmark_torch` (eager only; no `torch.compile`
+  row, because the plan names eager reference rows only).
+- **This loop is recorded as method-identical to Project 4's harness.** A test pins the rank-2 loop's
+  structure (warmup count, timed count, refusal, synchronisation) to dmf's constants.
+
+**6. Numeric parity.**
+- *Draws.* Five draws, seeds dmf's `PARITY_SEEDS` = (20260909, 0, 1, 7, 42). Each draw is 1 000
+  observations from the graph's own normaliser, σ̃ = √(σ² + ε) per entry: rows 0–799 from
+  N(μ, σ̃), rows 800–999 from N(μ, (20 σ̃)²). The tail rows push most entries past |z| = 10, so the
+  clip branch is exercised; the clipped fraction is reported per draw.
+- *Reference.* The PyTorch path of `LearnedPolicy.network_action`, batched, on the CPU, in its own
+  arithmetic: `VecNormalize.normalize_obs` (float64) → float32 → SB3 `predict(deterministic=True)`
+  → clip ±1. The normaliser is applied outside the network, so the fold itself is under test.
+- *Providers checked.* ORT `CPUExecutionProvider`, `CUDAExecutionProvider`,
+  `TensorrtExecutionProvider`, plus the folded torch module on CPU (`torch:cpu`) and on CUDA
+  (`torch:cuda`), because the torch-eager reference rows are timed too. TF32 is off on every path
+  (`NVIDIA_TF32_OVERRIDE=0`, ORT CUDA `use_tf32=0`, torch flags), and the run is in a child process
+  started under `tf32_environment()`.
+- *Criterion.* `max_abs_err < 1e-4 · max(1, |y|max)` (dmf's scale-relative form, P7-D3 of
+  Project 4), with |y|max read off the reference. The unscaled `< 1e-4` verdict is reported beside
+  it. Actions are in [−1, 1], so the two coincide here.
+- *Verdict.* Per (graph, provider), the worst of the five draws.
+- **Refusal.** A provider is refused for an architecture if **any** exported seed of that
+  architecture fails on it. A refused (architecture, provider) is written to `latency.csv` as
+  `refused` with no number and is **never timed**. The latency driver reads `parity.csv` and will not
+  launch a refused configuration; a test asserts that.
+
+**7. Closed-loop parity.**
+- *Episodes.* The frozen `id` list (`results/episodes/id.parquet`), aft pad as listed, JONSWAP,
+  noise off (committed `configs/env/noise.yaml`, `enabled: false`; asserted), λ = 1/25. The rows
+  with listed `index` 0–12 of SS3 and SS4 and `index` 0–11 of SS5 and SS6: 13 + 13 + 12 + 12 =
+  **50**, in committed order.
+- *Policies.* The four exported (method, seed) pairs. Each flies the 50 episodes twice through the
+  unchanged `rld.eval.runner`:
+  - **PyTorch:** `rld.rl.train.build_policy`, exactly as e05/e06 flew it;
+  - **ONNX:** the same built policy with `LearnedPolicy.network_action` overridden by
+    `rld.deploy.onnx_policy.OnnxNetworkMixin` (ORT CPU, 1 thread, the raw `policy_input` in). The
+    residual base, the composition and the forecaster are untouched.
+- *Pass.* For each policy, all 50 episodes have identical outcome classes. Also reported: max
+  |Δ touchdown `rel_vz_normal_m_s`| and max |Δ steps|. As a consistency check, the PyTorch rows are
+  compared with the committed e05/e06 rows of the same episodes.
+
+**8. Latency grid.**
+- *Backends:* `ort-cpu`, `ort-cuda`, `ort-trt`, and the reference rows `torch-eager` on CPU and on
+  CUDA.
+- *Per architecture* (`ppo` s4, `residual_ppo_forecast` s4): every backend × batch {1, 32} at
+  1 thread; plus a thread sweep {1, 2, 4, 8} for `ort-cpu` and `torch-eager` CPU at batch {1, 32}.
+  That is 22 configurations per architecture, minus any refused.
+- One fresh subprocess per configuration, run one at a time, with no other benchmark or training
+  job running on the machine.
+- *Recorded:* p50, p90, p99, mean, std, throughput, peak host memory, peak device memory, realized
+  providers, threads, `tf32` (False), environment stamp. Written to `results/latency/latency.json`
+  (dmf's `write_benchmark_json`) and `latency.csv`.
+
+**9. End-to-end control-step budget.**
+- *Where.* Inside real environment episodes: the §7 episodes, flown by the ONNX policy of each
+  architecture's median seed, in one process, every component at 1 thread. One extra episode (the
+  first of the 50) is flown first as an untimed warmup.
+- *Components timed per control step* (`time.perf_counter`):
+  - observation build (`DeckLandingAviary._computeObs`);
+  - forecaster step: `forecast_block` (DLinear-OLS window build, ORT run, lead extraction) —
+    `residual_ppo_forecast` only;
+  - base act (`pid_feedforward.act`) — residual only;
+  - the ONNX policy (ORT CPU, batch 1, 1 thread, `session.run` on the raw input);
+  - composition (`compose_residual`) — residual only.
+- *Reported:* p50 and p99 of each component and of their per-step sum, against the control period
+  1/30 s = **33.3 ms** (model scale).
+- *Reported separately, as simulation, not deployment:* physics stepping (`env.step` minus its
+  observation build: 8 PyBullet substeps, contact polling, reward) and the ship-motion feed's
+  `advance_to` (the analytic dmf motion standing in for a ship motion sensor).
+
+**10. H5, restated verbatim, and how it is read.**
+- *P3-D1 §8:* "At batch 1, the exported policy MLP's p50 latency on ORT CPU (1 thread) is lower than
+  on every parity-passing GPU provider, by a factor of **≥ 2×**. Test: Project 4's harness, 200
+  warmup + 2 000 timed runs. Scored on p50, with p99 reported."
+- *GPU providers:* ORT CUDA and ORT TensorRT, those that pass §6 parity for the `ppo` architecture.
+  The torch-eager CUDA row is not the exported graph; its ratio is printed as context and not scored.
+- *Ratio per provider:* p50(GPU provider, batch 1) / p50(ORT CPU, batch 1, 1 thread).
+- **Supported:** every ratio ≥ 2. **Not supported:** any ratio < 2. If no GPU provider passes parity,
+  H5 is "not scored — no parity-passing GPU provider". The p99 ratios are reported beside it.
+- One measurement per configuration, as in Project 4; no confidence interval on a latency ratio is
+  claimed.
+- *What may be quoted.* Only ratios of rows measured on this machine (`results/latency/`). The RTX
+  A4000 and the i9-10980XE stand in for an embedded flight computer; **nothing here measures one,
+  and no sentence may imply a real embedded target or real flight.** Everything is simulation.
+
+**11. Outputs and `--check`.**
+- `make bench` writes `results/latency/{selection.csv, parity.csv, closed_loop_parity.csv,
+  closed_loop_episodes.csv, latency.json, latency.csv, e2e_budget.csv, h5.csv, run_info.json}`.
+- `scripts/bench.py --check` re-exports, re-runs parity and the closed loop, and compares:
+  - byte for byte: `selection.csv`, `closed_loop_parity.csv`, `closed_loop_episodes.csv`, and every
+    deterministic-provider row of `parity.csv` (`CPUExecutionProvider`, `torch:cpu`) plus the graph
+    SHA-256s;
+  - for the GPU rows of `parity.csv` (CUDA, TensorRT, `torch:cuda`): the verdict columns, n, |y|max
+    and the threshold byte for byte, and the max error within the threshold. TensorRT's kernel
+    selection is not bit-reproducible between sessions (prototype above), so its last digits cannot
+    be byte-checked.
+  - Latency, e2e and `h5.csv` are measurements and are not byte-checked.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|
