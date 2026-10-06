@@ -255,8 +255,10 @@ No multiplicity correction was applied (P3-D4 #9).
     (D0.4). The transfer at that cell is the finding.
   - Outside the scored cell the picture is weaker for `ppo_sinusoid` (unpaired, untested). At `id`
     SS6 its seed CI, 97.3 [96.7, 97.8], lies below `ppo`'s 98.2 [98.0, 98.5]
-    (`results/e07/matrix/aggregate.csv`). Under σ_p = 4 cm noise it is 6–11 points below `ppo` at
-    every sea state, e.g. 69.7 vs 79.8 at SS3 with 0 steps (`results/e07/noise/sigma4cm_lat*/aggregate.csv`).
+    (`results/e07/matrix/aggregate.csv`). At σ_p = 4 cm with no latency it is 7.2–10.2 points below
+    `ppo` at every sea state, e.g. 69.7 vs 79.8 at SS3 (`results/e07/noise/sigma4cm_lat0step/aggregate.csv`).
+    Across the three 4 cm conditions the gap is 2.7–10.2 points (`sigma4cm_lat*/aggregate.csv`).
+    *(Corrected at Gate 9 from "6–11 points below at every sea state".)*
     *(Scope narrowed at the Gate 7 review.)*
 - **H5** waits for Phase 8. → scored at Gate 8, P8-D2.
 
@@ -268,8 +270,8 @@ baselines.
 - SS6 is outside every method's training distribution.
 - The regimes share realizations (P3-D1 §2), so regime-vs-regime readings are not independent
   draws.
-- `static` (all 12 methods 100 %; the forecast methods not run, see P7-D2) is in
-  `results/results.md` §1.
+- `static` (all 10 methods flown there score 100 %; the two forecast RL methods were not run,
+  see P7-D2) is in `results/results.md` §1.
 
 Cell format: learned = IQM [95 % CI]; baselines = rate [Wilson 95 % CI] k/N; after the semicolon, losses by class (C crash, O off_pad, H hard_landing, B bounce, T timeout; counts of 1 000 for learned rows, of 200 for baselines; – = none).
 
@@ -357,14 +359,15 @@ is named.
     two episodes above its 198/200 at `id`, and one above its 199/200 at `unseen_heading` and
     `unseen_vessel`. The two residual methods' 99.5 at `id` SS5 lie inside it (upper bound
     99.73).
-  - At `unseen_vessel` SS6 it scores 98.5 % [95.7, 99.5] (197/200), against 99.0–99.5 % for the
+  - At `unseen_vessel` SS6 it scores 98.5 % [95.7, 99.49] (197/200), against 99.0–99.5 % for the
     PPO family. Four of those five point estimates (0.990–0.9933) lie inside its Wilson interval
     [0.9568, 0.99489]; `ppo_sinusoid`'s 0.995 is just above it.
     *(Corrected at Gate 9. The original said the interval contains every PPO-family point
     estimate, which rounding to 99.5 hid, and the first correction overstated it the other way.)*
   - **On the S175 hull (`unseen_vessel`), these tables show no sea state at which
-    `pid_feedforward` is shown to be beaten** (unpaired, untested). At SS5, four PPO-family seed
-    CIs are a degenerate [100, 100], above its 199/200 Wilson interval [97.2, 99.9]: one episode.
+    `pid_feedforward` is shown to be beaten** (unpaired, untested). At SS5 every PPO-family point
+    estimate (100.0) is one episode above its 199/200 and just above its Wilson interval
+    [97.2, 99.91]. Four of the five PPO-family seed CIs there are a degenerate [100, 100].
     *(Qualified at Gate 9.)*
 - **In the SS6 frigate cells the PPO family sits above every baseline in point estimate, and in
   all three cells its seed CIs lie wholly above `pid_feedforward`'s Wilson interval.** At
@@ -791,7 +794,8 @@ Cell format: learned = IQM [95 % CI]; baselines = rate [Wilson 95 % CI] k/N; aft
     - σ_v = 0.2 m/s is 1.5× the `id` SS5 deck v_z SD (0.134 m/s) and 4.3× SS3's (0.046 m/s);
       table above (corrected in P7-D6).
 
-    `pid_track_descend` has no feedforward and still falls to 21.5–24.5 %. So that explanation
+    `pid_track_descend` has no feedforward and still falls to 21.5–24.5 % with no latency (16.5–24.5 %
+    across the three 4 cm conditions). So that explanation
     could at best be partial. No run separated position noise from velocity noise.
 - **Under noise, `ppo` and `ppo_forecast` sit above every classical baseline; `ppo_sinusoid`
   does in all but two cells** (unpaired reading; narrowed in P7-D6).
@@ -1023,7 +1027,9 @@ real ship**. MSS's spectrum match and Octave parity pass (P7-D2 §3). Sources:
 ### 8. What a skeptic should ask about
 
 1. **Ceilings and degenerate CIs.**
-   - The PPO family is at 100 % (seed CI [100.0, 100.0]) in nearly every SS3–SS5 cell of every arm.
+   - The PPO family is at 100 % (seed CI [100.0, 100.0]) in nearly every SS3–SS5 cell of every
+     noise-free arm (matrix, CG, sinusoid, λ). In the noise arm it is not: 53 of 165 such cells,
+     none at σ_p = 4 cm. *(Scope corrected at Gate 9.)*
    - H4's CI is [0.0, 0.0] because all 4 000 seed-episodes in its cell succeed.
    - Many descriptive contrasts are [0, 0] for the same reason.
    - These intervals record a ceiling, not precision. The seed-bootstrap IQM CIs also leave out
@@ -1032,8 +1038,8 @@ real ship**. MSS's spectrum match and Octave parity pass (P7-D2 §3). Sources:
    (P7-D3 §6).
 3. **The timeout-ranked sensitivity is vacuous.** No timeouts occur in any scored closing-speed
    cell.
-4. **Learned methods' p95 is higher at CG (separating for `ppo`, `residual_ppo` and `ppo_sinusoid`
-   only), and SAC fails more there**, although the CG deck is calmer
+4. **At `id` SS6, learned methods' p95 is higher at CG (separating for `ppo`, `residual_ppo` and
+   `ppo_sinusoid` only), and SAC fails more there**, although the CG deck is calmer
    (§3). This is not explained.
 5. **The perception arm was re-flown (P7-D4).** The first arm's 2-step-latency collapse
    (`pid_feedforward`, `gated` and `oracle_gated` crashing in 200 of 200) was an artifact of the

@@ -240,3 +240,8 @@ remaining: 0.
 in `docs/findings.md` §2 ("ties the learned methods"). It is fixed, together with four more
 imprecise §2/README sentences found by an unrounded sentence check and the attempt-3 MINOR items
 (P9-D2 §5). BLOCKING remaining: 0.
+
+**After the fourth `/phase-gate 9` attempt** (2026-10-06): that attempt's review swept all of
+findings Phases 7–9 at full precision. It found two false Phase 7 sentences, one mis-scoped one and
+four minor imprecisions, all in `docs/findings.md`, and all fixed (P9-D2 §6). BLOCKING
+remaining: 0.

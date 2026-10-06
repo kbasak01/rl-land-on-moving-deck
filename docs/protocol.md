@@ -5820,6 +5820,22 @@ attempt): 1 BLOCKING (B2 incomplete, above), 4 MAJOR, 4 MINOR and 2 NOTE. All ar
     interval.
   - The S175 SS6 interval is printed as [95.7, 99.49] in both places.
 
+**6. Gate 9 attempt-4 review fold-in** (`results-skeptic` at `f0539e7`, which swept all of
+findings Phases 7–9 at full precision): 2 BLOCKING, 1 MAJOR and 4 MINOR, all in Phase 7 text of
+`docs/findings.md`. Every f0539e7 change verified.
+- *B1.* "`ppo_sinusoid` 6–11 points below `ppo` at every sea state under 4 cm noise" is false
+  across the three 4 cm conditions (2.7 at 1 step, SS5). It now reads 7.2–10.2 with no latency,
+  2.7–10.2 across conditions.
+- *B2.* "The PPO family is at 100 % in nearly every SS3–SS5 cell of every arm" is false for the
+  noise arm (53 of 165, none at 4 cm). It is now scoped to the noise-free arms.
+- *M1.* "Learned methods' p95 is higher at CG" is now scoped to `id` SS6. CG is equal or lower in
+  15 of 78 learned cells.
+- *MINOR.*
+  - The S175 SS5 wording now matches the README's.
+  - The SS6 interval is printed as [95.7, 99.49].
+  - `static`: 10 methods flown, not 12.
+  - `pid_track_descend`'s 21.5–24.5 % is the no-latency range (16.5–24.5 % across conditions).
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|
