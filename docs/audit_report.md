@@ -235,3 +235,8 @@ only partly fixed. It is now fully fixed, together with the gate review's MAJOR 
 sentences, one of them the attempt-1 B2 fix. All four are fixed, with the attempt-2 MINOR items
 and one more false sentence found in a full-precision sentence check (P9-D2 §4). BLOCKING
 remaining: 0.
+
+**After the third `/phase-gate 9` attempt** (2026-10-06): that attempt failed on one false sentence
+in `docs/findings.md` §2 ("ties the learned methods"). It is fixed, together with four more
+imprecise §2/README sentences found by an unrounded sentence check and the attempt-3 MINOR items
+(P9-D2 §5). BLOCKING remaining: 0.

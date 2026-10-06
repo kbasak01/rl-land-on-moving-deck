@@ -5800,6 +5800,26 @@ attempt): 1 BLOCKING (B2 incomplete, above), 4 MAJOR, 4 MINOR and 2 NOTE. All ar
   candidate lines) was checked by hand against a full-precision table of every success cell,
   e02 rows included, rather than against rounded values.
 
+**5. Gate 9 attempt-3 review fold-in** (`results-skeptic` at `e551519`): 1 BLOCKING, 0 MAJOR and
+5 MINOR. The README had no false sentence.
+- *B1.* `docs/findings.md` §2 said "`pid_feedforward` ties the learned methods wherever it is not
+  at SS6 of a frigate regime". That is false for SAC. It now reads "within 1 point of the PPO
+  family", with the SS5 one-to-two-episode excess stated.
+- *Found by an unrounded sentence check of findings §2 run before this fold-in:*
+  - "the PPO family differs only at SS6" ignores the 99.5 vs 100.0 gap at `id` SS5; the README's
+    "these methods differ only at SS6" ignored that and `pid_feedforward`'s 99.0. Both now say
+    "within 1 point at SS3–SS5; differ materially only at SS6".
+  - "SAC differs everywhere" is false at `unseen_heading` and `unseen_vessel` SS3.
+  - "Above the baselines in point estimate only" undersold all three SS6 frigate cells. There the
+    PPO family's seed CIs lie wholly above `pid_feedforward`'s Wilson interval, though at
+    `unseen_heading` they overlap `lowvz_cut`'s.
+- *MINOR.*
+  - The SS5 list now names `lowvz` and `lowvz_cut`.
+  - "Same search space on their shared parameters" in the tuning sentence.
+  - The S175 SS5 sentence separates one episode against the point estimate from just above the
+    interval.
+  - The S175 SS6 interval is printed as [95.7, 99.49] in both places.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|

@@ -346,10 +346,17 @@ Cell format: learned = IQM [95 % CI]; baselines = rate [Wilson 95 % CI] k/N; aft
 is named.
 - **Sea states SS3–SS5 sit at the ceiling** for every PPO-family method in every regime.
   - The IQM is 100.0 with degenerate seed CIs [100.0, 100.0] in most cells.
-  - So these cells cannot rank the PPO-family methods. They differ only at SS6, and SAC differs
-    everywhere.
-- **`pid_feedforward` ties the learned methods wherever it is not at SS6 of a frigate regime.**
+  - So these cells cannot rank the PPO-family methods. At SS3–SS5 they are within 0.5 points of
+    each other (`residual_ppo` and `residual_ppo_forecast` at 99.5 at `id` SS5); they differ
+    materially only at SS6. SAC differs in every cell except `unseen_heading` SS3, `unseen_vessel`
+    SS3 and `static`. *(Wording corrected at Gate 9.)*
+- **`pid_feedforward` is within 1 point of the PPO family wherever it is not at SS6 of a frigate
+  regime.** *(Corrected at Gate 9. It said it "ties the learned methods", which is false for SAC.)*
   - It scores 99.0–100 % at SS3–SS5 in every regime.
+  - At SS5 in every regime, the PPO family's 100.0 estimates lie just above its Wilson interval:
+    two episodes above its 198/200 at `id`, and one above its 199/200 at `unseen_heading` and
+    `unseen_vessel`. The two residual methods' 99.5 at `id` SS5 lie inside it (upper bound
+    99.73).
   - At `unseen_vessel` SS6 it scores 98.5 % [95.7, 99.5] (197/200), against 99.0–99.5 % for the
     PPO family. Four of those five point estimates (0.990–0.9933) lie inside its Wilson interval
     [0.9568, 0.99489]; `ppo_sinusoid`'s 0.995 is just above it.
@@ -359,8 +366,10 @@ is named.
     `pid_feedforward` is shown to be beaten** (unpaired, untested). At SS5, four PPO-family seed
     CIs are a degenerate [100, 100], above its 199/200 Wilson interval [97.2, 99.9]: one episode.
     *(Qualified at Gate 9.)*
-- **In the SS6 frigate cells the PPO family sits above the baselines in point estimate only.**
-  The point estimates are:
+- **In the SS6 frigate cells the PPO family sits above every baseline in point estimate, and in
+  all three cells its seed CIs lie wholly above `pid_feedforward`'s Wilson interval.** At
+  `unseen_heading` they still overlap `pid_feedforward_lowvz_cut`'s. *(Corrected at Gate 9 from "in
+  point estimate only".)* The point estimates are:
   - `id`: 96.2–98.2 % against `pid_feedforward`'s 90.5 %;
   - `unseen_seastate`: 95.3–97.5 % against 90.0 %;
   - `unseen_heading`: 85.7–90.7 % against 77.0 %.
