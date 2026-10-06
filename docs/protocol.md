@@ -5623,7 +5623,9 @@ latency smoke.
 
 ### P9-D1 — README figures and landing GIFs: what they are, fixed before the gallery is rendered (2026-10-05)
 
-*Status.* Written before any gallery GIF was rendered. During camera development only one
+*Status.* Written before any gallery GIF was rendered. This is an assertion: git cannot show the
+order, because this entry and the GIFs were committed together (`bbdabc6`, `f95e388`; audit
+SHOULD FIX 8). During camera development only one
 episode, `id` SS5 #0 (`pid_feedforward`, `ppo` s0, `residual_ppo` s0, all `success`), was
 rendered into the scratchpad. It was used to set framing and fonts, not to choose an episode.
 Nothing in this entry changes a criterion, an episode list, a committed number or a verdict.
@@ -5699,6 +5701,65 @@ Nothing in this entry changes a criterion, an episode list, a committed number o
   `committed = False`.
 - *License.* An MIT `LICENSE` is added, as `pyproject.toml` already declared (user decision,
   2026-10-05). So is `THIRD_PARTY_NOTICES.md`.
+
+### P9-D2 — README review and pre-release audit fold-in (2026-10-05)
+
+*Status.* This entry records what the two Phase 9 reviews found and what was changed. No
+criterion, list, committed number or verdict changed.
+
+**1. README review** (`results-skeptic`, before the first commit): 0 BLOCKING, 3 MAJOR, 19 MINOR.
+All were folded in at `bbdabc6`.
+- *MAJOR.*
+  - M1: "outside the training distribution" also covers `id`'s 90° episodes and every
+    `unseen_heading` and `unseen_vessel` cell, not only SS6. The README setup and the figure
+    footnote now say so.
+  - M2: an untested descent-timing mechanism in a gallery caption was removed.
+  - M3: the `ppo_sinusoid` learning-curve label carried from P6-D6 #8 is stated in the README
+    and in findings. The figure was not re-rendered.
+- *MINOR.*
+  1. Latency wording: "only ratios quoted" contradicted the absolute times given.
+  2. "Fastest on one CPU thread" corrected; it is faster than any GPU provider, and more threads
+     are faster. Corrected in findings Phase 8 too.
+  3. Noise against deck motion: the noise exceeds it at SS3–SS5, and σ_v also at SS6.
+  4. The "no sea state beats" sentence was reworded.
+  5. "Separate" was replaced by "differ" for unpaired readings.
+  6. The 6.6 % is now scoped to the four exported policies.
+  7. The H3 secondary half-rule verdicts were added.
+  8. The PID tuning budget is disclosed.
+  9. P7-D4 is now mentioned.
+  10. A causal "but" was dropped from the SS5 #146 caption.
+  11. The gallery headings now say "the seed shown".
+  12. "Byte-exact" was replaced by "every recorded column equal as text".
+  13. `make all` and `make gifs` need checkpoints, and the README now says so.
+  14. The `audit_report.md` link resolved once the audit wrote the file.
+  15. The bolding of measured runtime rows was dropped.
+  16. dmf-derived `deploy/latency.py` and `deck/bridge.py` were added to the notices.
+  17. The `results.md` §7 intro, header and H5 caveat now cover H5 (eval-auditor).
+  18. The touchdown closing-speed ECDF, a plan §1 deliverable, was added.
+  19. H1b in the short version now carries its CI.
+
+**2. Pre-release audit** (`docs/audit_report.md`, at `bbdabc6`): 3 BLOCKING, 8 SHOULD FIX, 11 NOTE.
+- *BLOCKING, fixed.*
+  - B1: `gated_forecast` and `gated_forecast_tcn` (Phase 4, `results/e02/`) were missing from the
+    README (non-negotiable 6). They are now in the methods list, the `id` table and the SS6 shift
+    table, and the controller count was corrected.
+  - B2: the S175 Wilson-interval sentence was false at SS5, and the range was 99.0 instead of
+    99.5. Both are scoped and corrected.
+  - B3: the #168 caption said the timing reverses; it is the outcome that reverses.
+- *SHOULD FIX.*
+  - 1, closed-loop parity "50/50": not met as written, met under P8-D5. Unchanged here; left to
+    the Gate 9 decision.
+  - 2: `tests/test_release.py` now pins both submodule commits and the import paths.
+  - 3: the noise-arm disagreement now cites `summary.csv` + `baselines_summary.csv` and gives
+    its denominators.
+  - 4: findings is described as covering Phases 7–9.
+  - 5: the Gate 1 and Gate 7 qualifications are stated in the README status.
+  - 6: the `--check` and `make test` overclaims were corrected, and a README table names the
+    script behind each committed directory that `make all` does not regenerate.
+  - 7: itemised here.
+  - 8: P9-D1's ordering claim is labelled an assertion.
+- *NOTE items acted on.* The README's deck-motion table label was corrected to "frigate". The
+  static cell of the closing-speed count notes the two forecast methods that were not flown.
 
 ## Gates
 | gate | date | result | note |

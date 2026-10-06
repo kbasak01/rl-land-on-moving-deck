@@ -37,6 +37,14 @@ Definitions are in P9-D1.
   outside it too, not only SS6. The figures shade only SS6, and their footnote says so.
 - *Review.* The `results-skeptic` README review found 0 BLOCKING, 3 MAJOR and 19 MINOR issues,
   all wording or disclosure, folded in before commit. No number changed.
+- *Pre-release audit* (`docs/audit_report.md`): 3 BLOCKING, 8 SHOULD FIX and 11 NOTE.
+  - The BLOCKING items were all README errors, and they are fixed:
+    - the two Phase 4 forecast-gated controllers were missing from the README tables;
+    - a false S175 Wilson-interval sentence;
+    - a false gallery-caption timing claim.
+  - Both lists are itemised in P9-D2.
+  - The §7 closed-loop parity item is met only under P8-D5. That is unchanged, and it is the
+    Gate 9 decision.
 
 ## Phase 8 — ONNX export, parity and latency (2026-10-05)
 

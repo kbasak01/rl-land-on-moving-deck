@@ -4,14 +4,17 @@ Reinforcement-learning landing of a quadrotor on a heaving ship deck, in simulat
 gym-pybullet-drones Crazyflie 2.x lands on a plate driven by Froude-scaled JONSWAP seakeeping
 motion from [`deck-motion-forecast`](https://github.com/kbasak01/deck-motion-forecast) (dmf).
 Pure RL (PPO, SAC), residual RL on a PID-plus-feedforward baseline, forecast-conditioned RL and a
-sinusoid-trained policy are compared with six classical controllers on frozen, pre-registered
+sinusoid-trained policy are compared with eight classical controllers on frozen, pre-registered
 episode lists. Five seeds per learned method; interquartile means with stratified-bootstrap
 95 % CIs; paired contrasts for every hypothesis. The study ends with ONNX export and a latency
 measurement. **Everything in this repository is simulation. No real flight was flown, no real
 deck data is used anywhere, and no sim-to-real claim is made.**
 
 **Status: Phases 0–8 complete; Phase 9 (this release) under audit.**
-- Gates 0–2 and 4–7 passed as written.
+- Gates 0, 2 and 4–6 passed as written.
+- Gate 1 passed after an ambiguous denominator in its feasibility rule was resolved (P1-D1). The
+  rejected reading is recorded as FAIL beside it.
+- Gate 7 passed with H5 deferred to Gate 8 by a dated user decision (P7-D1 §7).
 - Gate 3 **failed** at its first attempt, on the adversarial review and before any RL run. It
   passed at the second attempt, after user decisions logged in P3-D1.
 - Gate 8 passed only **under a post-hoc deviation (P8-D5)**. Its closed-loop parity criterion as
@@ -20,9 +23,9 @@ deck data is used anywhere, and no sim-to-real claim is made.**
 - Phase 7's perception arm was redefined and re-flown under a dated deviation (P7-D4) after review
   found that its stand-in mixed timestamps. The first arm's latency readings are withdrawn.
 
-The phase-by-phase record, including every claim this project withdrew, is in
-[`docs/findings.md`](docs/findings.md). Every decision and deviation, dated, is in
-[`docs/protocol.md`](docs/protocol.md).
+The findings of Phases 7–9, with every claim withdrawn there, are in
+[`docs/findings.md`](docs/findings.md). Every decision, deviation and retraction of every phase,
+dated, is in [`docs/protocol.md`](docs/protocol.md).
 
 **The short version.**
 - On the frigate at sea states 3–5, every PPO-family method and the best classical baseline
@@ -114,7 +117,7 @@ lands at 3.3° relative tilt.
 - `residual_ppo` seed 1 lands hard at 16.5°; 2 of 5 `residual_ppo` seeds do.
 
 In this episode the RL policies shown touch down at 1.6–2.0 s and the PID at 5.0 s. No mechanism
-was tested; on #168 above, the timing is the other way round.
+was tested. On #168 above, the same early RL touchdown goes with RL landing and the PID failing.
 
 ![id SS6 #10](results/figures/gifs/id_ss6_10_rl_hard.gif)
 
@@ -147,7 +150,7 @@ an unscaled Crazyflie 2.x (`cf2x`, 27 g in its URDF). The ship motion is scaled 
 | linear acceleration, angles | 1 | × 1 |
 | angular rate, frequency | 1/√λ | × 5 |
 
-Vertical deck motion at the aft pad, `id` regime, model scale is below. Each value is the mean over
+Vertical deck motion at the aft pad, frigate, model scale is below. Each value is the mean over
 the 12 frigate cells of each sea state (headings 45/90/135/180°, speeds 0/6/12 kn), from
 `results/deck_stats.csv` (findings §4).
 
@@ -198,6 +201,16 @@ the 12 frigate cells of each sea state (headings 45/90/135/180°, speeds 0/6/12 
     `ppo_sinusoid` (trained only on matched sinusoids).
   - Classical: `pid_track_descend`, `pid_feedforward`, `pid_feedforward_lowvz`,
     `pid_feedforward_lowvz_cut`, `gated` and the privileged `oracle_gated`.
+  - Plus two forecast-gated controllers, `gated_forecast` (DLinear-OLS) and `gated_forecast_tcn`.
+    They are `gated` with its commit decision taken on a dmf forecast of the deck, fed by the
+    same ideal ship-motion channel as the forecast RL methods (P4-D3). They were flown on the
+    frozen lists in Phase 4 (`results/e02/`, P4-D4) and are shown in the `id` and SS6 tables
+    below.
+    - Forecast gating lowered success against `gated` in 19 (DLinear) and 9 (TCN) of 26 cells,
+      and raised it in none.
+    - `gated_forecast` timed out on every aft episode, as P4-D4a's pre-registered expectation
+      predicted.
+    - They are not in the Phase 7 shift arms, and so not in the figures.
   - The residual adds α = 0.3 of the network's action to `pid_feedforward`'s.
   - Training budgets: PPO family 10 M env steps, SAC 2 M, seeds 0–4 each, none dropped. PPO and
     SAC were each tuned with ≤ 20 trials on a separate tune pool; the other PPO methods inherit
@@ -247,8 +260,11 @@ learned rows it is the IQM of per-seed p95; for baselines it is a single run.
 | `pid_feedforward_lowvz_cut` | 100.0 [98.1, 100.0] 200/200; – | 98.5 [95.7, 99.5] 197/200; B3 | 98.0 [95.0, 99.2] 196/200; B4 | 88.0 [82.8, 91.8] 176/200; H9 B15 | 0.188 / 0.181 |
 | `gated` | 100.0 [98.1, 100.0] 200/200; – | 98.5 [95.7, 99.5] 197/200; T3 | 89.5 [84.5, 93.0] 179/200; T21 | 63.0 [56.1, 69.4] 126/200; B4 T70 | 0.250 / 0.267 |
 | `oracle_gated` (privileged) | 100.0 [98.1, 100.0] 200/200; – | 98.5 [95.7, 99.5] 197/200; T3 | 89.0 [83.9, 92.6] 178/200; B1 T21 | 64.5 [57.7, 70.8] 129/200; T71 | 0.252 / 0.254 |
+| `gated_forecast` (Phase 4; ideal feed) | 0.0 [0.0, 1.9] 0/200; T200 | 0.0 [0.0, 1.9] 0/200; T200 | 0.0 [0.0, 1.9] 0/200; T200 | 0.0 [0.0, 1.9] 0/200; T200 | – / – (no touchdowns) |
+| `gated_forecast_tcn` (Phase 4; ideal feed) | 100.0 [98.1, 100.0] 200/200; – | 95.0 [91.0, 97.3] 190/200; T10 | 60.0 [53.1, 66.5] 120/200; T80 | 16.5 [12.0, 22.3] 33/200; T167 | 0.229 / 0.204 |
 
-**Closing speed (unpaired reading).** Over 14 cells (13 regime × SS cells plus `static`), five
+**Closing speed (unpaired reading).** Over 14 cells (13 regime × SS cells plus `static`, where the
+two forecast RL methods were not flown), five
 baselines land softer than every PPO-family method in all 14: `pid_feedforward`, `lowvz`,
 `lowvz_cut`, `gated` and `oracle_gated`. `pid_track_descend` lands harder than every PPO-family
 method in 12 of 14, and `sac` lands hardest of all in 13 of 14. The only paired closing-speed tests
@@ -285,10 +301,15 @@ cells, where methods differ:
 | `pid_feedforward_lowvz_cut` | 89.5 [84.5, 93.0] 179/200; H7 B14 | 83.0 [77.2, 87.6] 166/200; H24 B10 | 97.0 [93.6, 98.6] 194/200; B6 |
 | `gated` | 64.5 [57.7, 70.8] 129/200; B2 T69 | 42.0 [35.4, 48.9] 84/200; B7 T109 | 90.0 [85.1, 93.4] 180/200; T20 |
 | `oracle_gated` (privileged) | 65.0 [58.2, 71.3] 130/200; T70 | 46.5 [39.7, 53.4] 93/200; T107 | 89.0 [83.9, 92.6] 178/200; T22 |
+| `gated_forecast` (Phase 4; ideal feed) | 0.0 [0.0, 1.9] 0/200; T200 | 0.0 [0.0, 1.9] 0/200; T200 | 0.0 [0.0, 1.9] 0/200; T200 |
+| `gated_forecast_tcn` (Phase 4; ideal feed) | 21.0 [15.9, 27.2] 42/200; T158 | 22.0 [16.8, 28.2] 44/200; T156 | 16.0 [11.6, 21.7] 32/200; T168 |
 
-- **`pid_feedforward` is not beaten on the S175 hull at any sea state** (`unseen_vessel`).
-  - It scores 99.0–100 % at SS3–SS5 and 98.5 % [95.7, 99.5] at SS6.
-  - Its Wilson interval contains every PPO-family point estimate.
+- **No learned method beats `pid_feedforward` on the S175 hull at any sea state** (`unseen_vessel`;
+  unpaired, nothing tested).
+  - It scores 99.5–100 % at SS3–SS5 and 98.5 % [95.7, 99.5] at SS6.
+  - At SS6 its Wilson interval contains every PPO-family point estimate (99.0–99.5 %).
+  - At SS5 the PPO family's 100.0 lies just above its 199/200 interval [97.2, 99.9]. That is one
+    episode.
 - **`unseen_heading` SS6 (beam seas) is the hardest cell for every method.**
   - The PPO family scores 85.7–90.7 % there, mostly through `hard_landing`, against
     `pid_feedforward`'s 77.0 %. That comparison is unpaired.
@@ -563,8 +584,10 @@ Read these before reading any number above.
 - **Touchdown detectors.**
   - Analytic and contact detection disagree on 17 of 82 000 learned matrix episodes (0.021 %).
   - That is below Gate 2's 1 % overall. The worst single cell is 3.5 % (`sac` seed 0,
-    `unseen_heading` SS6), and the three σ_p = 4 cm noise conditions are 1.21–1.30 %
-    (`results/e07/matrix/summary.csv`, `results/e07/noise/*/summary.csv`).
+    `unseen_heading` SS6). That figure is learned-only (`results/e07/matrix/summary.csv`).
+  - In the three σ_p = 4 cm noise conditions, all 12 methods together disagree on 349, 369 and 375
+    of 28 800 episodes: 1.21 / 1.28 / 1.30 % (`results/e07/noise/sigma4cm_*/summary.csv` +
+    `baselines_summary.csv`).
 - **SAC's budget is not equal.** It had 2 M env steps against 10 M for the PPO family, and every
   PPO-versus-SAC reading carries that confound.
 - **No multiplicity correction** across the scored hypothesis parts. The regimes share
@@ -641,29 +664,52 @@ shorter.
 Smaller flights from earlier phases (`e01_lowvz_cut`, `e02`, `e02_tcn_seeds`; 0.7 h together) are
 listed in the CSV. Smoke runs and diagnostic runs are not.
 
-**Cheap targets that read committed files only** (no checkpoints, no simulation):
+**Cheap targets.** `make report`, `make figures` and `make runtimes` read committed files only.
+`make test` runs about 14 min of simulation but needs no checkpoints.
+- On a fresh clone, the tests that need checkpoints or the dmf corpus skip.
+- The only skip in the suite as run here is `tests/test_platform.py:191`, by design.
 
 | command | what it does |
 |---|---|
 | `make report` | re-render `results/results.md` from the CSVs; `python scripts/report.py --check` compares bytes |
 | `make figures` | re-render the two success-vs-sea-state figures from committed CSVs |
 | `make runtimes` | re-collect `results/runtime_stages.csv` |
-| `make test` / `make lint` | the test suite (a fresh clone without `artifacts/` skips the tests that need checkpoints or the dmf corpus) |
+| `make test` / `make lint` | the test suite (simulation, no checkpoints needed); ruff + mypy --strict |
 
 **What is and is not committed.**
 - `results/` is committed in full: every episode-level CSV (gzipped for Phase 7), every summary,
   the hypotheses, the latency tables, the figures and the GIFs.
 - `artifacts/` is gitignored and is regenerated by the stages above and by training: the dmf corpus,
   the forecasters, the checkpoints, the ONNX graphs and the logs.
-- Seeds are fixed and recorded, and every flown stage has a `--check` mode that re-flies and
-  byte-compares. `make gifs` re-flies the gallery and fails if any panel differs from its committed
-  row.
+- Seeds are fixed and recorded.
+- `eval_phase7.py`, `eval_learned.py`, `bench.py`, `closed_loop_investigation.py`,
+  `make_episodes.py` and `report.py` have a `--check` mode that re-runs and byte-compares.
+- `eval_baselines.py` compares against a reference directory (`--reference-dir`).
+- `deck_stats.py`, `env_sanity.py` and `reward_hacking_audit.py` have no check mode. Their outputs
+  are re-derivable but not automatically compared.
+- `make gifs` re-flies the gallery and fails if any panel differs from its committed row.
+
+**Committed results that `make all` does not regenerate**, and what does:
+
+| results | produced by |
+|---|---|
+| `results/e01_lowvz_cut/`, `results/e02/`, `results/e02_tcn_seeds/` | `scripts/eval_baselines.py` (Phases 4–5; the e02 command is in its docstring, the `e01_lowvz_cut` one in P5-D3) |
+| `results/e05/`, `results/e06/` (episodes, learning curves) | `scripts/eval_learned.py --check`, `scripts/export_learning_curves.py` (P5-D13, P6-D4) |
+| `results/audit/`, `results/audit/e06/` | `scripts/reward_hacking_audit.py` (commands in each README) |
+| `results/tune/` | `make tune CFG=configs/rl/tune_<method>.yaml` |
+| `results/mss/` | `make mss-export` (network fetch of MSS, optional Octave) |
+| `results/forecast/*.csv` | `make forecast-report` (after `make dmf-forecasters`) |
+| `results/env_throughput*.csv` | `make throughput`, `make throughput-landing` |
+
+So `make all` regenerates the frozen-protocol evaluation, deployment and report path, not every
+committed directory. Plan §1 item 7, "`make all` reproduces everything", is met only together
+with the targets above.
 
 ## Documentation
 
 | | |
 |---|---|
-| [`docs/findings.md`](docs/findings.md) | The phase-by-phase record, every withdrawn claim beside what replaced it. Start here. |
+| [`docs/findings.md`](docs/findings.md) | The findings of Phases 7–9 (evaluation, deployment, release), every withdrawn claim beside what replaced it. Start here. Earlier phases' findings and retractions are in the protocol. |
 | [`docs/protocol.md`](docs/protocol.md) | The complete decision log: every gate, deviation, retraction and threshold, dated. P3-D1 is the frozen evaluation protocol. |
 | [`results/results.md`](results/results.md) | The machine-generated evaluation report, every table naming its source CSV. A reference, not a document to read front to back. |
 | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | The original plan. Where it and the protocol disagree, the protocol is what happened. |
