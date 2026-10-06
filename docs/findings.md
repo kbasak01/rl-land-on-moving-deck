@@ -3,6 +3,41 @@
 Phase-by-phase record of what was found, including every claim withdrawn and what replaced it.
 Written at each gate. Hypotheses are scored here exactly as pre-registered in P3-D1.
 
+## Phase 9 — release: README, figures, GIFs (2026-10-05)
+
+**Scope.** Nothing new is measured about landing. No criterion, list, number or verdict changes.
+Definitions are in P9-D1.
+- *H5 rendered.* H5 is rendered into `results/results.md` from `results/latency/h5.csv`
+  (supported, 4.72× / 3.94×). `results/e07/hypotheses.csv` keeps its Phase 7 "pending" row.
+- *Headline figures.* `results/figures/success_vs_seastate_{id,shift}.png` are drawn from the
+  committed `results/e07/matrix/` CSVs only, and are byte-reproducible by `make figures`.
+- *Landing GIFs.* Seven GIFs in `results/figures/gifs/` show `pid_feedforward | ppo |
+  residual_ppo` on hand-picked `id` episodes, failures included.
+  - Each panel is a re-flight that reproduces its committed episode row in every
+    `RECORD_COLUMNS` value, compared as text.
+  - `manifest.csv` holds the per-panel outcome and the k-of-5 seed counts the captions quote.
+  - **They are illustrations, not evidence.**
+- *Cosmetic defect, found while rendering.* The yellow pad disc (`DeckPlatform._spawn_pad_marker`)
+  was never moved with the plate in any committed flight. It is visual only, with no collision
+  shape, so no number is affected. The GIF code draws it on the plate (P9-D1 §2).
+- *Bandwidth ratio.* The deck-to-vehicle bandwidth ratio promised in plan D0.1 was never
+  measured. The README says so, and quotes only the committed speed ratios from
+  `results/deck_feasibility.csv`.
+- *Wall clock.* The per-stage wall clock is in `results/runtime_stages.csv`. Training rows are
+  copied from gitignored status files and marked `committed = False`.
+- *Touchdown closing-speed distributions* (a plan §1 deliverable). They are in
+  `results/figures/closing_speed_ecdf_id.png`: ECDFs at `id` SS5 and SS6 over touched-down
+  episodes, learned seeds pooled. Nothing in them is tested.
+- *Label carried from P6-D6 #8, not met in a figure.* The tune-pool panels of
+  `results/e06/learning_curves_ppo_sinusoid.png` are evaluated on **sinusoid** motion, the
+  method's training motion, not on JONSWAP. That figure was not re-rendered with the label. The
+  README states it instead.
+- *Training distribution.* The training pool is the frigate, SS3–SS5, headings 45/135/180°
+  (P3-D2). `id`'s 90° episodes and every `unseen_heading` and `unseen_vessel` cell are therefore
+  outside it too, not only SS6. The figures shade only SS6, and their footnote says so.
+- *Review.* The `results-skeptic` README review found 0 BLOCKING, 3 MAJOR and 19 MINOR issues,
+  all wording or disclosure, folded in before commit. No number changed.
+
 ## Phase 8 — ONNX export, parity and latency (2026-10-05)
 
 **Scope.** Simulation only. The latencies are measurements of a desktop RTX A4000 and an
@@ -105,8 +140,9 @@ the DLinear-OLS forecaster stay outside it.
     They include host-device copies by design (Project 4's host-to-host method). The likely
     causes of the GPU penalty were not measured separately: host↔device copies over PCIe and
     kernel launches dominating a tiny MLP, and WSL2's GPU paravirtualisation.
-  - At batch 32, ORT CPU at 1 thread is still the fastest ORT row: 0.156 against 0.243 (CUDA) and
-    0.196 ms (TensorRT).
+  - At batch 32, ORT CPU at 1 thread is still faster than the GPU rows: 0.156 against 0.243 (CUDA)
+    and 0.196 ms (TensorRT). More CPU threads are faster still. *(Corrected in Phase 9: this said
+    "the fastest ORT row".)*
 - *End-to-end per control step, in full simulated episodes* (`e2e_budget.csv`), one thread, ONNX policy:
   - `ppo`: observation build + policy = 0.19 ms p50 and 0.30 ms p99, i.e. 0.9 % of the 33.3 ms
     period at p99.
@@ -117,8 +153,9 @@ the DLinear-OLS forecaster stay outside it.
   - *Not in the deployed totals:* the velocity tracker `DSLPIDControl.computeControl` (setpoint to
     motor RPM). It runs inside `env.step`, so the e2e budget books it in the physics bucket, and
     the deployment sums above omit it. It was not re-timed (Gate 8 review m4).
-- **What this does and does not say.** On this machine, a 512×2 MLP at batch 1 runs fastest on
-  one CPU thread, and the timed per-step software stack (velocity tracker excluded) uses a few
+- **What this does and does not say.** On this machine, a 512×2 MLP at batch 1 runs faster on
+  one CPU thread than on any GPU provider *(corrected in Phase 9 from "fastest on one CPU
+  thread"; 2–8 threads are faster still)*, and the timed per-step software stack (velocity tracker excluded) uses a few
   percent of the control period.
   It says nothing about any embedded computer's CPU or GPU, which were not measured.
 

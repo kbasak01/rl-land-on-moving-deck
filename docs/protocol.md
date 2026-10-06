@@ -5619,6 +5619,87 @@ latency smoke.
   ruff-format and mypy --strict clean.
 - The P3-D1 block SHA-256 is `21465588…`, unchanged.
 
+## Phase 9
+
+### P9-D1 — README figures and landing GIFs: what they are, fixed before the gallery is rendered (2026-10-05)
+
+*Status.* Written before any gallery GIF was rendered. During camera development only one
+episode, `id` SS5 #0 (`pid_feedforward`, `ppo` s0, `residual_ppo` s0, all `success`), was
+rendered into the scratchpad. It was used to set framing and fonts, not to choose an episode.
+Nothing in this entry changes a criterion, an episode list, a committed number or a verdict.
+
+**1. Headline figure** (`rld.viz.curves.plot_success_vs_seastate`, `make figures`).
+- It reads committed CSVs only:
+  - learned methods: `results/e07/matrix/aggregate.csv` (`success_rate`, `iqm`; seed-bootstrap
+    95 % CI);
+  - baselines: `matrix/carried_summary_e01.csv` and `carried_summary_e01_lowvz_cut.csv`
+    (one run, Wilson 95 % CI).
+- All 12 methods, in four panels of three.
+  - Colour carries identity, and only three categorical slots stay distinguishable when every
+    line can cross another.
+  - `pid_feedforward` is repeated as a dashed grey reference in the three panels that do not
+    contain it.
+- SS6 is shaded as outside every method's training distribution.
+- No pooling across sea states.
+- The y axis starts at 55 % (`id`) or 35 % (the shift regimes). The marks are points with
+  intervals, not bars.
+- Outputs: `results/figures/success_vs_seastate_id.png` (`id`) and
+  `success_vs_seastate_shift.png` (`unseen_seastate`, `unseen_heading`, `unseen_vessel`).
+- *Shading, corrected at the README review.* The shading marks only SS6, the one sea state no
+  method trained on. The training pool is frigate, SS3–SS5, headings 45/135/180° (P3-D2). So
+  `id`'s 90° episodes and every `unseen_heading` and `unseen_vessel` cell are also outside the
+  training distribution, and the footnote says so.
+- *Touchdown closing-speed distributions.* `results/figures/closing_speed_ecdf_id.png` holds
+  ECDFs of |`rel_vz_normal_m_s`| at `id` SS5 and SS6.
+  - Only touched-down episodes are included, never imputed.
+  - Learned seeds are pooled; baselines are one run.
+  - Sources: `results/e07/matrix/episodes.csv.gz`, `results/e01/episodes.csv`, and the
+    `pid_feedforward_lowvz_cut` rows of `results/e01_lowvz_cut/episodes.csv`. That file re-carries
+    the e01 baselines, and those rows are not double-counted.
+  - This is a plan §1 deliverable, and it is descriptive only.
+
+**2. Landing GIFs** (`rld.viz.gifs`, `make gifs`; they need the gitignored checkpoints).
+- *What they are.* Illustrative re-flights of committed `id` episodes: `pid_feedforward |
+  ppo | residual_ppo`, side by side on the same listed episode, with a shared clock.
+- *Selection: hand-picked for visual clarity* (user decision, 2026-10-05).
+  - The rendered seed of each learned method is picked with the episode, since a failure
+    usually occurs in only some seeds.
+  - Every README caption states the seed and the k-of-5 count of that method's seeds sharing
+    the shown outcome on that episode, from `results/e07/matrix/episodes.csv.gz`.
+  - **They are not evidence and not a sample of the distribution.** The tables are the evidence.
+- *Reproduction check.* The environment is built as `rld.eval.envs.make_env` builds it, plus
+  `visual_shapes=True`. P5-D5 established that visual shapes are not in the dynamics world.
+  - The per-step loop is `rld.eval.runner.run_chunk`'s, with the same `_check_start`.
+  - After each episode, every `RECORD_COLUMNS` value is formatted as the committed CSV formats it
+    and compared with the committed row as text.
+  - Committed rows come from `results/e01/episodes.csv` for `pid_feedforward` and from
+    `results/e07/matrix/episodes.csv.gz` for the learned runs.
+  - **Any difference aborts that GIF** (`ReflightMismatchError`). A GIF is never relabelled. The
+    outcome banner is drawn from the committed row.
+- *Rendering touches only visual state.*
+  - `getCameraImage` uses the CPU TinyRenderer from the DIRECT client and does not step the
+    simulation.
+  - The ground plane is recoloured to read as sea.
+  - **Pad-marker defect (cosmetic, found here).** `DeckPlatform._spawn_pad_marker` creates the
+    yellow pad disc once, and `DeckPlatform.advance` never moves it. In every committed flight
+    the disc therefore stayed at its reset pose while the plate moved. It has no collision
+    shape, so it never took part in a contact or a number.
+    - The GIF code moves it onto the plate (1.2 mm along the deck normal) before each frame.
+    - `src/rld/envs/` is not changed.
+    - The reproduction check above shows the move changes nothing that is recorded.
+- *Playback.* One frame every 2 control steps, at 15 fps, is real time at model scale. At
+  λ = 1/25 the full-scale motion is 5× slower.
+
+**3. Other Phase 9 changes.**
+- *H5.* H5 is rendered into `results/results.md` from `results/latency/h5.csv`
+  (`rld.eval.results_md`). `results/e07/hypotheses.csv` keeps its Phase 7 "pending" row, unedited.
+- *`make all`.* It now lists `bench-investigate` (Phase 9 note (d)) and `figures`.
+- *Wall clock.* The per-stage wall clock is collected into `results/runtime_stages.csv` by
+  `scripts/collect_runtimes.py`. Rows sourced from gitignored files are marked
+  `committed = False`.
+- *License.* An MIT `LICENSE` is added, as `pyproject.toml` already declared (user decision,
+  2026-10-05). So is `THIRD_PARTY_NOTICES.md`.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|
