@@ -212,8 +212,8 @@ are itemised in P9-D2:
 
 | finding | resolution |
 |---|---|
-| B1 | `gated_forecast` and `gated_forecast_tcn` are added to the README methods list, the `id` table and the SS6 shift table, from `results/e02/summary.csv`; "eight classical controllers". |
-| B2 | The range is corrected to 99.5–100 %. The Wilson sentence went through two wrong corrections (P9-D2 §3, §4). It now states the facts per sea state: at SS5 every PPO estimate is one episode above the interval; at SS6 four of five are inside it and `ppo_sinusoid` (0.995 > 0.99489) is just above. |
+| B1 | `gated_forecast` and `gated_forecast_tcn` are added to the README methods list, the `id` table and the SS6 shift table, from `results/e02/summary.csv`; the count now reads "six classical and two forecast-gated controllers" (P9-D2 §3). `results/results.md` and findings §2 carry a pointer to them (P9-D2 §7). |
+| B2 | The range is corrected to 99.5–100 %. The Wilson sentence went through two wrong corrections (P9-D2 §3, §4). It now states the facts per sea state: at SS5 every PPO estimate is one episode above its 199/200 and just above its Wilson interval [97.2, 99.91]; at SS6 four of five are inside it and `ppo_sinusoid` (0.995 > 0.99489) is just above. |
 | B3 | The #168 caption now says the *outcome*, not the timing, reverses. |
 | SF1 | Not changed. The §7 closed-loop item is met only under P8-D5. **User decision (2026-10-05): accepted** for Gate 9 as "met under P8-D5, ORT CPU only" (P9-D2). |
 | SF2 | `tests/test_release.py` pins both submodule commits and the import paths. |

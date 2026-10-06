@@ -43,8 +43,19 @@ Definitions are in P9-D1.
     - a false S175 Wilson-interval sentence;
     - a false gallery-caption timing claim.
   - Both lists are itemised in P9-D2.
-  - The §7 closed-loop parity item is met only under P8-D5. That is unchanged, and it is the
-    Gate 9 decision.
+  - The §7 closed-loop parity item is met only under P8-D5. The user accepted it for Gate 9 as
+    "met under P8-D5, ORT CPU only" (P9-D2 §2).
+- *Gate 9 reviews.* Four `/phase-gate 9` attempts failed before the gate passed, on 8 BLOCKING
+  items in all (P9-D2 §3–§6).
+  - Almost all were false comparison sentences, hidden by rounding or wrongly scoped. They were
+    in the README and in this file's Phase 7 text. Two were earlier fixes that were themselves
+    wrong.
+  - Withdrawn README claims include:
+    - "each classical baseline got 20 tuning trials" (only `pid_track_descend` and
+      `pid_feedforward` were tuned);
+    - "`pid_feedforward`'s Wilson interval contains every PPO-family estimate on S175".
+  - Each correction is marked in place here and itemised in P9-D2. No committed number or verdict
+    changed.
 
 ## Phase 8 — ONNX export, parity and latency (2026-10-05)
 
@@ -272,6 +283,10 @@ baselines.
   draws.
 - `static` (all 10 methods flown there score 100 %; the two forecast RL methods were not run,
   see P7-D2) is in `results/results.md` §1.
+- The two Phase 4 forecast-gated controllers (`gated_forecast`, `gated_forecast_tcn`) are not in
+  these tables. They were flown only on the clean frozen lists, not in any Phase 7 arm. Their
+  rows are in `results/e02/success_vs_seastate.md` (P4-D4) and in the README's `id` and SS6
+  tables.
 
 Cell format: learned = IQM [95 % CI]; baselines = rate [Wilson 95 % CI] k/N; after the semicolon, losses by class (C crash, O off_pad, H hard_landing, B bounce, T timeout; counts of 1 000 for learned rows, of 200 for baselines; – = none).
 
