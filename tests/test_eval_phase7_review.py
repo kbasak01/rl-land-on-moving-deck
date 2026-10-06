@@ -271,6 +271,15 @@ def test_hypotheses_use_p3_d1_words_in_results_md(results_md: str) -> None:
     assert "**not scored (no supported id gain)**" in sec
 
 
+def test_header_names_the_phase4_forecast_gated_controllers(results_md: str) -> None:
+    """Gate 9 review M1: the two Phase 4 forecast-gated controllers are named, and where."""
+    header = results_md[: results_md.index("\n## 1. ")]
+    (bullet,) = [x for x in header.splitlines() if x.startswith("- `gated_forecast` ")]
+    assert "`gated_forecast_tcn`" in bullet and "no Phase 7 arm" in bullet
+    assert "`results/e02/success_vs_seastate.md` (P4-D4)" in bullet
+    assert "gated_forecast" not in results_md[len(header) :]  # not in any table of this report
+
+
 def test_h5_is_rendered_from_latency_h5_csv(results_md: str) -> None:
     """Phase 9 (a): H5 comes from ``results/latency/h5.csv``; Phase 7's CSV stays "pending"."""
     sec = _section(results_md, "## 7. Hypotheses")

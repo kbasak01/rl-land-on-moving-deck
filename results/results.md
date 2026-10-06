@@ -7,6 +7,7 @@
 - Success = all four frozen criteria (`configs/env/success.yaml`). Success is never pooled across sea states. Learned rows: IQM over 5 training seeds with the stratified-bootstrap 95 % CI (2 000 replicates, seed 20260926) and the per-seed range; baselines: rate with the Wilson 95 % CI and k/N. Every success table is followed by the six-class outcome breakdown.
 - `oracle_gated` is a **commit-timing oracle (privileged)**: it reads the true future deck motion. It is never a deployable result.
 - `pid_track_descend`, `pid_feedforward` and `oracle_gated` are in every method table.
+- `gated_forecast` (DLinear-OLS) and `gated_forecast_tcn`, the two Phase 4 forecast-gated controllers, were flown only on the clean frozen lists (aft and CG pads, no Phase 7 arm); their rows are in `results/e02/success_vs_seastate.md` (P4-D4) and in the README's `id` and SS6 tables, not in this report.
 - Carried into every table and verdict (P7-D1 §8):
   - Forecast methods: the forecaster's forecasts were in-sample during training, and the past-only ship-motion feed is an extra ideal sensor the other methods lack (P6-D1).
   - The residual methods descend harder than their base; no residual seed learned the post-contact throttle cut, and a lowvz-like descent was within the residual's authority (P6-D5, corrected at P6-D6 M1).

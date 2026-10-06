@@ -1061,6 +1061,10 @@ def _header() -> list[str]:
         f"- `oracle_gated` is a **{_ORACLE_SHORT}**: it reads the true future deck motion. "
         "It is never a deployable result.",
         "- `pid_track_descend`, `pid_feedforward` and `oracle_gated` are in every method table.",
+        "- `gated_forecast` (DLinear-OLS) and `gated_forecast_tcn`, the two Phase 4 "
+        "forecast-gated controllers, were flown only on the clean frozen lists (aft and CG "
+        "pads, no Phase 7 arm); their rows are in `results/e02/success_vs_seastate.md` "
+        "(P4-D4) and in the README's `id` and SS6 tables, not in this report.",
         "- Carried into every table and verdict (P7-D1 §8):",
         *(
             f"  - {CAVEATS[k]}"
