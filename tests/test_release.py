@@ -20,7 +20,7 @@ PINNED: dict[str, str] = {
 
 
 @pytest.mark.parametrize("path", sorted(PINNED))
-def test_submodule_is_at_the_pinned_commit(path: str) -> None:
+def test_submodule_is_at_the_pinned_commit_and_clean(path: str) -> None:
     head = subprocess.run(
         ["git", "-C", str(REPO / path), "rev-parse", "HEAD"],
         check=True,
@@ -28,6 +28,13 @@ def test_submodule_is_at_the_pinned_commit(path: str) -> None:
         text=True,
     ).stdout.strip()
     assert head == PINNED[path]
+    dirty = subprocess.run(
+        ["git", "-C", str(REPO / path), "status", "--porcelain"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert dirty == "", f"{path} has local changes (third_party/ is read-only): {dirty}"
     assert PINNED[path] in (REPO / "docs" / "protocol.md").read_text(encoding="utf-8")
 
 

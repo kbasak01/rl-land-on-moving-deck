@@ -4,7 +4,8 @@ Reinforcement-learning landing of a quadrotor on a heaving ship deck, in simulat
 gym-pybullet-drones Crazyflie 2.x lands on a plate driven by Froude-scaled JONSWAP seakeeping
 motion from [`deck-motion-forecast`](https://github.com/kbasak01/deck-motion-forecast) (dmf).
 Pure RL (PPO, SAC), residual RL on a PID-plus-feedforward baseline, forecast-conditioned RL and a
-sinusoid-trained policy are compared with eight classical controllers on frozen, pre-registered
+sinusoid-trained policy are compared with six classical and two forecast-gated controllers on
+frozen, pre-registered
 episode lists. Five seeds per learned method; interquartile means with stratified-bootstrap
 95 % CIs; paired contrasts for every hypothesis. The study ends with ONNX export and a latency
 measurement. **Everything in this repository is simulation. No real flight was flown, no real
@@ -40,8 +41,9 @@ dated, is in [`docs/protocol.md`](docs/protocol.md).
 - Forecasts did nothing measurable (H3).
 - Training on sinusoidal deck motion cost nothing measurable at the scored cell (H4), so **the
   project's motion-realism novelty claim is withdrawn**.
-- On the S175 hull (any sea state) and on the MSS records, no learned method beats
-  `pid_feedforward`.
+- On the S175 hull and on the MSS records, no learned method is shown to beat
+  `pid_feedforward` (unpaired; on S175 the PPO family differs from it by at most two episodes in
+  200 per sea state).
 - SAC's point estimate sits below `pid_feedforward`'s in every SS5/SS6 cell of every regime.
 
 ---
@@ -95,8 +97,8 @@ included. They are not a sample of the distribution**, and the tables above are 
   the deck normal; tilt is the drone's tilt relative to the deck.
 
 **SS3, head seas, 12 kn: all three land.** `ppo` touches down at 1.45 s and `residual_ppo` at
-1.77 s, against `pid_feedforward`'s 3.73 s. That is the two-phase descent the PID's
-constant-descent tuning cannot express. All 5 seeds of each learned method land this episode.
+1.77 s, against `pid_feedforward`'s 3.73 s. That is consistent with the two-phase descent the
+PID's constant-descent tuning cannot express; no mechanism was tested. All 5 seeds of each learned method land this episode.
 
 ![id SS3 #6](results/figures/gifs/id_ss3_6_all_land.gif)
 
@@ -206,11 +208,12 @@ the 12 frigate cells of each sea state (headings 45/90/135/180°, speeds 0/6/12 
     same ideal ship-motion channel as the forecast RL methods (P4-D3). They were flown on the
     frozen lists in Phase 4 (`results/e02/`, P4-D4) and are shown in the `id` and SS6 tables
     below.
-    - Forecast gating lowered success against `gated` in 19 (DLinear) and 9 (TCN) of 26 cells,
-      and raised it in none.
+    - Forecast gating lowered success against `gated` in 19 (DLinear) and 9 (TCN) of 26 cells
+      with separated Wilson CIs, and raised it in none (P4-D4).
     - `gated_forecast` timed out on every aft episode, as P4-D4a's pre-registered expectation
       predicted.
-    - They are not in the Phase 7 shift arms, and so not in the figures.
+    - They were not flown in any Phase 7 arm (CG, noise, sinusoid, λ, MSS), so they are not in the
+      figures.
   - The residual adds α = 0.3 of the network's action to `pid_feedforward`'s.
   - Training budgets: PPO family 10 M env steps, SAC 2 M, seeds 0–4 each, none dropped. PPO and
     SAC were each tuned with ≤ 20 trials on a separate tune pool; the other PPO methods inherit
@@ -243,7 +246,8 @@ The three always-printed baselines are `pid_track_descend`, `pid_feedforward` an
 ### `id` (frigate; aft pad; JONSWAP; λ = 1/25)
 
 Sources: `results/e07/matrix/aggregate.csv`, `summary.csv`, `carried_summary_e01.csv` and
-`carried_summary_e01_lowvz_cut.csv`. The p95 closing speed is in m/s along the deck normal. For
+`carried_summary_e01_lowvz_cut.csv`. The two Phase 4 forecast-gated rows, here and in the SS6 shift
+table, come from `results/e02/summary.csv` (aft pad). The p95 closing speed is in m/s along the deck normal. For
 learned rows it is the IQM of per-seed p95; for baselines it is a single run.
 
 | method | SS3 | SS4 | SS5 | SS6 | p95 closing SS5 / SS6 |
@@ -304,12 +308,14 @@ cells, where methods differ:
 | `gated_forecast` (Phase 4; ideal feed) | 0.0 [0.0, 1.9] 0/200; T200 | 0.0 [0.0, 1.9] 0/200; T200 | 0.0 [0.0, 1.9] 0/200; T200 |
 | `gated_forecast_tcn` (Phase 4; ideal feed) | 21.0 [15.9, 27.2] 42/200; T158 | 22.0 [16.8, 28.2] 44/200; T156 | 16.0 [11.6, 21.7] 32/200; T168 |
 
-- **No learned method beats `pid_feedforward` on the S175 hull at any sea state** (`unseen_vessel`;
+- **No learned method is shown to beat `pid_feedforward` on the S175 hull** (`unseen_vessel`;
   unpaired, nothing tested).
   - It scores 99.5–100 % at SS3–SS5 and 98.5 % [95.7, 99.5] at SS6.
-  - At SS6 its Wilson interval contains every PPO-family point estimate (99.0–99.5 %).
-  - At SS5 the PPO family's 100.0 lies just above its 199/200 interval [97.2, 99.9]. That is one
-    episode.
+  - At SS5 and SS6 the PPO family's point estimates sit at or just above its Wilson upper bound:
+    SS5 100.0 against 99.9, and SS6 99.0–99.5 against 99.49.
+  - The gap is at most one or two episodes in 200.
+  - At SS5 four PPO-family seed CIs are a degenerate [100, 100], which by the non-overlap reading
+    used for SAC above lies wholly above its interval. Nothing here was tested.
 - **`unseen_heading` SS6 (beam seas) is the hardest cell for every method.**
   - The PPO family scores 85.7–90.7 % there, mostly through `hard_landing`, against
     `pid_feedforward`'s 77.0 %. That comparison is unpaired.
@@ -619,8 +625,11 @@ See [`SETUP.md`](SETUP.md) for the environment in detail.
 
 **`make all` needs the trained checkpoints.** `eval`, `bench` and `bench-investigate` fly them, and
 `gifs` re-flies them. They live in the gitignored `artifacts/runs/` and are produced by training
-(below), so on a fresh clone train first. The `--check` targets and the cheap targets further
-down do not need them.
+(below), so on a fresh clone train first.
+- `eval_phase7.py --check` and `eval_learned.py --check` re-derive their CSVs from the committed
+  episode rows, so they do not need the checkpoints.
+- Nor do the cheap targets further down.
+- `make bench-check` (re-exports the graphs) and `make bench-investigate-check` (re-flies) do.
 
 **Wall clock per stage** (from [`results/runtime_stages.csv`](results/runtime_stages.csv), which
 `make runtimes` collects):
@@ -682,8 +691,12 @@ listed in the CSV. Smoke runs and diagnostic runs are not.
 - `artifacts/` is gitignored and is regenerated by the stages above and by training: the dmf corpus,
   the forecasters, the checkpoints, the ONNX graphs and the logs.
 - Seeds are fixed and recorded.
-- `eval_phase7.py`, `eval_learned.py`, `bench.py`, `closed_loop_investigation.py`,
-  `make_episodes.py` and `report.py` have a `--check` mode that re-runs and byte-compares.
+- These scripts have a `--check` mode that byte-compares against the committed files:
+  - `eval_phase7.py` and `eval_learned.py` re-derive from the committed episodes;
+  - `bench.py` re-exports and re-checks parity and the closed loop;
+  - `closed_loop_investigation.py` re-flies;
+  - `make_episodes.py` re-hashes the frozen lists;
+  - `report.py` re-renders.
 - `eval_baselines.py` compares against a reference directory (`--reference-dir`).
 - `deck_stats.py`, `env_sanity.py` and `reward_hacking_audit.py` have no check mode. Their outputs
   are re-derivable but not automatically compared.
@@ -700,6 +713,12 @@ listed in the CSV. Smoke runs and diagnostic runs are not.
 | `results/mss/` | `make mss-export` (network fetch of MSS, optional Octave) |
 | `results/forecast/*.csv` | `make forecast-report` (after `make dmf-forecasters`) |
 | `results/env_throughput*.csv` | `make throughput`, `make throughput-landing` |
+| `results/episodes/` (the frozen lists) | `scripts/make_episodes.py`; generated once at `0780aaa` and since only verified (`--check`, run by `make eval`) |
+| `results/episodes_mss/` | `scripts/make_episodes.py --mss` (needs `make mss-export`) |
+| `results/e01/tuning_*.csv`, `results/e01/tune_pool_final.csv` | `scripts/tune_controller.py` (P3-D3; no make target) |
+| `results/p5_bounce_check/` | `scripts/p5_bounce_check.py`, `p5_bounce_check_report.py`, `p5_contact_probes.py` (P5-D1) |
+| `results/figures/gifs/` | `make gifs` (needs the checkpoints) |
+| `results/runtime_stages.csv` | `make runtimes` |
 
 So `make all` regenerates the frozen-protocol evaluation, deployment and report path, not every
 committed directory. Plan §1 item 7, "`make all` reproduces everything", is met only together

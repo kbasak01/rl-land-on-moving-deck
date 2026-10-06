@@ -351,9 +351,14 @@ is named.
 - **`pid_feedforward` ties the learned methods wherever it is not at SS6 of a frigate regime.**
   - It scores 99.0–100 % at SS3–SS5 in every regime.
   - At `unseen_vessel` SS6 it scores 98.5 % [95.7, 99.5] (197/200), against 99.0–99.5 % for the
-    PPO family. Its Wilson interval contains every PPO-family point estimate.
+    PPO family. Those point estimates sit at or just above its Wilson upper bound (0.99489; the
+    highest, `ppo_sinusoid`, is 0.995), a gap of at most one or two episodes in 200.
+    *(Corrected at Gate 9. The earlier text said the interval contains every PPO-family point
+    estimate, which rounding to 99.5 hid.)*
   - **On the S175 hull (`unseen_vessel`), these tables show no sea state at which
-    `pid_feedforward` is beaten.**
+    `pid_feedforward` is shown to be beaten** (unpaired, untested). At SS5, four PPO-family seed
+    CIs are a degenerate [100, 100], above its 199/200 Wilson interval [97.2, 99.9]: one episode.
+    *(Qualified at Gate 9.)*
 - **In the SS6 frigate cells the PPO family sits above the baselines in point estimate only.**
   The point estimates are:
   - `id`: 96.2–98.2 % against `pid_feedforward`'s 90.5 %;

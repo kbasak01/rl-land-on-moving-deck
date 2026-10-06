@@ -5744,7 +5744,11 @@ All were folded in at `bbdabc6`.
     README (non-negotiable 6). They are now in the methods list, the `id` table and the SS6 shift
     table, and the controller count was corrected.
   - B2: the S175 Wilson-interval sentence was false at SS5, and the range was 99.0 instead of
-    99.5. Both are scoped and corrected.
+    99.5.
+    - The first fix scoped the sentence to SS6. The Gate 9 review then showed it is false there
+      too: `ppo_sinusoid`'s 0.995 is above the 0.99489 Wilson upper bound.
+    - Both the README and findings §2 now say the PPO point estimates sit at or just above the
+      bound, a gap of one or two episodes. The S175 headline is now "not shown to beat".
   - B3: the #168 caption said the timing reverses; it is the outcome that reverses.
 - *SHOULD FIX.*
   - 1, closed-loop parity "50/50": not met as written, met under P8-D5. Unchanged here. **User
@@ -5762,6 +5766,18 @@ All were folded in at `bbdabc6`.
   - 8: P9-D1's ordering claim is labelled an assertion.
 - *NOTE items acted on.* The README's deck-motion table label was corrected to "frigate". The
   static cell of the closing-speed count notes the two forecast methods that were not flown.
+
+**3. Gate 9 review fold-in** (`results-skeptic`, at `d183a12`, the first `/phase-gate 9`
+attempt): 1 BLOCKING (B2 incomplete, above), 4 MAJOR, 4 MINOR and 2 NOTE. All are fixed:
+- the `--check` descriptions now say which checks re-derive and which need the checkpoints;
+- the outside-`make all` table gained `results/episodes/`, `results/episodes_mss/`, the `e01`
+  tuning CSVs, `results/p5_bounce_check/`, the GIFs and the runtime table;
+- the `id` table names `results/e02/summary.csv` as a source;
+- the forecast-gating cell counts carry their criterion (separated Wilson CIs);
+- "Phase 7 shift arms" was reworded;
+- the SS3 caption's descent mechanism was softened to "consistent with";
+- `tests/test_release.py` also asserts clean submodule trees;
+- "eight classical" now reads "six classical and two forecast-gated".
 
 ## Gates
 | gate | date | result | note |
