@@ -1,0 +1,44 @@
+# Landing GIF gallery (Phase 9, P9-D1). HAND-PICKED for visual clarity (user decision
+# 2026-10-05): illustrations, not evidence and not a sample of the distribution.
+# Every panel is re-flown and checked against its committed row (rld.viz.gifs.fly);
+# learned seeds are picked with the episode and every caption states how many of the
+# method's 5 seeds share the shown outcome. regime/ss/index name a row of the frozen list
+# results/episodes/<regime>.parquet. seed is the training seed (0 for pid_feedforward).
+frame_stride: 2        # control steps per frame (30 Hz control -> 15 fps, real time, model scale)
+hold_s: 1.6            # extra display time of the last frame, seconds
+cases:
+  - slug: id_ss5_125_all_land
+    regime: id
+    ss: SS5
+    index: 125
+    panels: [{method: pid_feedforward}, {method: ppo, seed: 0}, {method: residual_ppo, seed: 0}]
+  - slug: id_ss3_6_all_land
+    regime: id
+    ss: SS3
+    index: 6
+    panels: [{method: pid_feedforward}, {method: ppo, seed: 0}, {method: residual_ppo, seed: 0}]
+  - slug: id_ss5_146_pid_bounces
+    regime: id
+    ss: SS5
+    index: 146
+    panels: [{method: pid_feedforward}, {method: ppo, seed: 0}, {method: residual_ppo, seed: 0}]
+  - slug: id_ss6_168_pid_hard
+    regime: id
+    ss: SS6
+    index: 168
+    panels: [{method: pid_feedforward}, {method: ppo, seed: 0}, {method: residual_ppo, seed: 0}]
+  - slug: id_ss6_10_rl_hard
+    regime: id
+    ss: SS6
+    index: 10
+    panels: [{method: pid_feedforward}, {method: ppo, seed: 0}, {method: residual_ppo, seed: 1}]
+  - slug: id_ss6_102_residual_hard
+    regime: id
+    ss: SS6
+    index: 102
+    panels: [{method: pid_feedforward}, {method: ppo, seed: 0}, {method: residual_ppo, seed: 0}]
+  - slug: id_ss6_178_all_fail
+    regime: id
+    ss: SS6
+    index: 178
+    panels: [{method: pid_feedforward}, {method: ppo, seed: 2}, {method: residual_ppo, seed: 0}]

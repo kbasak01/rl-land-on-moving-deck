@@ -455,7 +455,13 @@ def test_report_round_trip(scratch_e07: Path, tmp_path: Path) -> None:
     text = out.read_text(encoding="utf-8")
     assert text == render_results(RESULTS, scratch_e07)
     assert "commit-timing oracle (privileged)" in text and "upper bound" not in text.lower()
-    assert "Simulation only" in text and "pending — scored at Gate 8" in text
+    assert "Simulation only" in text
+    # H5 is rendered from results/latency/h5.csv once Gate 8 has written it (Phase 9 (a)).
+    if (RESULTS / "latency" / "h5.csv").is_file():
+        assert "pending — scored at Gate 8" not in text
+        assert "rendered from `results/latency/h5.csv`" in text
+    else:
+        assert "pending — scored at Gate 8" in text
     for method in arms.ALWAYS_PRINTED:
         assert f"`{method}`" in text
     out.write_text(text + "edited by hand\n", encoding="utf-8")

@@ -271,6 +271,70 @@ def test_hypotheses_use_p3_d1_words_in_results_md(results_md: str) -> None:
     assert "**not scored (no supported id gain)**" in sec
 
 
+def test_h5_is_rendered_from_latency_h5_csv(results_md: str) -> None:
+    """Phase 9 (a): H5 comes from ``results/latency/h5.csv``; Phase 7's CSV stays "pending"."""
+    sec = _section(results_md, "## 7. Hypotheses")
+    h5_lines = [line for line in sec.splitlines() if line.startswith("| H5 |")]
+    assert len(h5_lines) == 2  # the scored row and the torch-eager CUDA context row
+    scored, context = h5_lines
+    assert "| scored |" in scored and "| **supported** |" in scored
+    for text in ("ORT CUDA 4.72× (0.217 vs 0.046 ms)", "ORT TensorRT 3.94× (0.181 vs 0.046 ms)"):
+        assert text in scored
+    assert "ORT CUDA 5.57×, ORT TensorRT 6.97×" in scored and "≥ 2×" in scored
+    assert "one measurement per configuration, no CI" in scored
+    assert "`results/latency/h5.csv`" in scored and "P8-D2" in scored
+    # MINOR 17: H5's caveat says what "parity-passing" means, on every H5 row.
+    for line in h5_lines:
+        caveats = line.rstrip(" |").rsplit(" | ", 1)[1]
+        assert caveats.startswith("parity-passing = numeric parity only (P8-D1 §6)")
+        assert "P8-D1 §7 not met" in caveats and "P8-D5 met for ORT CPU only" in caveats
+    # MINOR 17: the intro names both scorers, and the header names P8-D2.
+    assert sec.startswith("## 7. Hypotheses (P3-D1 §8, P3-D4, P6-D6, P7-D1 §2, P7-D1a, P8-D2)\n")
+    assert "Every verdict is computed by" not in sec
+    assert (
+        "H1a–H4 verdicts are computed by `rld.eval.hypotheses` (`results/e07/hypotheses.csv`)"
+        in sec
+    )
+    assert "H5's by `rld.deploy.latency.score_h5` (`results/latency/h5.csv`, P8-D2 §7)" in sec
+    assert "| context (not scored) |" in context and "torch:cuda" in context
+    assert "| **not scored** |" in context and "**supported**" not in context
+    assert "pending — scored at Gate 8" not in results_md
+    note = next(line for line in sec.splitlines() if line.startswith("- H5,"))
+    assert 'keeps its Phase 7 "pending" H5 row unedited' in note
+    # The committed Phase 7 file is not edited: its H5 row still reads "pending".
+    with (E07_DIR / "hypotheses.csv").open(encoding="utf-8", newline="") as handle:
+        (h5,) = [r for r in csv.DictReader(handle) if r["hypothesis"] == "H5"]
+    assert h5["verdict"] == "pending — scored at Gate 8"
+
+
+def test_h5_rows_are_formatted_from_the_csv_not_hardcoded(tmp_path: Path) -> None:
+    """Different numbers in ``h5.csv`` give different rows; no ``h5.csv`` keeps the pending row."""
+    from rld.eval.results_md import _hypotheses_section
+
+    src = RESULTS_DIR / "latency" / "h5.csv"
+    with src.open(encoding="utf-8", newline="") as handle:
+        recs = list(csv.DictReader(handle))
+        fields = list(recs[0])
+    for r in recs:
+        if r["verdict"] != "context (not scored)":
+            r["verdict"] = "not supported"
+    recs[0].update(other_p50_ms="0.07", ratio_p50="1.5", ratio_p99="1.25", meets_threshold="False")
+    h5 = tmp_path / "h5.csv"
+    with h5.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(recs)
+    sec = "\n".join(_hypotheses_section(E07_DIR, h5))
+    (scored,) = [x for x in sec.splitlines() if x.startswith("| H5 |") and "| scored |" in x]
+    assert "ORT CUDA 1.50× (0.070 vs 0.046 ms)" in scored and "ORT CUDA 1.25×" in scored
+    assert "| **not supported** |" in scored
+    without = "\n".join(_hypotheses_section(E07_DIR, tmp_path / "missing.csv"))
+    assert "**pending — scored at Gate 8**" in without and "latency/h5.csv" not in without
+    assert without.startswith("## 7. Hypotheses (P3-D1 §8, P3-D4, P6-D6, P7-D1 §2, P7-D1a)\n")
+    assert "Every verdict is computed by `rld.eval.hypotheses`" in without
+    assert "score_h5" not in without and "parity-passing" not in without
+
+
 def test_noise_flight_refuses_the_superseded_stand_in(monkeypatch: pytest.MonkeyPatch) -> None:
     """P7-D4: the noise arm is never flown under the Phase 2 stand-in (``apply`` only)."""
     from rld.eval import phase7
