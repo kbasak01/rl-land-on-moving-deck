@@ -36,7 +36,7 @@ BENCH_WORKERS ?= 16
 
 .PHONY: test lint format throughput throughput-landing env-sanity \
         deck-stats baselines dmf-forecasters forecast-report mss-export train-bg sweep tune eval bench \
-        bench-check bench-investigate bench-investigate-check report all
+        bench-check bench-investigate bench-investigate-check report figures gifs runtimes all
 
 # --- implemented ------------------------------------------------------------------
 
@@ -170,8 +170,20 @@ bench-investigate-check: ; $(PY) scripts/closed_loop_investigation.py --check --
 # Phase 7/9 -- eval-auditor: re-render results/results.md from the committed CSVs only
 # (`$(PY) scripts/report.py --check` re-renders and compares bytes, writing nothing).
 report:          ; $(PY) scripts/report.py
+# Phase 9 -- the README's success-vs-sea-state figures, from committed CSVs only (no
+# checkpoints, no simulation) -> results/figures/success_vs_seastate_{id,shift}.png (P9-D1).
+figures:         ; $(PY) scripts/make_figures.py
+# Phase 9 -- the README's landing GIFs (configs/viz/gifs.yaml): hand-picked committed episodes
+# re-flown from the gitignored checkpoints in artifacts/runs/, every panel checked column by
+# column against its committed row before it is drawn -> results/figures/gifs/ (P9-D1). Not in
+# `all`: it needs the checkpoints, which `all` does not produce (training is launched by hand).
+gifs:            ; $(PY) scripts/make_gifs.py
+# Phase 9 -- per-stage wall clock -> results/runtime_stages.csv, from the committed run_info.json
+# files plus the gitignored training status files (rows marked committed=False).
+runtimes:        ; $(PY) scripts/collect_runtimes.py
 
-# The whole project in the order the methodology requires. Stubs today; each phase
-# replaces its own line's target. Training (train-bg / sweep / tune) is deliberately not in
-# `all`: it runs detached for hours and is launched by hand under the P3-D1 budget.
-all: deck-stats env-sanity baselines dmf-forecasters eval bench report
+# The whole project in the order the methodology requires; every stage is implemented
+# (`make -n all` lists them, Gate 9). Training (train-bg / sweep / tune) is deliberately not in
+# `all`: it runs detached for hours and is launched by hand under the P3-D1 budget, and `gifs`
+# needs its checkpoints. Wall clock per stage: results/runtime_stages.csv (README, Reproduce).
+all: deck-stats env-sanity baselines dmf-forecasters eval bench bench-investigate report figures

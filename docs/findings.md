@@ -3,6 +3,60 @@
 Phase-by-phase record of what was found, including every claim withdrawn and what replaced it.
 Written at each gate. Hypotheses are scored here exactly as pre-registered in P3-D1.
 
+## Phase 9 — release: README, figures, GIFs (2026-10-05)
+
+**Scope.** Nothing new is measured about landing. No criterion, list, number or verdict changes.
+Definitions are in P9-D1.
+- *H5 rendered.* H5 is rendered into `results/results.md` from `results/latency/h5.csv`
+  (supported, 4.72× / 3.94×). `results/e07/hypotheses.csv` keeps its Phase 7 "pending" row.
+- *Headline figures.* `results/figures/success_vs_seastate_{id,shift}.png` are drawn from the
+  committed `results/e07/matrix/` CSVs only, and are byte-reproducible by `make figures`.
+- *Landing GIFs.* Seven GIFs in `results/figures/gifs/` show `pid_feedforward | ppo |
+  residual_ppo` on hand-picked `id` episodes, failures included.
+  - Each panel is a re-flight that reproduces its committed episode row in every
+    `RECORD_COLUMNS` value, compared as text.
+  - `manifest.csv` holds the per-panel outcome and the k-of-5 seed counts the captions quote.
+  - **They are illustrations, not evidence.**
+- *Cosmetic defect, found while rendering.* The yellow pad disc (`DeckPlatform._spawn_pad_marker`)
+  was never moved with the plate in any committed flight. It is visual only, with no collision
+  shape, so no number is affected. The GIF code draws it on the plate (P9-D1 §2).
+- *Bandwidth ratio.* The deck-to-vehicle bandwidth ratio promised in plan D0.1 was never
+  measured. The README says so, and quotes only the committed speed ratios from
+  `results/deck_feasibility.csv`.
+- *Wall clock.* The per-stage wall clock is in `results/runtime_stages.csv`. Training rows are
+  copied from gitignored status files and marked `committed = False`.
+- *Touchdown closing-speed distributions* (a plan §1 deliverable). They are in
+  `results/figures/closing_speed_ecdf_id.png`: ECDFs at `id` SS5 and SS6 over touched-down
+  episodes, learned seeds pooled. Nothing in them is tested.
+- *Label carried from P6-D6 #8, not met in a figure.* The tune-pool panels of
+  `results/e06/learning_curves_ppo_sinusoid.png` are evaluated on **sinusoid** motion, the
+  method's training motion, not on JONSWAP. That figure was not re-rendered with the label. The
+  README states it instead.
+- *Training distribution.* The training pool is the frigate, SS3–SS5, headings 45/135/180°
+  (P3-D2). `id`'s 90° episodes and every `unseen_heading` and `unseen_vessel` cell are therefore
+  outside it too, not only SS6. The figures shade only SS6, and their footnote says so.
+- *Review.* The `results-skeptic` README review found 0 BLOCKING, 3 MAJOR and 19 MINOR issues,
+  all wording or disclosure, folded in before commit. No number changed.
+- *Pre-release audit* (`docs/audit_report.md`): 3 BLOCKING, 8 SHOULD FIX and 11 NOTE.
+  - The BLOCKING items were all README errors, and they are fixed:
+    - the two Phase 4 forecast-gated controllers were missing from the README tables;
+    - a false S175 Wilson-interval sentence;
+    - a false gallery-caption timing claim.
+  - Both lists are itemised in P9-D2.
+  - The §7 closed-loop parity item is met only under P8-D5. The user accepted it for Gate 9 as
+    "met under P8-D5, ORT CPU only" (P9-D2 §2).
+- *Gate 9 reviews.* Four `/phase-gate 9` attempts failed before the gate passed, on 8 BLOCKING
+  items in all (P9-D2 §3–§6).
+  - Almost all were false comparison sentences, hidden by rounding or wrongly scoped. They were
+    in the README and in this file's Phase 7 text. Two were earlier fixes that were themselves
+    wrong.
+  - Withdrawn README claims include:
+    - "each classical baseline got 20 tuning trials" (only `pid_track_descend` and
+      `pid_feedforward` were tuned);
+    - "`pid_feedforward`'s Wilson interval contains every PPO-family estimate on S175".
+  - Each correction is marked in place here and itemised in P9-D2. No committed number or verdict
+    changed.
+
 ## Phase 8 — ONNX export, parity and latency (2026-10-05)
 
 **Scope.** Simulation only. The latencies are measurements of a desktop RTX A4000 and an
@@ -105,8 +159,9 @@ the DLinear-OLS forecaster stay outside it.
     They include host-device copies by design (Project 4's host-to-host method). The likely
     causes of the GPU penalty were not measured separately: host↔device copies over PCIe and
     kernel launches dominating a tiny MLP, and WSL2's GPU paravirtualisation.
-  - At batch 32, ORT CPU at 1 thread is still the fastest ORT row: 0.156 against 0.243 (CUDA) and
-    0.196 ms (TensorRT).
+  - At batch 32, ORT CPU at 1 thread is still faster than the GPU rows: 0.156 against 0.243 (CUDA)
+    and 0.196 ms (TensorRT). More CPU threads are faster still. *(Corrected in Phase 9: this said
+    "the fastest ORT row".)*
 - *End-to-end per control step, in full simulated episodes* (`e2e_budget.csv`), one thread, ONNX policy:
   - `ppo`: observation build + policy = 0.19 ms p50 and 0.30 ms p99, i.e. 0.9 % of the 33.3 ms
     period at p99.
@@ -117,8 +172,9 @@ the DLinear-OLS forecaster stay outside it.
   - *Not in the deployed totals:* the velocity tracker `DSLPIDControl.computeControl` (setpoint to
     motor RPM). It runs inside `env.step`, so the e2e budget books it in the physics bucket, and
     the deployment sums above omit it. It was not re-timed (Gate 8 review m4).
-- **What this does and does not say.** On this machine, a 512×2 MLP at batch 1 runs fastest on
-  one CPU thread, and the timed per-step software stack (velocity tracker excluded) uses a few
+- **What this does and does not say.** On this machine, a 512×2 MLP at batch 1 runs faster on
+  one CPU thread than on any GPU provider *(corrected in Phase 9 from "fastest on one CPU
+  thread"; 2–8 threads are faster still)*, and the timed per-step software stack (velocity tracker excluded) uses a few
   percent of the control period.
   It says nothing about any embedded computer's CPU or GPU, which were not measured.
 
@@ -210,8 +266,10 @@ No multiplicity correction was applied (P3-D4 #9).
     (D0.4). The transfer at that cell is the finding.
   - Outside the scored cell the picture is weaker for `ppo_sinusoid` (unpaired, untested). At `id`
     SS6 its seed CI, 97.3 [96.7, 97.8], lies below `ppo`'s 98.2 [98.0, 98.5]
-    (`results/e07/matrix/aggregate.csv`). Under σ_p = 4 cm noise it is 6–11 points below `ppo` at
-    every sea state, e.g. 69.7 vs 79.8 at SS3 with 0 steps (`results/e07/noise/sigma4cm_lat*/aggregate.csv`).
+    (`results/e07/matrix/aggregate.csv`). At σ_p = 4 cm with no latency it is 7.2–10.2 points below
+    `ppo` at every sea state, e.g. 69.7 vs 79.8 at SS3 (`results/e07/noise/sigma4cm_lat0step/aggregate.csv`).
+    Across the three 4 cm conditions the gap is 2.7–10.2 points (`sigma4cm_lat*/aggregate.csv`).
+    *(Corrected at Gate 9 from "6–11 points below at every sea state".)*
     *(Scope narrowed at the Gate 7 review.)*
 - **H5** waits for Phase 8. → scored at Gate 8, P8-D2.
 
@@ -223,8 +281,12 @@ baselines.
 - SS6 is outside every method's training distribution.
 - The regimes share realizations (P3-D1 §2), so regime-vs-regime readings are not independent
   draws.
-- `static` (all 12 methods 100 %; the forecast methods not run, see P7-D2) is in
-  `results/results.md` §1.
+- `static` (all 10 methods flown there score 100 %; the two forecast RL methods were not run,
+  see P7-D2) is in `results/results.md` §1.
+- The two Phase 4 forecast-gated controllers (`gated_forecast`, `gated_forecast_tcn`) are not in
+  these tables. They were flown only on the clean frozen lists, not in any Phase 7 arm. Their
+  rows are in `results/e02/success_vs_seastate.md` (P4-D4) and in the README's `id` and SS6
+  tables.
 
 Cell format: learned = IQM [95 % CI]; baselines = rate [Wilson 95 % CI] k/N; after the semicolon, losses by class (C crash, O off_pad, H hard_landing, B bounce, T timeout; counts of 1 000 for learned rows, of 200 for baselines; – = none).
 
@@ -301,16 +363,31 @@ Cell format: learned = IQM [95 % CI]; baselines = rate [Wilson 95 % CI] k/N; aft
 is named.
 - **Sea states SS3–SS5 sit at the ceiling** for every PPO-family method in every regime.
   - The IQM is 100.0 with degenerate seed CIs [100.0, 100.0] in most cells.
-  - So these cells cannot rank the PPO-family methods. They differ only at SS6, and SAC differs
-    everywhere.
-- **`pid_feedforward` ties the learned methods wherever it is not at SS6 of a frigate regime.**
+  - So these cells cannot rank the PPO-family methods. At SS3–SS5 they are within 0.5 points of
+    each other (`residual_ppo` and `residual_ppo_forecast` at 99.5 at `id` SS5); they differ
+    materially only at SS6. SAC differs in every cell except `unseen_heading` SS3, `unseen_vessel`
+    SS3 and `static`. *(Wording corrected at Gate 9.)*
+- **`pid_feedforward` is within 1 point of the PPO family wherever it is not at SS6 of a frigate
+  regime.** *(Corrected at Gate 9. It said it "ties the learned methods", which is false for SAC.)*
   - It scores 99.0–100 % at SS3–SS5 in every regime.
-  - At `unseen_vessel` SS6 it scores 98.5 % [95.7, 99.5] (197/200), against 99.0–99.5 % for the
-    PPO family. Its Wilson interval contains every PPO-family point estimate.
+  - At SS5 in every regime, the PPO family's 100.0 estimates lie just above its Wilson interval:
+    two episodes above its 198/200 at `id`, and one above its 199/200 at `unseen_heading` and
+    `unseen_vessel`. The two residual methods' 99.5 at `id` SS5 lie inside it (upper bound
+    99.73).
+  - At `unseen_vessel` SS6 it scores 98.5 % [95.7, 99.49] (197/200), against 99.0–99.5 % for the
+    PPO family. Four of those five point estimates (0.990–0.9933) lie inside its Wilson interval
+    [0.9568, 0.99489]; `ppo_sinusoid`'s 0.995 is just above it.
+    *(Corrected at Gate 9. The original said the interval contains every PPO-family point
+    estimate, which rounding to 99.5 hid, and the first correction overstated it the other way.)*
   - **On the S175 hull (`unseen_vessel`), these tables show no sea state at which
-    `pid_feedforward` is beaten.**
-- **In the SS6 frigate cells the PPO family sits above the baselines in point estimate only.**
-  The point estimates are:
+    `pid_feedforward` is shown to be beaten** (unpaired, untested). At SS5 every PPO-family point
+    estimate (100.0) is one episode above its 199/200 and just above its Wilson interval
+    [97.2, 99.91]. Four of the five PPO-family seed CIs there are a degenerate [100, 100].
+    *(Qualified at Gate 9.)*
+- **In the SS6 frigate cells the PPO family sits above every baseline in point estimate, and in
+  all three cells its seed CIs lie wholly above `pid_feedforward`'s Wilson interval.** At
+  `unseen_heading` they still overlap `pid_feedforward_lowvz_cut`'s. *(Corrected at Gate 9 from "in
+  point estimate only".)* The point estimates are:
   - `id`: 96.2–98.2 % against `pid_feedforward`'s 90.5 %;
   - `unseen_seastate`: 95.3–97.5 % against 90.0 %;
   - `unseen_heading`: 85.7–90.7 % against 77.0 %.
@@ -322,7 +399,10 @@ is named.
   - `gated` scores 42.0 % and `oracle_gated` 46.5 %, mostly `timeout`.
   - `pid_feedforward_lowvz_cut` (83.0 %) is above `pid_feedforward` (77.0 %) here. That is also
     unpaired; their Wilson intervals overlap.
-- **Within the PPO family, plain `ppo` sits at or above the others; nothing here is tested.**
+- **Within the PPO family, plain `ppo` has the highest point estimate at `id` and
+  `unseen_heading` SS6. At `unseen_seastate` and `unseen_vessel` SS6, `ppo_sinusoid` is above it
+  (97.5 vs 97.3, 99.5 vs 99.3), with overlapping CIs. Nothing here is tested.** *(Scope corrected
+  at Gate 9; it said "plain `ppo` sits at or above the others".)*
   - At `unseen_heading` SS6, `ppo` at 90.7 [86.3, 93.3] is above `residual_ppo` at 85.7
     [84.0, 89.0], but the seed CIs overlap. That is a non-result.
   - At `id` SS6, the H1b cell, `ppo` at 98.2 [98.0, 98.5] lies wholly above `residual_ppo` at 96.2
@@ -729,7 +809,8 @@ Cell format: learned = IQM [95 % CI]; baselines = rate [Wilson 95 % CI] k/N; aft
     - σ_v = 0.2 m/s is 1.5× the `id` SS5 deck v_z SD (0.134 m/s) and 4.3× SS3's (0.046 m/s);
       table above (corrected in P7-D6).
 
-    `pid_track_descend` has no feedforward and still falls to 21.5–24.5 %. So that explanation
+    `pid_track_descend` has no feedforward and still falls to 21.5–24.5 % with no latency (16.5–24.5 %
+    across the three 4 cm conditions). So that explanation
     could at best be partial. No run separated position noise from velocity noise.
 - **Under noise, `ppo` and `ppo_forecast` sit above every classical baseline; `ppo_sinusoid`
   does in all but two cells** (unpaired reading; narrowed in P7-D6).
@@ -961,7 +1042,9 @@ real ship**. MSS's spectrum match and Octave parity pass (P7-D2 §3). Sources:
 ### 8. What a skeptic should ask about
 
 1. **Ceilings and degenerate CIs.**
-   - The PPO family is at 100 % (seed CI [100.0, 100.0]) in nearly every SS3–SS5 cell of every arm.
+   - The PPO family is at 100 % (seed CI [100.0, 100.0]) in nearly every SS3–SS5 cell of every
+     noise-free arm (matrix, CG, sinusoid, λ). In the noise arm it is not: 53 of 165 such cells,
+     none at σ_p = 4 cm. *(Scope corrected at Gate 9.)*
    - H4's CI is [0.0, 0.0] because all 4 000 seed-episodes in its cell succeed.
    - Many descriptive contrasts are [0, 0] for the same reason.
    - These intervals record a ceiling, not precision. The seed-bootstrap IQM CIs also leave out
@@ -970,8 +1053,8 @@ real ship**. MSS's spectrum match and Octave parity pass (P7-D2 §3). Sources:
    (P7-D3 §6).
 3. **The timeout-ranked sensitivity is vacuous.** No timeouts occur in any scored closing-speed
    cell.
-4. **Learned methods' p95 is higher at CG (separating for `ppo`, `residual_ppo` and `ppo_sinusoid`
-   only), and SAC fails more there**, although the CG deck is calmer
+4. **At `id` SS6, learned methods' p95 is higher at CG (separating for `ppo`, `residual_ppo` and
+   `ppo_sinusoid` only), and SAC fails more there**, although the CG deck is calmer
    (§3). This is not explained.
 5. **The perception arm was re-flown (P7-D4).** The first arm's 2-step-latency collapse
    (`pid_feedforward`, `gated` and `oracle_gated` crashing in 200 of 200) was an artifact of the

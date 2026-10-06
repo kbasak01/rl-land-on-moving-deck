@@ -5619,6 +5619,236 @@ latency smoke.
   ruff-format and mypy --strict clean.
 - The P3-D1 block SHA-256 is `21465588…`, unchanged.
 
+## Phase 9
+
+### P9-D1 — README figures and landing GIFs: what they are, fixed before the gallery is rendered (2026-10-05)
+
+*Status.* Written before any gallery GIF was rendered. This is an assertion: git cannot show the
+order, because this entry and the GIFs were committed together (`bbdabc6`, `f95e388`; audit
+SHOULD FIX 8). During camera development only one
+episode, `id` SS5 #0 (`pid_feedforward`, `ppo` s0, `residual_ppo` s0, all `success`), was
+rendered into the scratchpad. It was used to set framing and fonts, not to choose an episode.
+Nothing in this entry changes a criterion, an episode list, a committed number or a verdict.
+
+**1. Headline figure** (`rld.viz.curves.plot_success_vs_seastate`, `make figures`).
+- It reads committed CSVs only:
+  - learned methods: `results/e07/matrix/aggregate.csv` (`success_rate`, `iqm`; seed-bootstrap
+    95 % CI);
+  - baselines: `matrix/carried_summary_e01.csv` and `carried_summary_e01_lowvz_cut.csv`
+    (one run, Wilson 95 % CI).
+- All 12 methods, in four panels of three.
+  - Colour carries identity, and only three categorical slots stay distinguishable when every
+    line can cross another.
+  - `pid_feedforward` is repeated as a dashed grey reference in the three panels that do not
+    contain it.
+- SS6 is shaded as outside every method's training distribution.
+- No pooling across sea states.
+- The y axis starts at 55 % (`id`) or 35 % (the shift regimes). The marks are points with
+  intervals, not bars.
+- Outputs: `results/figures/success_vs_seastate_id.png` (`id`) and
+  `success_vs_seastate_shift.png` (`unseen_seastate`, `unseen_heading`, `unseen_vessel`).
+- *Shading, corrected at the README review.* The shading marks only SS6, the one sea state no
+  method trained on. The training pool is frigate, SS3–SS5, headings 45/135/180° (P3-D2). So
+  `id`'s 90° episodes and every `unseen_heading` and `unseen_vessel` cell are also outside the
+  training distribution, and the footnote says so.
+- *Touchdown closing-speed distributions.* `results/figures/closing_speed_ecdf_id.png` holds
+  ECDFs of |`rel_vz_normal_m_s`| at `id` SS5 and SS6.
+  - Only touched-down episodes are included, never imputed.
+  - Learned seeds are pooled; baselines are one run.
+  - Sources: `results/e07/matrix/episodes.csv.gz`, `results/e01/episodes.csv`, and the
+    `pid_feedforward_lowvz_cut` rows of `results/e01_lowvz_cut/episodes.csv`. That file re-carries
+    the e01 baselines, and those rows are not double-counted.
+  - This is a plan §1 deliverable, and it is descriptive only.
+
+**2. Landing GIFs** (`rld.viz.gifs`, `make gifs`; they need the gitignored checkpoints).
+- *What they are.* Illustrative re-flights of committed `id` episodes: `pid_feedforward |
+  ppo | residual_ppo`, side by side on the same listed episode, with a shared clock.
+- *Selection: hand-picked for visual clarity* (user decision, 2026-10-05).
+  - The rendered seed of each learned method is picked with the episode, since a failure
+    usually occurs in only some seeds.
+  - Every README caption states the seed and the k-of-5 count of that method's seeds sharing
+    the shown outcome on that episode, from `results/e07/matrix/episodes.csv.gz`.
+  - **They are not evidence and not a sample of the distribution.** The tables are the evidence.
+- *Reproduction check.* The environment is built as `rld.eval.envs.make_env` builds it, plus
+  `visual_shapes=True`. P5-D5 established that visual shapes are not in the dynamics world.
+  - The per-step loop is `rld.eval.runner.run_chunk`'s, with the same `_check_start`.
+  - After each episode, every `RECORD_COLUMNS` value is formatted as the committed CSV formats it
+    and compared with the committed row as text.
+  - Committed rows come from `results/e01/episodes.csv` for `pid_feedforward` and from
+    `results/e07/matrix/episodes.csv.gz` for the learned runs.
+  - **Any difference aborts that GIF** (`ReflightMismatchError`). A GIF is never relabelled. The
+    outcome banner is drawn from the committed row.
+- *Rendering touches only visual state.*
+  - `getCameraImage` uses the CPU TinyRenderer from the DIRECT client and does not step the
+    simulation.
+  - The ground plane is recoloured to read as sea.
+  - **Pad-marker defect (cosmetic, found here).** `DeckPlatform._spawn_pad_marker` creates the
+    yellow pad disc once, and `DeckPlatform.advance` never moves it. In every committed flight
+    the disc therefore stayed at its reset pose while the plate moved. It has no collision
+    shape, so it never took part in a contact or a number.
+    - The GIF code moves it onto the plate (1.2 mm along the deck normal) before each frame.
+    - `src/rld/envs/` is not changed.
+    - The reproduction check above shows the move changes nothing that is recorded.
+- *Playback.* One frame every 2 control steps, at 15 fps, is real time at model scale. At
+  λ = 1/25 the full-scale motion is 5× slower.
+
+**3. Other Phase 9 changes.**
+- *H5.* H5 is rendered into `results/results.md` from `results/latency/h5.csv`
+  (`rld.eval.results_md`). `results/e07/hypotheses.csv` keeps its Phase 7 "pending" row, unedited.
+- *`make all`.* It now lists `bench-investigate` (Phase 9 note (d)) and `figures`.
+- *Wall clock.* The per-stage wall clock is collected into `results/runtime_stages.csv` by
+  `scripts/collect_runtimes.py`. Rows sourced from gitignored files are marked
+  `committed = False`.
+- *License.* An MIT `LICENSE` is added, as `pyproject.toml` already declared (user decision,
+  2026-10-05). So is `THIRD_PARTY_NOTICES.md`.
+
+### P9-D2 — README review and pre-release audit fold-in (2026-10-05)
+
+*Status.* This entry records what the two Phase 9 reviews found and what was changed. No
+criterion, list, committed number or verdict changed.
+
+**1. README review** (`results-skeptic`, before the first commit): 0 BLOCKING, 3 MAJOR, 19 MINOR.
+All were folded in at `bbdabc6`.
+- *MAJOR.*
+  - M1: "outside the training distribution" also covers `id`'s 90° episodes and every
+    `unseen_heading` and `unseen_vessel` cell, not only SS6. The README setup and the figure
+    footnote now say so.
+  - M2: an untested descent-timing mechanism in a gallery caption was removed.
+  - M3: the `ppo_sinusoid` learning-curve label carried from P6-D6 #8 is stated in the README
+    and in findings. The figure was not re-rendered.
+- *MINOR.*
+  1. Latency wording: "only ratios quoted" contradicted the absolute times given.
+  2. "Fastest on one CPU thread" corrected; it is faster than any GPU provider, and more threads
+     are faster. Corrected in findings Phase 8 too.
+  3. Noise against deck motion: the noise exceeds it at SS3–SS5, and σ_v also at SS6.
+  4. The "no sea state beats" sentence was reworded.
+  5. "Separate" was replaced by "differ" for unpaired readings.
+  6. The 6.6 % is now scoped to the four exported policies.
+  7. The H3 secondary half-rule verdicts were added.
+  8. The PID tuning budget is disclosed.
+  9. P7-D4 is now mentioned.
+  10. A causal "but" was dropped from the SS5 #146 caption.
+  11. The gallery headings now say "the seed shown".
+  12. "Byte-exact" was replaced by "every recorded column equal as text".
+  13. `make all` and `make gifs` need checkpoints, and the README now says so.
+  14. The `audit_report.md` link resolved once the audit wrote the file.
+  15. The bolding of measured runtime rows was dropped.
+  16. dmf-derived `deploy/latency.py` and `deck/bridge.py` were added to the notices.
+  17. The `results.md` §7 intro, header and H5 caveat now cover H5 (eval-auditor).
+  18. The touchdown closing-speed ECDF, a plan §1 deliverable, was added.
+  19. H1b in the short version now carries its CI.
+
+**2. Pre-release audit** (`docs/audit_report.md`, at `bbdabc6`): 3 BLOCKING, 8 SHOULD FIX, 11 NOTE.
+- *BLOCKING, fixed.*
+  - B1: `gated_forecast` and `gated_forecast_tcn` (Phase 4, `results/e02/`) were missing from the
+    README (non-negotiable 6). They are now in the methods list, the `id` table and the SS6 shift
+    table, and the controller count was corrected.
+  - B2: the S175 Wilson-interval sentence was false at SS5, and the range was 99.0 instead of
+    99.5.
+    - The first fix scoped the sentence to SS6. The Gate 9 review then showed it is false there
+      too: `ppo_sinusoid`'s 0.995 is above the 0.99489 Wilson upper bound.
+    - The first correction said the PPO point estimates sit "at or just above" the bound, but four
+      of five are inside it. The README and findings §2 now say exactly that: at SS6 four of five
+      PPO-family estimates are inside, and `ppo_sinusoid`'s 0.995 is just above. The S175
+      headline is now "not shown to beat".
+  - B3: the #168 caption said the timing reverses; it is the outcome that reverses.
+- *SHOULD FIX.*
+  - 1, closed-loop parity "50/50": not met as written, met under P8-D5. Unchanged here. **User
+    decision (2026-10-05): accepted.** For Gate 9, the plan §7 closed-loop item is recorded as
+    "met under post-hoc deviation P8-D5, ORT CPU only", exactly as at Gate 8. P8-D1 §7 as written
+    stays not met, and both verdicts stay in the README.
+  - 2: `tests/test_release.py` now pins both submodule commits and the import paths.
+  - 3: the noise-arm disagreement now cites `summary.csv` + `baselines_summary.csv` and gives
+    its denominators.
+  - 4: findings is described as covering Phases 7–9.
+  - 5: the Gate 1 and Gate 7 qualifications are stated in the README status.
+  - 6: the `--check` and `make test` overclaims were corrected, and a README table names the
+    script behind each committed directory that `make all` does not regenerate.
+  - 7: itemised here.
+  - 8: P9-D1's ordering claim is labelled an assertion.
+- *NOTE items acted on.* The README's deck-motion table label was corrected to "frigate". The
+  static cell of the closing-speed count notes the two forecast methods that were not flown.
+
+**3. Gate 9 review fold-in** (`results-skeptic`, at `d183a12`, the first `/phase-gate 9`
+attempt): 1 BLOCKING (B2 incomplete, above), 4 MAJOR, 4 MINOR and 2 NOTE. All are fixed:
+- the `--check` descriptions now say which checks re-derive and which need the checkpoints;
+- the outside-`make all` table gained `results/episodes/`, `results/episodes_mss/`, the `e01`
+  tuning CSVs, `results/p5_bounce_check/`, the GIFs and the runtime table;
+- the `id` table names `results/e02/summary.csv` as a source;
+- the forecast-gating cell counts carry their criterion (separated Wilson CIs);
+- "Phase 7 shift arms" was reworded;
+- the SS3 caption's descent mechanism was softened to "consistent with";
+- `tests/test_release.py` also asserts clean submodule trees;
+- "eight classical" now reads "six classical and two forecast-gated".
+
+**4. Gate 9 attempt-2 review fold-in** (`results-skeptic` at `6efe2e1`): 4 BLOCKING, 0 MAJOR and
+3 MINOR. All four BLOCKING items were false README sentences.
+- B1: the attempt-1 S175 SS6 fix overstated the gap. Four of the five estimates are inside the
+  Wilson interval.
+- B2: "plain `ppo` sits at or above the others" and "`ppo_sinusoid` is weaker outside the scored
+  cell" are false at `unseen_seastate` and `unseen_vessel` SS6. Both are now scoped to the cells
+  where they hold, in the README and in findings §2.
+- B3: "hardest cell for every method" now excludes the forecast-gated rows added at attempt 1.
+- B4: "each classical baseline got 20 tuning trials" (added at the first review) was false and
+  flattered the baselines. Only `pid_track_descend` and `pid_feedforward` were tuned (P3-D3).
+- Found in a sentence-by-sentence check before this fold-in: "the methods differ only at SS6"
+  holds only for the PPO family and `pid_feedforward`. `sac`, `pid_track_descend` and the gated
+  controllers already differ at SS5.
+- MINOR: "every clean cell" is scoped to the main matrix; `make gifs` is noted as not in `all`;
+  `--check` is dropped from the `eval_learned.py` producer entry.
+- *Method.* Before this fold-in, every README sentence carrying a comparison keyword (144
+  candidate lines) was checked by hand against a full-precision table of every success cell,
+  e02 rows included, rather than against rounded values.
+
+**5. Gate 9 attempt-3 review fold-in** (`results-skeptic` at `e551519`): 1 BLOCKING, 0 MAJOR and
+5 MINOR. The README had no false sentence.
+- *B1.* `docs/findings.md` §2 said "`pid_feedforward` ties the learned methods wherever it is not
+  at SS6 of a frigate regime". That is false for SAC. It now reads "within 1 point of the PPO
+  family", with the SS5 one-to-two-episode excess stated.
+- *Found by an unrounded sentence check of findings §2 run before this fold-in:*
+  - "the PPO family differs only at SS6" ignores the 99.5 vs 100.0 gap at `id` SS5; the README's
+    "these methods differ only at SS6" ignored that and `pid_feedforward`'s 99.0. Both now say
+    "within 1 point at SS3–SS5; differ materially only at SS6".
+  - "SAC differs everywhere" is false at `unseen_heading` and `unseen_vessel` SS3.
+  - "Above the baselines in point estimate only" undersold all three SS6 frigate cells. There the
+    PPO family's seed CIs lie wholly above `pid_feedforward`'s Wilson interval, though at
+    `unseen_heading` they overlap `lowvz_cut`'s.
+- *MINOR.*
+  - The SS5 list now names `lowvz` and `lowvz_cut`.
+  - "Same search space on their shared parameters" in the tuning sentence.
+  - The S175 SS5 sentence separates one episode against the point estimate from just above the
+    interval.
+  - The S175 SS6 interval is printed as [95.7, 99.49] in both places.
+
+**6. Gate 9 attempt-4 review fold-in** (`results-skeptic` at `f0539e7`, which swept all of
+findings Phases 7–9 at full precision): 2 BLOCKING, 1 MAJOR and 4 MINOR, all in Phase 7 text of
+`docs/findings.md`. Every f0539e7 change verified.
+- *B1.* "`ppo_sinusoid` 6–11 points below `ppo` at every sea state under 4 cm noise" is false
+  across the three 4 cm conditions (2.7 at 1 step, SS5). It now reads 7.2–10.2 with no latency,
+  2.7–10.2 across conditions.
+- *B2.* "The PPO family is at 100 % in nearly every SS3–SS5 cell of every arm" is false for the
+  noise arm (53 of 165, none at 4 cm). It is now scoped to the noise-free arms.
+- *M1.* "Learned methods' p95 is higher at CG" is now scoped to `id` SS6. CG is equal or lower in
+  15 of 78 learned cells.
+- *MINOR.*
+  - The S175 SS5 wording now matches the README's.
+  - The SS6 interval is printed as [95.7, 99.49].
+  - `static`: 10 methods flown, not 12.
+  - `pid_track_descend`'s 21.5–24.5 % is the no-latency range (16.5–24.5 % across conditions).
+
+**7. Gate 9 attempt-5 review fold-in** (`results-skeptic` at `fa0febd`): 0 BLOCKING, 1 MAJOR and
+4 MINOR. Every fa0febd change was verified. The sweep also covered the parts not swept before:
+the `results.md` prose, findings Phase 9, the notices, the audit resolution and P9-D1/D2.
+- *M1.* `results/results.md` and findings §2 never mentioned the two Phase 4 forecast-gated
+  controllers. Both now carry a pointer to `results/e02/success_vs_seastate.md` and the README
+  tables. The `results.md` bullet is generated by `rld.eval.results_md._header` (eval-auditor),
+  and a new test, `test_header_names_the_phase4_forecast_gated_controllers`, checks it.
+- *MINOR.*
+  - Two stale `audit_report.md` resolution lines were updated: the controller count, and the
+    S175 SS5 wording.
+  - findings Phase 9 no longer calls the closed-loop item an open decision.
+  - findings Phase 9 now summarises the four failed gate attempts.
+
 ## Gates
 | gate | date | result | note |
 |---|---|---|---|
@@ -5631,3 +5861,4 @@ latency smoke.
 | 6 | 2026-10-01 | PASSED | Criteria checked against committed artifacts at `9f2cf3f` plus this row's commit. `make test lint` green: 515 passed, 1 skipped by design (`test_platform.py:191`, P2-D1), 461 s; ruff, ruff-format and mypy --strict clean. P3-D1 block SHA-256 unchanged (`21465588…`); `make_episodes.py --check` OK on all 5 lists (MANIFEST `e6f30e55…`). **All runs complete** (P6-D3): 20 / 20 `done` (`residual_ppo`, `ppo_forecast`, `residual_ppo_forecast`, `ppo_sinusoid` × seeds 0–4), 10 010 624 steps each, trained at `6cedd5d` with `git_dirty` false, none resumed or dropped; inherited `ppo.yaml` unchanged (P6-D1, pinned by `test_phase6_config_inherits_ppo`); smoke runs were pipeline checks only (P6-D2). Learning curves, 5 seeds mean ± SD, in `results/e06/learning_curves_*` (`7d6fc64`). **`id` results committed** (P6-D4, `0e49f39`): 20 final checkpoints × 800 frozen `id` episodes, aft; IQM success SS3–SS6 `residual_ppo` 100.0 / 100.0 / 99.5 / 96.2, `ppo_forecast` 100.0 / 100.0 / 100.0 / 98.0, `residual_ppo_forecast` 100.0 / 100.0 / 99.5 / 96.8, `ppo_sinusoid` (JONSWAP; not H4) 100.0 / 100.0 / 100.0 / 97.3; `ppo`, `sac` and six baselines carried byte-identically; `--check` byte-identical for e06 and e05. **Zeroed residual reduces to the baseline (test):** `tests/test_rl_residual.py::test_gate_zeroed_residual_is_pid_feedforward` (14 frozen `id` episodes, 2 220 steps; every episode column but `method` identical to `pid_feedforward`, per-step actions bit-identical, training-wrapper path identical) and `tests/test_rl_forecast_obs.py::test_zeroed_residual_forecast_policy_is_pid_feedforward` (`residual_ppo_forecast`, 2 episodes) both **ran and passed, not skipped**, in this gate's `make test` and in a separate targeted run. **Hacking audit** (P6-D5, `1d57571`; thresholds pre-stated and committed alone at `f66bca6` before computation): findings recorded — early-training hovering in the pure methods (1 % bins; `ppo_forecast` seed 2 relapse at 200–300 k), `ppo_sinusoid` tunnelling max 7.12 mm vs 7.03 mm and pooled post-contact idle 0.549, up to 7 SS6 successes that may depend on tunnelling overlap; clean on final-policy hovering, detector disagreement, easy starts, saturation, passive landings; **no residual seed has the post-contact throttle cut** (H1a confound); 2 340 / 2 340 re-flights reproduce e06. **Results-skeptic:** no BLOCKING; MAJOR M1 (P6-D5 authority reading contradicted by the descent profile) corrected in place, MAJOR M2 (H4 arithmetically bounded at `id` SS5) recorded as a dated note with H4 unchanged (P6-D6); 9 MINOR fixed or recorded (P6-D6). Re-review at `9f2cf3f`: all remediated, no new BLOCKING or MAJOR; two new MINOR slips (this row's skip evidence; P6-D5's README line count) fixed in this commit. `/phase-gate 6` re-run at `9b1c322` (after the user's H4 decision): `make test` 515 passed, 1 skipped (P2-D1), 474 s; both zeroed-residual tests 2/2 passed, not skipped; lint clean; P3-D1 `21465588…` and all 5 lists OK; `--check` byte-identical for e06 (6/6) and e05 (4/4). A fresh `results-skeptic` review found no BLOCKING or MAJOR. It also flew the trained `residual_ppo/3` and `residual_ppo_forecast/4` with `action_net` zeroed in memory: 0 differing columns from `pid_feedforward` on 4 `id` episodes each. No sinusoid-test-motion episode exists anywhere. Three MINOR slips were fixed in the next commit: the Phase 7 note's hard-landing sentence is narrowed to the methods P6-D5 covers; the post-flight checkpoint digests are in `results/e06/summary.csv`; P6-D5's 2 200 = 2 000 learned + 200 baseline. Its NOTE was also acted on: both H4 withdrawal triggers are now cited, and the sinusoid test-leg definition, period included, is to be recorded before the first sinusoid flight. |
 | 7 | 2026-10-04 | PASSED | Criteria checked against committed artifacts at `ccce147` plus this row's commit. `make test lint` green: 723 passed, 1 skipped by design (`test_platform.py:191`, P2-D1), 841 s; ruff, ruff-format and mypy --strict clean. P3-D1 block SHA-256 unchanged (`21465588…`); `make_episodes.py --check` 5/5 and `--mss --check` 2/2 (MSS MANIFEST `49468e19…`, P7-D2). **`results/results.md` rendered from CSVs byte-reproducibly:** `scripts/report.py --check` byte-identical and a second render `cmp`-identical (SHA-256 `6e84adba…`, P7-D6 §10); `eval_phase7.py --arm all --check` exit 0 (17 conditions, 11 superseded conditions against their P7-D2 hashes, feasibility, `contrasts.csv`, `hypotheses.csv`) with the tree left clean; e05/e06 `--check` byte-identical; sinusoid re-flight at 7 workers byte-identical (closes the P3-D4 carry item). **Hypotheses scored in `docs/findings.md`** exactly as pre-registered (P3-D1 §8, P3-D4, P7-D1, P7-D1a; `results/e07/hypotheses.csv`): H1a not supported (r = −0.470 [−0.696, −0.368]; `residual_ppo` lands harder than `pid_feedforward_lowvz`); H1b supported (+6.0 [+2.0, +10.2] points at `id` SS6, out of distribution, 1.0-point margin, fragile to the bounce-grace rule, P7-D3/P7-D5); H2 not supported (−1.5 [−4.5, +1.7]); H3 primary not supported at `id` SS5 and SS6, half-rule not applicable; H3 secondary SS6 inconclusive (+1.9 % [+0.4, +3.8]); H4 not supported (0.0 [0.0, 0.0], ceiling), novelty claim withdrawn (D0.4, P6-D6); H5 pending — scored at Gate 8 (P7-D1 §7, user decision). No multiplicity correction. **Flights:** 578 600 episodes, 6 arms (matrix, CG, sinusoid, λ, noise, MSS), every learned method × seeds 0–4, baselines beside every table (P7-D2). **Deviation P7-D4** (user, option b): the perception stand-in mixed timestamps (review M1) and left deck channels ideal (M2); it now perceives the deck, and the noise arm was re-flown from a clean `182cdea` (P7-D5); the superseded arm is kept byte-identical in `noise_superseded_p7d1/`. No verdict moved. **Results-skeptic:** first review at `2448d14` 0 BLOCKING, 4 MAJOR, 8 MINOR (P7-D4, P7-D5); re-review at `7be11a7` 0 BLOCKING, 1 MAJOR (MJ1, noise vs deck-motion reference wrong since P7-D1 §4), 7 MINOR (P7-D6); gate review at `ccce147` 0 BLOCKING, 0 MAJOR, 4 MINOR wording fixes to `findings.md` (CG CI overlap, plain `ppo` above `residual_ppo` at the H1b cell, H4 headline scoped to its ceiling cell, `sac` 17.6 mm penetration), fixed in this row's commit. |
 | 8 | 2026-10-05 | PASSED (closed-loop parity under post-hoc deviation P8-D5) | Criteria checked against committed artifacts at `34ec28f` plus this row's commit. `make test lint` green: 763 passed, 1 skipped by design (`test_platform.py:191`, P2-D1), 817 s; ruff, ruff-format and mypy --strict clean. P3-D1 block SHA-256 unchanged (`21465588…`); P8-D1 block unchanged since `2f24763`; `git diff 908aed8..HEAD` empty for `results/episodes*`, `results/e0*`, `configs/`, `third_party/`. `make bench-check` OK (selection, 4 graph SHA-256s, parity, closed-loop files, `h5.csv` re-score byte-identical); `make bench-investigate-check` byte-identical on 11 files. **Selection** (P8-D1, committed before any timing): `ppo` and `residual_ppo_forecast` (P7-D1 §3 rule; the latter's CI overlaps `residual_ppo`'s, a selection not a result), seeds 0 and median seed 4 each (`results/latency/selection.csv`). **Numeric parity passes on every timed provider:** `results/latency/parity.csv` 220/220 pass, worst max_abs_err 9.5e-7 against 1e-4·max(1,|y|max), TF32 off, both clips exercised; 44/44 latency rows timed, each with a parity pass for its (graph, provider, threads), realized provider = requested, 200 warmup + 2 000 timed; no configuration refused. **Closed-loop parity — read with both verdicts:** P8-D1 §7 as written **NOT MET** (3 of 4 policies 49/50; P8-D2). User decision: investigate (P8-D3 pre-registered, P8-D4: reading "rounding sensitivity"); then user option (b), dated **post-hoc** deviation P8-D5, met for **ORT CPU only** (4/4 policies: flips 4 each ≤ noise max 5–9, all in S, |S| = 53/800). Disclosed (P8-D6): the one-ulp yardstick is 2–4× larger than the export error and, pooled, biased toward fewer successes; on SS6-200 ONNX flips 16 (−5) against `torch_folded` 10 (+4) and `torch_fp64` 9 (+1). ORT CUDA is not judged and would fail P8-D5 (ii) for 2 of 4 policies (leave-one-out p ≈ 0.017), scoped out after this was seen; ORT TensorRT and torch-eager CUDA were never flown closed loop. **`results/latency/*` committed** (`400b706`, `6119b14`, `628e460`). **H5 scored: supported** (`results/latency/h5.csv`): batch-1 p50, `ppo` graph, ORT CPU 1 thread 0.046 ms; ORT CUDA 4.72× (p99 5.57×), ORT TensorRT 3.94× (p99 6.97×), ≥ 2× threshold; one measurement per configuration, no CI; ratios from this machine only (desktop RTX A4000 under WSL2; no embedded target measured). A 20-iteration smoke had read H5 before the recorded run, after P8-D1 (P8-D2 addendum). **E2E budget** (`e2e_budget.csv`, full simulated episodes): `ppo` 0.19 ms p50 / 0.30 ms p99, `residual_ppo_forecast` 0.85 / 1.13 ms (forecaster 0.53 / 0.69 ms), against 33.3 ms; `DSLPIDControl` is booked with physics. **Results-skeptic:** review at `ebb9aae` 0 BLOCKING, 5 MAJOR, 7 MINOR + NOTE, folded in by P8-D6 (`46f7e55`, `628e460`, `34ec28f`); re-review at `34ec28f` 0 BLOCKING, 0 MAJOR, 4 MINOR wording fixes (pooled-bias scope, leave-one-out wording, H1b pointer, "in no result file") plus the H5 single-measurement clause, fixed in this row's commit. Intentionally still "pending": `results/e07/hypotheses.csv` and `results/results.md` (Phase 9). |
+| 9 | 2026-10-06 | PASSED (5th attempt; §7 closed-loop parity item under post-hoc deviation P8-D5, user decision P9-D2) | Criteria checked against committed artifacts at `0fd2138`. `make test lint` green on that commit: 779 passed, 1 skipped by design (`test_platform.py:191`, P2-D1), 811 s; ruff, ruff-format and mypy --strict clean. P3-D1 block SHA-256 unchanged (`21465588…`); `make_episodes.py --check` 5/5 (MANIFEST `e6f30e55…`); `scripts/report.py --check` byte-identical; `make figures` byte-identical; submodules pinned at P0-D1 commits and clean (`tests/test_release.py`). **§7 validation protocol:** splits PASS (0 key overlap); episode-list hashes PASS; 5 seeds in every learned cell PASS; VecNormalize frozen PASS; reward-hacking audits on the final checkpoints PASS (P5-D14, P6-D5, not re-run, no retraining); touchdown disagreement 17/82 000 = 0.021 % PASS (worst cell 3.5 %, disclosed); bridge parity PASS, SHA now pinned by test; forecaster causality PASS; numeric ONNX parity 220/220 PASS; closed-loop parity **met only under P8-D5, ORT CPU only** (P8-D1 §7 as written not met, 3 of 4 at 49/50; user accepted for Gate 9, P9-D2 §2); every deviation dated; README states simulation only, 3-DOF, Froude-scaled, state-based, dmf phase defect. **`make all` dry run** lists deck-stats, env-sanity, baselines, dmf-forecasters, eval, bench, bench-investigate, report, figures. **Every README number traced** to a committed file (`docs/audit_report.md` traceability table, 0 untraceable). **Audit:** `/full-audit` at `bbdabc6` 3 BLOCKING / 8 SHOULD FIX / 11 NOTE, all resolved (P9-D2 §2). **Gate attempts:** 1 at `d183a12` FAILED (1 BLOCKING: S175 SS6 Wilson sentence), 2 at `6efe2e1` FAILED (4 false README sentences), 3 at `e551519` FAILED (1 false findings §2 sentence), 4 at `f0539e7` FAILED (2 false findings Phase 7 sentences); each fold-in in P9-D2 §3–§6; no committed number or verdict changed. **Results-skeptic** at `fa0febd`: 0 BLOCKING, 1 MAJOR (forecast-gated controllers not pointed to from `results.md`/findings §2), 4 MINOR, all fixed in `be6d63a`, `0fd2138` (P9-D2 §7). Attempt 5's first full run at `fa0febd` showed 1 failure (`test_committed_results_md_rerenders_identically`) from a mid-run edit of `results_md.py`; the file re-ran 20/20 and the full suite on `0fd2138` is green. Phase 9 is the plan's last phase; no next phase. |

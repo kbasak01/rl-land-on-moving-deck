@@ -3,7 +3,9 @@ r"""Render ``results/results.md`` from the committed Phase 7 CSVs, and nothing e
 Called as :func:`rld.eval.report.render_results` (``scripts/report.py``). Reads only CSV files
 under ``results/e07/`` (each condition's ``summary.csv``, ``aggregate.csv``, ``seeds.csv``,
 ``baselines_summary.csv``, ``carried_summary_*.csv`` and ``tunnelled_success.csv``;
-``contrasts.csv``; ``hypotheses.csv``; ``lambda/feasibility.csv``) plus, for the MSS
+``contrasts.csv``; ``hypotheses.csv``; ``lambda/feasibility.csv``), ``results/latency/h5.csv``
+for the H5 rows (Gate 8, P8-D2 §7; ``results/e07/hypotheses.csv`` keeps its Phase 7 "pending"
+H5 row unedited), plus, for the MSS
 comparison only, the matrix ``episodes.csv`` (its committed ``episodes.csv.gz``, read
 transparently, P7-D1a §12) and ``results/e01/episodes.csv``. The superseded noise record
 (``results/e07/noise_superseded_p7d1/``, P7-D4) is never read; it is named in one labelled
@@ -56,6 +58,25 @@ __all__ = ["RESULTS_NAME", "main", "render"]
 
 #: The rendered file under ``results/``.
 RESULTS_NAME: str = "results.md"
+
+#: H5's scored table under ``results/`` (written by ``make bench``, Gate 8, P8-D2 §7).
+H5_RELPATH: str = "latency/h5.csv"
+
+#: How an ``h5.csv`` ``other_provider`` is named in the hypotheses table.
+_H5_PROVIDERS: dict[str, str] = {
+    "CUDAExecutionProvider": "ORT CUDA",
+    "TensorrtExecutionProvider": "ORT TensorRT",
+    "torch:cuda": "torch-eager CUDA (`torch:cuda`)",
+}
+
+#: ``h5.csv``'s ``verdict`` of a row printed for context only.
+_H5_CONTEXT = "context (not scored)"
+
+#: The caveats cell of every H5 row: what "parity-passing" means in H5's rule.
+_H5_CAVEAT = (
+    "parity-passing = numeric parity only (P8-D1 §6); closed-loop parity P8-D1 §7 not met, "
+    "post-hoc P8-D5 met for ORT CPU only"
+)
 
 #: How a learned method is described in a table label.
 _LEARNED_NOTES: dict[str, str] = {
@@ -758,14 +779,125 @@ def _threshold(rec: Mapping[str, str]) -> str:
     return f"≥ {_signed_pts(_f(rec, 'threshold'))}"
 
 
-def _hypotheses_section(e07: Path) -> list[str]:
+def _h5_rows(path: Path) -> tuple[list[list[str]], str]:
+    """Return H5's hypotheses-table rows and its note, rendered from ``results/latency/h5.csv``.
+
+    One row carries the verdict over every parity-passing GPU provider (P3-D1 §8 H5, read as
+    P8-D1 §10); each context row (``verdict`` "context (not scored)") gets its own unscored
+    row. Ratios are ``other / ORT CPU`` latency, batch 1, ORT CPU at 1 intra-op thread;
+    latencies in ms of host wall time per inference (a timing, not a model-scale quantity).
+
+    Args:
+        path: ``results/latency/h5.csv``.
+
+    Returns:
+        ``(rows, note)``: table rows in the hypotheses-table column order, and the note line
+        for "Numbers behind each verdict".
+
+    Raises:
+        ValueError: If the file has no row, or its non-context rows disagree on the verdict.
+    """
+    recs = read_rows(path)
+    if not recs:
+        raise ValueError(f"{path} has no H5 row")
+    verdicts = {r["verdict"] for r in recs if r["verdict"] != _H5_CONTEXT}
+    if len(verdicts) != 1:
+        raise ValueError(f"{path}: expected one H5 verdict over the scored rows, got {verdicts}")
+    verdict = verdicts.pop()
+    first = recs[0]
+    cpu50, cpu99 = _f(first, "cpu_p50_ms"), _f(first, "cpu_p99_ms")
+    cell = f"batch {first['batch_size']}, `{first['architecture']}`, ORT CPU 1 thread"
+    source = f"P3-D1 §8 H5; P8-D1 §10; P8-D2 §7 (`results/{H5_RELPATH}`)"
+    no_ci = "one measurement per configuration, no CI"
+
+    def provider(r: Mapping[str, str]) -> str:
+        return _H5_PROVIDERS.get(r["other_provider"], f"`{r['other_provider']}`")
+
+    def p50(r: Mapping[str, str]) -> str:
+        return f"{_f(r, 'ratio_p50'):.2f}× ({_f(r, 'other_p50_ms'):.3f} vs {cpu50:.3f} ms)"
+
+    scored = [r for r in recs if r["scored"] == "True"]
+    unscored = [r for r in recs if r["scored"] != "True" and r["verdict"] != _H5_CONTEXT]
+    context = [r for r in recs if r["verdict"] == _H5_CONTEXT]
+    parts = [f"{provider(r)} {p50(r)}" for r in scored]
+    parts += [f"{provider(r)} {r['other_status']} (outside H5)" for r in unscored]
+    stat = "ratio p50: " + "; ".join(parts) if parts else "–"
+    if scored:
+        p99s = ", ".join(f"{provider(r)} {_f(r, 'ratio_p99'):.2f}×" for r in scored)
+        stat += f"; ratio p99: {p99s}"
+    threshold = f"≥ {_f(first, 'threshold'):g}× (every parity-passing GPU provider, p50)"
+    rows = [
+        [
+            "H5",
+            "ORT CPU vs GPU p50 latency",
+            "scored",
+            cell,
+            f"{stat}; {no_ci}",
+            threshold,
+            f"**{verdict}**",
+            source,
+            _H5_CAVEAT,
+        ]
+    ]
+    for r in context:
+        stat = f"ratio p50 {p50(r)}" if r["ratio_p50"] else r["other_status"]
+        if r["ratio_p99"]:
+            stat += f"; ratio p99 {_f(r, 'ratio_p99'):.2f}×"
+        rows.append(
+            [
+                "H5",
+                f"ORT CPU vs {provider(r)} p50 latency",
+                _H5_CONTEXT,
+                cell,
+                f"{stat}; {no_ci}",
+                "–",
+                "**not scored**",
+                source,
+                _H5_CAVEAT,
+            ]
+        )
+    ms = "; ".join(
+        f"{provider(r)} p50 {_f(r, 'other_p50_ms'):.4f} ms, p99 {_f(r, 'other_p99_ms'):.4f} ms"
+        + ("" if r["scored"] == "True" else " (context, not scored)")
+        for r in recs
+        if r["other_p50_ms"]
+    )
+    note = (
+        f"- H5, ORT CPU vs GPU p50 latency: ORT CPU (1 thread) p50 {cpu50:.4f} ms, p99 "
+        f"{cpu99:.4f} ms; {ms}. Desktop measurements, {no_ci}; no embedded target was "
+        f'measured (P8-D2 §7). `results/e07/hypotheses.csv` keeps its Phase 7 "pending" H5 row '
+        f"unedited; the H5 rows of this table are rendered from `results/{H5_RELPATH}`."
+    )
+    return rows, note
+
+
+def _hypotheses_section(e07: Path, h5: Path | None = None) -> list[str]:
+    """Return section 7: the hypothesis rows of ``hypotheses.csv``, H5 from ``h5.csv``.
+
+    Args:
+        e07: ``results/e07``.
+        h5: ``results/latency/h5.csv``; when it is a file, its rows replace the Phase 7
+            "pending" H5 row of ``hypotheses.csv`` (which is never edited).
+
+    Returns:
+        The section's lines.
+    """
     path = e07 / "hypotheses.csv"
-    lines = ["## 7. Hypotheses (P3-D1 §8, P3-D4, P6-D6, P7-D1 §2, P7-D1a)", ""]
+    has_h5 = h5 is not None and h5.is_file()
+    sources = "P3-D1 §8, P3-D4, P6-D6, P7-D1 §2, P7-D1a" + (", P8-D2" if has_h5 else "")
+    lines = [f"## 7. Hypotheses ({sources})", ""]
     if not path.is_file():
         return [*lines, "*Not scored yet: no `results/e07/hypotheses.csv`.*", ""]
+    computed = (
+        "H1a–H4 verdicts are computed by `rld.eval.hypotheses` (`results/e07/hypotheses.csv`) "
+        f"and H5's by `rld.deploy.latency.score_h5` (`results/{H5_RELPATH}`, P8-D2 §7), each "
+        "from the pre-registered rule named in its row."
+        if has_h5
+        else "Every verdict is computed by `rld.eval.hypotheses` from the pre-registered rule "
+        "named in its row."
+    )
     lines += [
-        "Every verdict is computed by `rld.eval.hypotheses` from the pre-registered rule "
-        "named in its row. Rates and differences in points, r in %; 10 000 bootstrap "
+        f"{computed} Rates and differences in points, r in %; 10 000 bootstrap "
         "replicates, seed 20260926 for every contrast (replicates correlated across "
         "contrasts; P7-D1a #11), percentile 95 % CI. No multiplicity correction "
         "(P3-D4 #9). H1a's non-inferiority, H1b and H4 use P3-D1 §4's paired bootstrap on "
@@ -778,7 +910,13 @@ def _hypotheses_section(e07: Path) -> list[str]:
     rows = []
     used: list[str] = []
     notes: list[str] = []
+    h5_rows, h5_note = _h5_rows(h5) if h5 is not None and has_h5 else ([], "")
     for r in read_rows(path):
+        if r["hypothesis"] == "H5" and h5_rows:
+            rows += h5_rows
+            notes.append(h5_note)
+            h5_rows = []
+            continue
         if r["note"]:
             notes.append(f"- {r['hypothesis']}, {r['part']}: {r['note']}")
         stat = r["point"] and (
@@ -803,6 +941,9 @@ def _hypotheses_section(e07: Path) -> list[str]:
                 ", ".join(keys) or "–",
             ]
         )
+    if h5_rows:  # hypotheses.csv without an H5 row: H5 still printed, last
+        rows += h5_rows
+        notes.append(h5_note)
     lines += _table(
         ["H", "part", "role", "cell", "point [95 % CI]", "threshold", "verdict", "rule", "caveats"],
         rows,
@@ -920,6 +1061,10 @@ def _header() -> list[str]:
         f"- `oracle_gated` is a **{_ORACLE_SHORT}**: it reads the true future deck motion. "
         "It is never a deployable result.",
         "- `pid_track_descend`, `pid_feedforward` and `oracle_gated` are in every method table.",
+        "- `gated_forecast` (DLinear-OLS) and `gated_forecast_tcn`, the two Phase 4 "
+        "forecast-gated controllers, were flown only on the clean frozen lists (aft and CG "
+        "pads, no Phase 7 arm); their rows are in `results/e02/success_vs_seastate.md` "
+        "(P4-D4) and in the README's `id` and SS6 tables, not in this report.",
         "- Carried into every table and verdict (P7-D1 §8):",
         *(
             f"  - {CAVEATS[k]}"
@@ -964,7 +1109,7 @@ def render(results: Path = RESULTS_DIR, e07: Path = E07_DIR) -> str:
     lines += _noise_section(e07)
     lines += _lambda_section(e07)
     lines += _mss_section(e07, results)
-    lines += _hypotheses_section(e07)
+    lines += _hypotheses_section(e07, results / H5_RELPATH)
     lines += _appendix_seeds(e07)
     lines += _appendix_noise(e07)
     text = "\n".join(lines).rstrip("\n") + "\n"

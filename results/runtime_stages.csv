@@ -1,0 +1,113 @@
+stage,target,item,wall_s,workers,source,committed
+deck-stats,deck-stats,re-run to a temporary directory,215.3,24,"measured (scripts/collect_runtimes.py --measure, Phase 9)",True
+env-sanity,env-sanity,"hover policy, SS3 + SS5",11.9,,results/e00_env_sanity.csv wall_s,True
+env-sanity,env-sanity,"random policy, SS3",1.5,,results/e00_env_sanity.csv wall_s,True
+env-sanity,env-sanity,"random policy, SS5",1.4,,results/e00_env_sanity.csv wall_s,True
+baselines,baselines,e01 flights,529.8,24,e01/run_info.json wall_s,True
+baselines (later phases),-,e01_lowvz_cut flights (Phase 5),133.5,24,e01_lowvz_cut/run_info.json wall_s,True
+baselines (later phases),-,e02 forecast-gated flights (Phase 4),1714.2,24,e02/run_info.json wall_s,True
+baselines (later phases),-,e02 TCN seed arms (Phase 4),671.3,24,e02_tcn_seeds/run_info.json wall_s,True
+dmf-forecasters,dmf-forecasters,dmf corpus (2304 realizations),18.5,24,artifacts/dmf/corpus.log real,False
+dmf-forecasters,dmf-forecasters,closed-form fits,127.3,,artifacts/dmf/fit_closed_form.log real,False
+dmf-forecasters,dmf-forecasters,tcn fit seed 0,2637.7,,results/forecast/fit_manifest.json models.tcn.seeds[0].wall_time_s,True
+dmf-forecasters,dmf-forecasters,tcn fit seed 1,2605.8,,results/forecast/fit_manifest.json models.tcn.seeds[1].wall_time_s,True
+dmf-forecasters,dmf-forecasters,tcn fit seed 2,2600.1,,results/forecast/fit_manifest.json models.tcn.seeds[2].wall_time_s,True
+dmf-forecasters,dmf-forecasters,tcn_quantile fit seed 0,2844.1,,results/forecast/fit_manifest.json models.tcn_quantile.seeds[0].wall_time_s,True
+dmf-forecasters,dmf-forecasters,tcn_quantile fit seed 1,2846.4,,results/forecast/fit_manifest.json models.tcn_quantile.seeds[1].wall_time_s,True
+dmf-forecasters,dmf-forecasters,tcn_quantile fit seed 2,2850.5,,results/forecast/fit_manifest.json models.tcn_quantile.seeds[2].wall_time_s,True
+eval,eval,eval_phase7.py --arm matrix --workers 24,1925.5,24,results/e07/run_info.json invocations[0].wall_s,True
+eval,eval,eval_phase7.py --arm cg --workers 24,2014.6,24,results/e07/run_info.json invocations[1].wall_s,True
+eval,eval,eval_phase7.py --arm sinusoid --workers 24,577.4,24,results/e07/run_info.json invocations[2].wall_s,True
+eval,eval,eval_phase7.py --arm lambda --workers 24,1085.3,24,results/e07/run_info.json invocations[3].wall_s,True
+eval,eval,"eval_phase7.py --arm noise --workers 24 (superseded, P7-D4)",7984.7,24,results/e07/run_info.json invocations[4].wall_s,True
+eval,eval,eval_phase7.py --arm mss --workers 24,3444.6,24,results/e07/run_info.json invocations[5].wall_s,True
+eval,eval,eval_phase7.py --arm hypotheses,81.6,24,results/e07/run_info.json invocations[7].wall_s,True
+eval,eval,eval_phase7.py --arm hypotheses,33.8,24,results/e07/run_info.json invocations[9].wall_s,True
+eval,eval,eval_phase7.py --arm noise --workers 24,8449.9,24,results/e07/run_info.json invocations[10].wall_s,True
+eval,eval,eval_phase7.py --arm hypotheses,82.6,24,results/e07/run_info.json invocations[12].wall_s,True
+bench,bench,closed-loop,31.6,,results/latency/run_info.json wall_s_closed-loop,True
+bench,bench,e2e,27.8,,results/latency/run_info.json wall_s_e2e,True
+bench,bench,export,1.6,,results/latency/run_info.json wall_s_export,True
+bench,bench,latency,200.7,,results/latency/run_info.json wall_s_latency,True
+bench,bench,parity,19.9,,results/latency/run_info.json wall_s_parity,True
+bench,bench,selection,0.0,,results/latency/run_info.json wall_s_selection,True
+bench-investigate,bench-investigate,total,715.7,,results/latency/closed_loop_investigation/run_info.json wall_s_total,True
+training: ppo,sweep,"seed 0, 10010624 env steps",11426.9,,artifacts/runs/ppo/0/status.json wall_s,False
+training: ppo,sweep,"seed 1, 10010624 env steps",11580.9,,artifacts/runs/ppo/1/status.json wall_s,False
+training: ppo,sweep,"seed 2, 10010624 env steps",11258.7,,artifacts/runs/ppo/2/status.json wall_s,False
+training: ppo,sweep,"seed 3, 10010624 env steps",11035.0,,artifacts/runs/ppo/3/status.json wall_s,False
+training: ppo,sweep,"seed 4, 10010624 env steps",9459.3,,artifacts/runs/ppo/4/status.json wall_s,False
+training: sac,sweep,"seed 0, 2000000 env steps",46255.4,,artifacts/runs/sac/0/status.json wall_s,False
+training: sac,sweep,"seed 1, 2000000 env steps",46526.2,,artifacts/runs/sac/1/status.json wall_s,False
+training: sac,sweep,"seed 2, 2000000 env steps",46464.5,,artifacts/runs/sac/2/status.json wall_s,False
+training: sac,sweep,"seed 3, 2000000 env steps",47213.1,,artifacts/runs/sac/3/status.json wall_s,False
+training: sac,sweep,"seed 4, 2000000 env steps",31010.4,,artifacts/runs/sac/4/status.json wall_s,False
+training: residual_ppo,sweep,"seed 0, 10010624 env steps",11802.4,,artifacts/runs/residual_ppo/0/status.json wall_s,False
+training: residual_ppo,sweep,"seed 1, 10010624 env steps",11624.0,,artifacts/runs/residual_ppo/1/status.json wall_s,False
+training: residual_ppo,sweep,"seed 2, 10010624 env steps",11815.5,,artifacts/runs/residual_ppo/2/status.json wall_s,False
+training: residual_ppo,sweep,"seed 3, 10010624 env steps",11791.9,,artifacts/runs/residual_ppo/3/status.json wall_s,False
+training: residual_ppo,sweep,"seed 4, 10010624 env steps",11706.8,,artifacts/runs/residual_ppo/4/status.json wall_s,False
+training: ppo_forecast,sweep,"seed 0, 10010624 env steps",20045.4,,artifacts/runs/ppo_forecast/0/status.json wall_s,False
+training: ppo_forecast,sweep,"seed 1, 10010624 env steps",20396.7,,artifacts/runs/ppo_forecast/1/status.json wall_s,False
+training: ppo_forecast,sweep,"seed 2, 10010624 env steps",20055.1,,artifacts/runs/ppo_forecast/2/status.json wall_s,False
+training: ppo_forecast,sweep,"seed 3, 10010624 env steps",19881.6,,artifacts/runs/ppo_forecast/3/status.json wall_s,False
+training: ppo_forecast,sweep,"seed 4, 10010624 env steps",19882.4,,artifacts/runs/ppo_forecast/4/status.json wall_s,False
+training: residual_ppo_forecast,sweep,"seed 0, 10010624 env steps",19015.5,,artifacts/runs/residual_ppo_forecast/0/status.json wall_s,False
+training: residual_ppo_forecast,sweep,"seed 1, 10010624 env steps",19048.7,,artifacts/runs/residual_ppo_forecast/1/status.json wall_s,False
+training: residual_ppo_forecast,sweep,"seed 2, 10010624 env steps",19333.7,,artifacts/runs/residual_ppo_forecast/2/status.json wall_s,False
+training: residual_ppo_forecast,sweep,"seed 3, 10010624 env steps",19295.6,,artifacts/runs/residual_ppo_forecast/3/status.json wall_s,False
+training: residual_ppo_forecast,sweep,"seed 4, 10010624 env steps",19409.1,,artifacts/runs/residual_ppo_forecast/4/status.json wall_s,False
+training: ppo_sinusoid,sweep,"seed 0, 10010624 env steps",9086.3,,artifacts/runs/ppo_sinusoid/0/status.json wall_s,False
+training: ppo_sinusoid,sweep,"seed 1, 10010624 env steps",9138.2,,artifacts/runs/ppo_sinusoid/1/status.json wall_s,False
+training: ppo_sinusoid,sweep,"seed 2, 10010624 env steps",8948.3,,artifacts/runs/ppo_sinusoid/2/status.json wall_s,False
+training: ppo_sinusoid,sweep,"seed 3, 10010624 env steps",7773.5,,artifacts/runs/ppo_sinusoid/3/status.json wall_s,False
+training: ppo_sinusoid,sweep,"seed 4, 10010624 env steps",7753.8,,artifacts/runs/ppo_sinusoid/4/status.json wall_s,False
+tuning: ppo,tune,trial 0 (done),2154.3,,results/tune/ppo/trials.csv wall_s,True
+tuning: ppo,tune,trial 1 (done),1731.0,,results/tune/ppo/trials.csv wall_s,True
+tuning: ppo,tune,trial 2 (done),2860.2,,results/tune/ppo/trials.csv wall_s,True
+tuning: ppo,tune,trial 3 (done),2214.9,,results/tune/ppo/trials.csv wall_s,True
+tuning: ppo,tune,trial 4 (done),1896.1,,results/tune/ppo/trials.csv wall_s,True
+tuning: ppo,tune,trial 5 (done),1888.9,,results/tune/ppo/trials.csv wall_s,True
+tuning: ppo,tune,trial 6 (done),1944.1,,results/tune/ppo/trials.csv wall_s,True
+tuning: ppo,tune,trial 7 (done),2850.1,,results/tune/ppo/trials.csv wall_s,True
+tuning: ppo,tune,trial 8 (done),1893.3,,results/tune/ppo/trials.csv wall_s,True
+tuning: ppo,tune,trial 9 (done),1843.2,,results/tune/ppo/trials.csv wall_s,True
+tuning: ppo,tune,trial 10 (done),2427.5,,results/tune/ppo/trials.csv wall_s,True
+tuning: ppo,tune,trial 11 (done),1712.8,,results/tune/ppo/trials.csv wall_s,True
+tuning: ppo,tune,trial 12 (done),1696.6,,results/tune/ppo/trials.csv wall_s,True
+tuning: ppo,tune,trial 13 (done),1884.6,,results/tune/ppo/trials.csv wall_s,True
+tuning: ppo,tune,trial 14 (done),2066.9,,results/tune/ppo/trials.csv wall_s,True
+tuning: ppo,tune,trial 15 (done),1842.4,,results/tune/ppo/trials.csv wall_s,True
+tuning: ppo,tune,trial 16 (done),1719.1,,results/tune/ppo/trials.csv wall_s,True
+tuning: ppo,tune,trial 17 (done),2661.8,,results/tune/ppo/trials.csv wall_s,True
+tuning: sac_v2,tune,trial 0 (done),7598.7,,results/tune/sac_v2/trials.csv wall_s,True
+tuning: sac_v2,tune,trial 1 (done),16817.5,,results/tune/sac_v2/trials.csv wall_s,True
+tuning: sac_v2,tune,trial 2 (done),7355.3,,results/tune/sac_v2/trials.csv wall_s,True
+tuning: sac_v2,tune,trial 3 (done),9222.5,,results/tune/sac_v2/trials.csv wall_s,True
+tuning: sac_v2,tune,trial 4 (done),12405.9,,results/tune/sac_v2/trials.csv wall_s,True
+tuning: sac_v2,tune,trial 5 (done),16918.9,,results/tune/sac_v2/trials.csv wall_s,True
+tuning: sac_v2,tune,trial 6 (done),7227.2,,results/tune/sac_v2/trials.csv wall_s,True
+tuning: sac_v2,tune,trial 7 (done),8847.5,,results/tune/sac_v2/trials.csv wall_s,True
+tuning: sac_v2,tune,trial 8 (done),11818.3,,results/tune/sac_v2/trials.csv wall_s,True
+tuning: sac_v2,tune,trial 9 (done),9076.3,,results/tune/sac_v2/trials.csv wall_s,True
+tuning: sac_v2,tune,trial 10 (done),11238.5,,results/tune/sac_v2/trials.csv wall_s,True
+tuning: sac_v2,tune,trial 11 (done),16059.1,,results/tune/sac_v2/trials.csv wall_s,True
+tuning: sac_v2,tune,trial 12 (done),7036.2,,results/tune/sac_v2/trials.csv wall_s,True
+tuning: sac_v2,tune,trial 13 (done),8994.1,,results/tune/sac_v2/trials.csv wall_s,True
+tuning: sac_v2,tune,trial 14 (done),11434.9,,results/tune/sac_v2/trials.csv wall_s,True
+tuning: sac_v2,tune,trial 15 (done),15964.7,,results/tune/sac_v2/trials.csv wall_s,True
+tuning: sac_v2,tune,trial 16 (done),7376.7,,results/tune/sac_v2/trials.csv wall_s,True
+tuning: sac_v2,tune,trial 17 (done),16562.1,,results/tune/sac_v2/trials.csv wall_s,True
+tuning: sac_v2,tune,trial 18 (done),7438.8,,results/tune/sac_v2/trials.csv wall_s,True
+tuning: sac_v2,tune,trial 19 (done),9592.8,,results/tune/sac_v2/trials.csv wall_s,True
+"tuning: sac v1 (superseded, P5-D10)",tune,trial_00 (done),9230.9,,artifacts/runs/tune_sac/trial_00/0/status.json wall_s,False
+"tuning: sac v1 (superseded, P5-D10)",tune,trial_01 (failed),24813.0,,artifacts/runs/tune_sac/trial_01/0/status.json wall_s,False
+"tuning: sac v1 (superseded, P5-D10)",tune,trial_02 (done),9116.1,,artifacts/runs/tune_sac/trial_02/0/status.json wall_s,False
+"tuning: sac v1 (superseded, P5-D10)",tune,trial_03 (done),14897.9,,artifacts/runs/tune_sac/trial_03/0/status.json wall_s,False
+"tuning: sac v1 (superseded, P5-D10)",tune,trial_04 (failed),22884.8,,artifacts/runs/tune_sac/trial_04/0/status.json wall_s,False
+"tuning: sac v1 (superseded, P5-D10)",tune,trial_05 (failed),20876.3,,artifacts/runs/tune_sac/trial_05/0/status.json wall_s,False
+"tuning: sac v1 (superseded, P5-D10)",tune,trial_06 (done),10213.8,,artifacts/runs/tune_sac/trial_06/0/status.json wall_s,False
+"tuning: sac v1 (superseded, P5-D10)",tune,trial_07 (failed),7963.2,,artifacts/runs/tune_sac/trial_07/0/status.json wall_s,False
+"tuning: sac v1 (superseded, P5-D10)",tune,trial_08 (failed),6348.8,,artifacts/runs/tune_sac/trial_08/0/status.json wall_s,False
+"tuning: sac v1 (superseded, P5-D10)",tune,trial_09 (failed),3834.2,,artifacts/runs/tune_sac/trial_09/0/status.json wall_s,False
+report,report,report.py --check,2.3,,"measured (scripts/collect_runtimes.py --measure, Phase 9)",True
