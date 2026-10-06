@@ -215,7 +215,7 @@ are itemised in P9-D2:
 | B1 | `gated_forecast` and `gated_forecast_tcn` are added to the README methods list, the `id` table and the SS6 shift table, from `results/e02/summary.csv`; "eight classical controllers". |
 | B2 | The S175 Wilson sentence is scoped to SS6, with the SS5 one-episode exception stated; the range is corrected to 99.5–100 %. |
 | B3 | The #168 caption now says the *outcome*, not the timing, reverses. |
-| SF1 | Not changed. The §7 closed-loop item is met only under P8-D5; the Gate 9 decision. |
+| SF1 | Not changed. The §7 closed-loop item is met only under P8-D5. **User decision (2026-10-05): accepted** for Gate 9 as "met under P8-D5, ORT CPU only" (P9-D2). |
 | SF2 | `tests/test_release.py` pins both submodule commits and the import paths. |
 | SF3 | The noise-arm disagreement cites `summary.csv` + `baselines_summary.csv` with its denominators. |
 | SF4 | `docs/findings.md` is described as covering Phases 7–9; the protocol covers every phase. |
@@ -225,4 +225,4 @@ are itemised in P9-D2:
 | SF8 | P9-D1's ordering claim is labelled an assertion. |
 | NOTEs | The deck-table label and the static-cell caveat are fixed; the rest need no change. |
 
-**BLOCKING remaining after the fixes: 0.** SHOULD FIX remaining: 1 (SF1, a gate decision).
+**BLOCKING remaining after the fixes: 0.** SHOULD FIX remaining: 0 (SF1 accepted by the user under P8-D5).

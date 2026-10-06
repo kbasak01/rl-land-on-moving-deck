@@ -5747,8 +5747,10 @@ All were folded in at `bbdabc6`.
     99.5. Both are scoped and corrected.
   - B3: the #168 caption said the timing reverses; it is the outcome that reverses.
 - *SHOULD FIX.*
-  - 1, closed-loop parity "50/50": not met as written, met under P8-D5. Unchanged here; left to
-    the Gate 9 decision.
+  - 1, closed-loop parity "50/50": not met as written, met under P8-D5. Unchanged here. **User
+    decision (2026-10-05): accepted.** For Gate 9, the plan §7 closed-loop item is recorded as
+    "met under post-hoc deviation P8-D5, ORT CPU only", exactly as at Gate 8. P8-D1 §7 as written
+    stays not met, and both verdicts stay in the README.
   - 2: `tests/test_release.py` now pins both submodule commits and the import paths.
   - 3: the noise-arm disagreement now cites `summary.csv` + `baselines_summary.csv` and gives
     its denominators.
