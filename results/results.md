@@ -1547,9 +1547,9 @@ Per seed: success [Wilson 95 % CI] k/N (a baseline is one deterministic run, see
 | `gated` | 97 | 0 (0.0) | 0 (0.0) | 0 (0.0) | 0 (0.0) | 89 (91.8) | 8 (8.2) | 0 |
 | `oracle_gated` — commit-timing oracle (privileged) | 97 | 0 (0.0) | 0 (0.0) | 0 (0.0) | 0 (0.0) | 91 (93.8) | 6 (6.2) | 0 |
 
-## 7. Hypotheses (P3-D1 §8, P3-D4, P6-D6, P7-D1 §2, P7-D1a)
+## 7. Hypotheses (P3-D1 §8, P3-D4, P6-D6, P7-D1 §2, P7-D1a, P8-D2)
 
-Every verdict is computed by `rld.eval.hypotheses` from the pre-registered rule named in its row. Rates and differences in points, r in %; 10 000 bootstrap replicates, seed 20260926 for every contrast (replicates correlated across contrasts; P7-D1a #11), percentile 95 % CI. No multiplicity correction (P3-D4 #9). H1a's non-inferiority, H1b and H4 use P3-D1 §4's paired bootstrap on per-episode differences (a mean over resampled seeds × episodes); their IQM-over-seeds values sit beside them as *post hoc, not scored*. H2 uses IQM success (P7-D1a #3). Each part of H1 and of H3 has its own verdict; there is no combined H1 or H3 verdict (P3-D4 #5, P7-D1a #2). Rows not labelled `scored` are not scored.
+H1a–H4 verdicts are computed by `rld.eval.hypotheses` (`results/e07/hypotheses.csv`) and H5's by `rld.deploy.latency.score_h5` (`results/latency/h5.csv`, P8-D2 §7), each from the pre-registered rule named in its row. Rates and differences in points, r in %; 10 000 bootstrap replicates, seed 20260926 for every contrast (replicates correlated across contrasts; P7-D1a #11), percentile 95 % CI. No multiplicity correction (P3-D4 #9). H1a's non-inferiority, H1b and H4 use P3-D1 §4's paired bootstrap on per-episode differences (a mean over resampled seeds × episodes); their IQM-over-seeds values sit beside them as *post hoc, not scored*. H2 uses IQM success (P7-D1a #3). Each part of H1 and of H3 has its own verdict; there is no combined H1 or H3 verdict (P3-D4 #5, P7-D1a #2). Rows not labelled `scored` are not scored.
 
 | H | part | role | cell | point [95 % CI] | threshold | verdict | rule | caveats |
 |---|---|---|---|---|---|---|---|---|
@@ -1569,7 +1569,8 @@ Every verdict is computed by `rld.eval.hypotheses` from the pre-registered rule 
 | H3 | secondary: unseen_vessel SS6 half-rule | secondary (pre-registered, reported beside) | unseen_vessel SS6 vs id SS6, aft | +0.0 [-1.9, +2.6] | r(unseen_vessel) ≤ 0.5 × r(id) | **not scored (no supported id gain)** | P3-D1 §8 H3; P7-D1 §2; P7-D1a #2 (own verdict); P7-D4 (m6 wording) | P6-D1-forecast, closing-speed-7pct, tunnelling-any-substep, no-multiplicity, shared-bootstrap-seed, regimes-overlap |
 | H4 | drop difference | scored | id SS5, aft | +0.0 [+0.0, +0.0] | ≥ +10.0 | **not supported** | P3-D1 §8 H4 (prediction, test); P6-D6 (scored as written at id SS5); P7-D1a #1 (mapping, user 2026-10-02), #3 (mean paired bootstrap), #7 (D0.4) | H4-bounded, no-multiplicity, shared-bootstrap-seed |
 | H4 | drop difference, IQM over seeds | post hoc, not scored | id SS5, aft | +0.0 [+0.0, +0.0] | – | **not scored** | P7-D1a #3: the IQM-based value, printed beside the scored mean | – |
-| H5 | ORT CPU vs GPU p50 latency | pending | batch 1 | – | – | **pending — scored at Gate 8** | P3-D1 §8 H5; P7-D1 §7 (user decision 2026-10-01: deferred to Gate 8) | – |
+| H5 | ORT CPU vs GPU p50 latency | scored | batch 1, `mlp512x2-tanh-in25`, ORT CPU 1 thread | ratio p50: ORT CUDA 4.72× (0.217 vs 0.046 ms); ORT TensorRT 3.94× (0.181 vs 0.046 ms); ratio p99: ORT CUDA 5.57×, ORT TensorRT 6.97×; one measurement per configuration, no CI | ≥ 2× (every parity-passing GPU provider, p50) | **supported** | P3-D1 §8 H5; P8-D1 §10; P8-D2 §7 (`results/latency/h5.csv`) | parity-passing = numeric parity only (P8-D1 §6); closed-loop parity P8-D1 §7 not met, post-hoc P8-D5 met for ORT CPU only |
+| H5 | ORT CPU vs torch-eager CUDA (`torch:cuda`) p50 latency | context (not scored) | batch 1, `mlp512x2-tanh-in25`, ORT CPU 1 thread | ratio p50 8.80× (0.404 vs 0.046 ms); ratio p99 9.87×; one measurement per configuration, no CI | – | **not scored** | P3-D1 §8 H5; P8-D1 §10; P8-D2 §7 (`results/latency/h5.csv`) | parity-passing = numeric parity only (P8-D1 §6); closed-loop parity P8-D1 §7 not met, post-hoc P8-D5 met for ORT CPU only |
 
 ### Numbers behind each verdict (`hypotheses.csv` notes)
 
@@ -1586,6 +1587,7 @@ Every verdict is computed by `rld.eval.hypotheses` from the pre-registered rule 
 - H3, secondary: unseen_vessel SS5 half-rule: r(id SS5) -0.0081 [-0.0244, +0.0089]; r(unseen_vessel SS5) -0.0195 [-0.0358, -0.0034]
 - H3, secondary: unseen_vessel SS6 half-rule: r(id SS6) +0.0188 [+0.0042, +0.0382]; r(unseen_vessel SS6) +0.0004 [-0.0194, +0.0260]
 - H4, drop difference: drop_sin +0.0000 (sin 1.0000, jon 1.0000); drop_jon +0.0000 (jon 1.0000, sin 1.0000). Novelty claim withdrawn: True. Triggers: P3-D1 §8 (CI does not exclude 0, i.e. lower bound <= 0, P7-D1a #6) True; D0.4 (ppo_sinusoid's JONSWAP id SS5 success 1.0000 >= ppo's 1.0000) True; with IQM over seeds (post hoc) 1.0000 >= 1.0000 True. IQM over seeds (post hoc, not scored) +0.0000 [+0.0000, +0.0000]
+- H5, ORT CPU vs GPU p50 latency: ORT CPU (1 thread) p50 0.0460 ms, p99 0.0824 ms; ORT CUDA p50 0.2171 ms, p99 0.4591 ms; ORT TensorRT p50 0.1811 ms, p99 0.5740 ms; torch-eager CUDA (`torch:cuda`) p50 0.4045 ms, p99 0.8137 ms (context, not scored). Desktop measurements, one measurement per configuration, no CI; no embedded target was measured (P8-D2 §7). `results/e07/hypotheses.csv` keeps its Phase 7 "pending" H5 row unedited; the H5 rows of this table are rendered from `results/latency/h5.csv`.
 
 ### Caveat keys
 
