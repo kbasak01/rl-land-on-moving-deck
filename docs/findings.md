@@ -351,10 +351,10 @@ is named.
 - **`pid_feedforward` ties the learned methods wherever it is not at SS6 of a frigate regime.**
   - It scores 99.0–100 % at SS3–SS5 in every regime.
   - At `unseen_vessel` SS6 it scores 98.5 % [95.7, 99.5] (197/200), against 99.0–99.5 % for the
-    PPO family. Those point estimates sit at or just above its Wilson upper bound (0.99489; the
-    highest, `ppo_sinusoid`, is 0.995), a gap of at most one or two episodes in 200.
-    *(Corrected at Gate 9. The earlier text said the interval contains every PPO-family point
-    estimate, which rounding to 99.5 hid.)*
+    PPO family. Four of those five point estimates (0.990–0.9933) lie inside its Wilson interval
+    [0.9568, 0.99489]; `ppo_sinusoid`'s 0.995 is just above it.
+    *(Corrected at Gate 9. The original said the interval contains every PPO-family point
+    estimate, which rounding to 99.5 hid, and the first correction overstated it the other way.)*
   - **On the S175 hull (`unseen_vessel`), these tables show no sea state at which
     `pid_feedforward` is shown to be beaten** (unpaired, untested). At SS5, four PPO-family seed
     CIs are a degenerate [100, 100], above its 199/200 Wilson interval [97.2, 99.9]: one episode.
@@ -372,7 +372,10 @@ is named.
   - `gated` scores 42.0 % and `oracle_gated` 46.5 %, mostly `timeout`.
   - `pid_feedforward_lowvz_cut` (83.0 %) is above `pid_feedforward` (77.0 %) here. That is also
     unpaired; their Wilson intervals overlap.
-- **Within the PPO family, plain `ppo` sits at or above the others; nothing here is tested.**
+- **Within the PPO family, plain `ppo` has the highest point estimate at `id` and
+  `unseen_heading` SS6. At `unseen_seastate` and `unseen_vessel` SS6, `ppo_sinusoid` is above it
+  (97.5 vs 97.3, 99.5 vs 99.3), with overlapping CIs. Nothing here is tested.** *(Scope corrected
+  at Gate 9; it said "plain `ppo` sits at or above the others".)*
   - At `unseen_heading` SS6, `ppo` at 90.7 [86.3, 93.3] is above `residual_ppo` at 85.7
     [84.0, 89.0], but the seed CIs overlap. That is a non-result.
   - At `id` SS6, the H1b cell, `ppo` at 98.2 [98.0, 98.5] lies wholly above `residual_ppo` at 96.2

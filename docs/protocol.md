@@ -5747,8 +5747,10 @@ All were folded in at `bbdabc6`.
     99.5.
     - The first fix scoped the sentence to SS6. The Gate 9 review then showed it is false there
       too: `ppo_sinusoid`'s 0.995 is above the 0.99489 Wilson upper bound.
-    - Both the README and findings §2 now say the PPO point estimates sit at or just above the
-      bound, a gap of one or two episodes. The S175 headline is now "not shown to beat".
+    - The first correction said the PPO point estimates sit "at or just above" the bound, but four
+      of five are inside it. The README and findings §2 now say exactly that: at SS6 four of five
+      PPO-family estimates are inside, and `ppo_sinusoid`'s 0.995 is just above. The S175
+      headline is now "not shown to beat".
   - B3: the #168 caption said the timing reverses; it is the outcome that reverses.
 - *SHOULD FIX.*
   - 1, closed-loop parity "50/50": not met as written, met under P8-D5. Unchanged here. **User
@@ -5778,6 +5780,25 @@ attempt): 1 BLOCKING (B2 incomplete, above), 4 MAJOR, 4 MINOR and 2 NOTE. All ar
 - the SS3 caption's descent mechanism was softened to "consistent with";
 - `tests/test_release.py` also asserts clean submodule trees;
 - "eight classical" now reads "six classical and two forecast-gated".
+
+**4. Gate 9 attempt-2 review fold-in** (`results-skeptic` at `6efe2e1`): 4 BLOCKING, 0 MAJOR and
+3 MINOR. All four BLOCKING items were false README sentences.
+- B1: the attempt-1 S175 SS6 fix overstated the gap. Four of the five estimates are inside the
+  Wilson interval.
+- B2: "plain `ppo` sits at or above the others" and "`ppo_sinusoid` is weaker outside the scored
+  cell" are false at `unseen_seastate` and `unseen_vessel` SS6. Both are now scoped to the cells
+  where they hold, in the README and in findings §2.
+- B3: "hardest cell for every method" now excludes the forecast-gated rows added at attempt 1.
+- B4: "each classical baseline got 20 tuning trials" (added at the first review) was false and
+  flattered the baselines. Only `pid_track_descend` and `pid_feedforward` were tuned (P3-D3).
+- Found in a sentence-by-sentence check before this fold-in: "the methods differ only at SS6"
+  holds only for the PPO family and `pid_feedforward`. `sac`, `pid_track_descend` and the gated
+  controllers already differ at SS5.
+- MINOR: "every clean cell" is scoped to the main matrix; `make gifs` is noted as not in `all`;
+  `--check` is dropped from the `eval_learned.py` producer entry.
+- *Method.* Before this fold-in, every README sentence carrying a comparison keyword (144
+  candidate lines) was checked by hand against a full-precision table of every success cell,
+  e02 rows included, rather than against rounded values.
 
 ## Gates
 | gate | date | result | note |

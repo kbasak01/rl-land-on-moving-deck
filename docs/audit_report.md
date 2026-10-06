@@ -213,7 +213,7 @@ are itemised in P9-D2:
 | finding | resolution |
 |---|---|
 | B1 | `gated_forecast` and `gated_forecast_tcn` are added to the README methods list, the `id` table and the SS6 shift table, from `results/e02/summary.csv`; "eight classical controllers". |
-| B2 | The range is corrected to 99.5–100 %. The Wilson sentence was first scoped to SS6, but the Gate 9 review (P9-D2 §3) showed SS6 is also outside (`ppo_sinusoid` 0.995 > 0.99489). It now says the PPO point estimates sit at or just above the bound, a gap of one or two episodes, in the README and findings §2. |
+| B2 | The range is corrected to 99.5–100 %. The Wilson sentence went through two wrong corrections (P9-D2 §3, §4). It now states the facts per sea state: at SS5 every PPO estimate is one episode above the interval; at SS6 four of five are inside it and `ppo_sinusoid` (0.995 > 0.99489) is just above. |
 | B3 | The #168 caption now says the *outcome*, not the timing, reverses. |
 | SF1 | Not changed. The §7 closed-loop item is met only under P8-D5. **User decision (2026-10-05): accepted** for Gate 9 as "met under P8-D5, ORT CPU only" (P9-D2). |
 | SF2 | `tests/test_release.py` pins both submodule commits and the import paths. |
@@ -230,3 +230,8 @@ are itemised in P9-D2:
 **After the first `/phase-gate 9` attempt** (2026-10-06): that attempt failed on B2, which was
 only partly fixed. It is now fully fixed, together with the gate review's MAJOR and MINOR items
 (P9-D2 §3). BLOCKING remaining: 0.
+
+**After the second `/phase-gate 9` attempt** (2026-10-06): that attempt failed on four false README
+sentences, one of them the attempt-1 B2 fix. All four are fixed, with the attempt-2 MINOR items
+and one more false sentence found in a full-precision sentence check (P9-D2 §4). BLOCKING
+remaining: 0.
